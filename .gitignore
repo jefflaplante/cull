@@ -1,0 +1,4 @@
+/bin/
+*.report.json
+gophotocull-report.json
+gophotocull-report.csv

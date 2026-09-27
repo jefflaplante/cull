@@ -34,6 +34,7 @@ type Config struct {
 	Resume         bool
 	WriteXMP       bool
 	OverwriteXMP   bool
+	MoveCulled     bool // move cull decisions (and sidecars) into CulledDir after processing
 	XMPDevelop     bool // also write crs:Exposure2012 / crs:Crop*
 	MinPreviewEdge int
 	Prep           imageprep.Options
@@ -57,7 +58,7 @@ func Discover(dir string, recursive bool) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			if p != dir && !recursive {
+			if p != dir && (!recursive || d.Name() == CulledDir) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -171,6 +172,12 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 			if err := rep.Save(cfg.ReportPath); err != nil {
 				fmt.Fprintf(cfg.Log, "checkpoint failed: %v\n", err)
 			}
+		}
+	}
+	if cfg.MoveCulled && !cfg.DryRun {
+		// After a quota stop or Ctrl-C too: those decisions are final.
+		if n := moveCulled(rep, cfg.Log); n > 0 {
+			fmt.Fprintf(cfg.Log, "moved %d culled frame(s) into %s/ (undo: gophotocull restore %s)\n", n, CulledDir, cfg.Dir)
 		}
 	}
 	rep.Generated = time.Now()

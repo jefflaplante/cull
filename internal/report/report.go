@@ -49,6 +49,7 @@ type Result struct {
 	Fixups      []string         `json:"fixups,omitempty"`
 	Usage       eval.Usage       `json:"usage"`
 	XMP         string           `json:"xmp,omitempty"`
+	MovedTo     string           `json:"moved_to,omitempty"` // set by --move-culled; cleared by restore
 	Error       string           `json:"error,omitempty"`
 }
 

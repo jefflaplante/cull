@@ -3,6 +3,11 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"image"
+	"image/jpeg"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -130,4 +135,86 @@ func TestScanConcurrencyDefaultBoundsMemory(t *testing.T) {
 		}
 	}
 	t.Fatal("no scan command")
+}
+
+func TestRestoreWithoutReportFails(t *testing.T) {
+	_, err := run(t, "restore", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "report") {
+		t.Fatalf("want a missing-report error, got %v", err)
+	}
+}
+
+func TestCullHasMoveCulledFlag(t *testing.T) {
+	for _, c := range NewRootCmd().Commands() {
+		if c.Name() == "cull" {
+			if f := c.Flags().Lookup("move-culled"); f == nil || f.DefValue != "false" {
+				t.Fatalf("move-culled flag: %+v", f)
+			}
+			return
+		}
+	}
+	t.Fatal("no cull command")
+}
+
+// tinyDNG writes a minimal DNG: IFD0 marked reduced-resolution, strip = a JPEG.
+func tinyDNG(t *testing.T, path string) {
+	t.Helper()
+	var j bytes.Buffer
+	jpeg.Encode(&j, image.NewRGBA(image.Rect(0, 0, 1600, 1067)), nil)
+	le := binary.LittleEndian
+	var b bytes.Buffer
+	b.WriteString("II")
+	binary.Write(&b, le, uint16(42))
+	binary.Write(&b, le, uint32(8))
+	dataOff := uint32(8 + 2 + 4*12 + 4)
+	binary.Write(&b, le, uint16(4))
+	for _, e := range [][3]uint32{{0x00FE, 4, 1}, {0x0103, 3, 7}, {0x0111, 4, dataOff}, {0x0117, 4, uint32(j.Len())}} {
+		binary.Write(&b, le, uint16(e[0]))
+		binary.Write(&b, le, uint16(e[1]))
+		binary.Write(&b, le, uint32(1))
+		binary.Write(&b, le, e[2])
+	}
+	binary.Write(&b, le, uint32(0))
+	b.Write(j.Bytes())
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A fake `claude` that always judges the frame missed_focus.
+const fakeClaudeCull = `#!/bin/sh
+cat > /dev/null
+echo '{"type":"system","subtype":"init","apiKeySource":"none"}'
+echo '{"type":"result","is_error":false,"structured_output":{"sharpness":{"score":2,"status":"missed_focus","focus_target":"x"},"exposure":{"score":7,"status":"good","ev_adjust":0,"clipping":"none","reason":""},"composition":{"score":6,"status":"good","issues":[],"crop":{"apply":false,"left":0,"top":0,"right":1,"bottom":1},"straighten_degrees":0},"notes":""},"usage":{"input_tokens":10,"output_tokens":5}}'
+`
+
+func TestCullMoveCulledThenRestoreEndToEnd(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	frame := filepath.Join(dir, "L1000001.DNG")
+	tinyDNG(t, frame)
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+
+	out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--write-xmp", "--move-culled", dir)
+	if err != nil {
+		t.Fatalf("cull: %v\n%s", err, out)
+	}
+	moved := filepath.Join(dir, "culled", "L1000001.DNG")
+	if _, err := os.Stat(moved); err != nil {
+		t.Fatalf("frame not moved into culled/:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "culled", "L1000001.xmp")); err != nil {
+		t.Fatal("sidecar not moved with the frame")
+	}
+	if !strings.Contains(out, "gophotocull restore") {
+		t.Fatalf("no undo hint in output:\n%s", out)
+	}
+
+	if out, err := run(t, "restore", dir); err != nil || !strings.Contains(out, "restored 1") {
+		t.Fatalf("restore: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(frame); err != nil {
+		t.Fatal("frame not restored")
+	}
 }

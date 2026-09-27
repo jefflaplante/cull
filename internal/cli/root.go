@@ -49,7 +49,7 @@ Start with 'gophotocull scan <dir>' to confirm preview resolution before spendin
 	pf.Float64Var(&so.faceMinQ, "face-min-q", 80, "face detection score needed to trust a face as the focus target")
 	pf.StringVar(&so.saveInputs, "save-inputs", "", "write exactly what the model sees (JPEGs + inputs.json) to this directory")
 
-	root.AddCommand(newScanCmd(&so), newCullCmd(&so), newVersionCmd())
+	root.AddCommand(newScanCmd(&so), newCullCmd(&so), newRestoreCmd(&so), newVersionCmd())
 	return root
 }
 

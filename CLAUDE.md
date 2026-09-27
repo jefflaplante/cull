@@ -24,7 +24,7 @@ make vet
 ## Layout
 
 - `cmd/gophotocull` — main; signal-aware context into cobra
-- `internal/cli` — cobra tree: `scan`, `cull`, `version` (+ built-in `completion`)
+- `internal/cli` — cobra tree: `scan`, `cull`, `restore`, `version` (+ built-in `completion`)
 - `internal/dng` — pure-Go TIFF IFD/SubIFD walk for the largest reduced-resolution
   JPEG; reads IFDs + preview bytes only. `exiftool` fallback.
 - `internal/imageprep` — `Frame` (oriented RGBA + luma), downscale, native crops,
@@ -37,14 +37,16 @@ make vet
 - `internal/eval` — prompts, schemas, `Evaluate`, `Locate`, **Policy**
 - `internal/pipeline` — detect → locate → crops → evaluate → decide; worker pool,
   resume (path+size+mtime; refuses a different backend/model/schema), checkpointing,
-  quota stop, `--save-inputs`
+  quota stop, `--save-inputs`, `--move-culled` / `Restore` (move.go; Discover skips `culled/`)
 - `internal/report` — JSON source of truth + CSV
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default
 - `internal/config` — API key resolution
 
 ## Invariants — do not break
 
-- Never modify DNGs. Never overwrite an existing `.xmp` unless `--overwrite-xmp`.
+- Never modify or delete DNGs. Only `cull --move-culled` moves them (same-disk
+  rename into `culled/`, never overwriting, recorded as `moved_to`), and `restore`
+  undoes it. Never overwrite an existing `.xmp` unless `--overwrite-xmp`.
 - Never print, log, or read the API key contents beyond `internal/config`.
 - Keep/review/cull is decided in Go (`eval.Policy`), not by the model. The model
   only assesses. Keeps decisions deterministic, auditable, and tunable.
@@ -108,6 +110,11 @@ make vet
   both genuinely soft at 100% (M1103817 missed focus; M1104110 moving subject); kept
   the 3 frames the 4B model false-culled. 17 unlabelled frames: a first signal, not
   calibration. Compare backends and `--tiles 0` vs `1` against hand labels.
+- API `cull --backend anthropic` (claude-sonnet-5), 1 frame (M1104114, no face),
+  run with the user's approval: locate + evaluate both succeeded on the first try
+  with `output_config.format` json_schema. 7.4k input / 1.2k output tokens (~$0.03),
+  26 s. Locate boxed the eyes of a tilted face pigo missed; verdict matched the
+  subscription run (acceptable 5.5, keep). Output stayed far under the 8192 cap.
 
 ### Model access via a Claude subscription (checked 2026-09-26)
 

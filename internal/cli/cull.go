@@ -29,6 +29,7 @@ type cullOpts struct {
 	writeXMP      bool
 	xmpDevelop    bool
 	overwriteXMP  bool
+	moveCulled    bool
 	minCropArea   float64
 	checkpoint    int
 	csv           string
@@ -57,7 +58,8 @@ Backends (--backend):
 		Example: `  gophotocull cull --csv cull.csv ~/Pictures/2026-09-26
   gophotocull cull --backend claude-code -o cc.json ~/Pictures/2026-09-26
   gophotocull cull --backend openai --model <model> ~/Pictures/2026-09-26
-  gophotocull cull --resume --write-xmp ~/Pictures/2026-09-26`,
+  gophotocull cull --resume --write-xmp ~/Pictures/2026-09-26
+  gophotocull cull --move-culled ~/Pictures/2026-09-26`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if o.xmpDevelop && !o.writeXMP {
@@ -108,6 +110,7 @@ Backends (--backend):
 			cfg.WriteXMP = o.writeXMP
 			cfg.XMPDevelop = o.xmpDevelop
 			cfg.OverwriteXMP = o.overwriteXMP
+			cfg.MoveCulled = o.moveCulled
 			cfg.Policy = eval.Policy{MinCropArea: o.minCropArea}
 			cfg.CheckpointN = o.checkpoint
 
@@ -139,6 +142,7 @@ Backends (--backend):
 	f.BoolVar(&o.writeXMP, "write-xmp", false, "write XMP sidecars (rating, label, keyword)")
 	f.BoolVar(&o.xmpDevelop, "xmp-develop", false, "also write Adobe crs exposure/crop (not applied by Capture One)")
 	f.BoolVar(&o.overwriteXMP, "overwrite-xmp", false, "overwrite existing sidecars (default: never clobber)")
+	f.BoolVar(&o.moveCulled, "move-culled", false, "move frames decided cull (with their .xmp) into a culled/ folder beside them; undo with 'gophotocull restore'. Use before importing into Capture One")
 	f.Float64Var(&o.minCropArea, "min-crop-area", 0.6, "reject suggested crops retaining less than this fraction of the frame")
 	f.IntVar(&o.checkpoint, "checkpoint", 25, "save the report every N results")
 	f.StringVar(&o.csv, "csv", "", "also write a CSV summary to this path")

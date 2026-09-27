@@ -15,12 +15,16 @@ make build
 ./bin/gophotocull cull --csv /path/to/shoot/cull.csv /path/to/shoot
 # 3. Write sidecars from a resumed run (never clobbers existing .xmp)
 ./bin/gophotocull cull --resume --write-xmp /path/to/shoot
+# Optional, before importing into Capture One: move culls aside, and undo it
+./bin/gophotocull cull --resume --move-culled /path/to/shoot
+./bin/gophotocull restore /path/to/shoot
 ```
 
 | Command | Purpose |
 |---|---|
 | `scan <dir>` | Extract + measure previews, detect faces; writes report only, calls no model |
-| `cull <dir>` | Evaluate with the model, apply policy, optional sidecars |
+| `cull <dir>` | Evaluate with the model, apply policy, optional sidecars; `--move-culled` moves culls (with their `.xmp`) into `culled/` beside them |
+| `restore <dir>` | Move frames that `--move-culled` moved back to where they were (never overwrites) |
 | `version` | Build version (set via `make build`) |
 | `completion <shell>` | Shell completion (cobra built-in) |
 
@@ -38,6 +42,12 @@ landed" tiles, default 1), `--face-min-q` (default 80), `--save-inputs <dir>`,
 
 `--resume` refuses a report written by a different backend or model: use `-o` to
 keep one report per backend when comparing them.
+
+`--move-culled` is meant for culling before import: moving files that Capture One
+already references makes them show as missing. Moves are same-disk renames that
+never overwrite; each is recorded as `moved_to` in the report, `culled/` folders are
+skipped by later runs, and `gophotocull restore` puts everything back. Until the
+sharpness gate is calibrated, look through `culled/` before deleting anything.
 
 ## Pipeline
 

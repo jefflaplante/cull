@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(make build)",
+      "Bash(make test)",
+      "Bash(make vet)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(gofmt *)",
+      "Bash(./bin/gophotocull scan *)",
+      "Bash(./bin/gophotocull version)",
+      "Bash(./bin/gophotocull --help)",
+      "Bash(sdef *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ],
+    "ask": [
+      "Bash(./bin/gophotocull cull *)",
+      "Bash(osascript *)",
+      "Bash(git push *)"
+    ],
+    "deny": [
+      "Read(~/.anthropic/**)",
+      "Read(~/.anthropic_api_key)",
+      "Read(~/.config/anthropic/**)"
+    ]
+  }
+}

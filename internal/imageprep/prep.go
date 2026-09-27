@@ -1,6 +1,6 @@
-// Package imageprep turns an embedded preview into model inputs: a downscaled full
-// frame for composition/exposure, native-resolution crops of the highest-detail
-// regions for sharpness, and deterministic measurements the model can anchor on.
+// Package imageprep turns an embedded preview into model inputs: an oriented
+// frame (RGBA + luma) that can be downscaled for composition/exposure and cropped
+// at native resolution for focus, plus deterministic exposure measurements.
 package imageprep
 
 import (
@@ -10,66 +10,98 @@ import (
 	"image/draw"
 	"image/jpeg"
 	"math"
-	"sort"
 )
 
 // Stats are measured on the oriented preview at native resolution.
 // Note: the preview is a tone-mapped rendering; clipping here overstates raw clipping.
 type Stats struct {
-	MeanLuma          float64 `json:"mean_luma"`
-	LumaP1            int     `json:"luma_p1"`
-	LumaP50           int     `json:"luma_p50"`
-	LumaP99           int     `json:"luma_p99"`
-	HighlightClipPct  float64 `json:"highlight_clip_pct"` // any channel >= 250
-	ShadowClipPct     float64 `json:"shadow_clip_pct"`    // luma <= 3
-	GlobalSharpness   float64 `json:"global_sharpness"`   // Laplacian variance, whole frame
-	PeakTileSharpness float64 `json:"peak_tile_sharpness"`
+	MeanLuma         float64 `json:"mean_luma"`
+	LumaP1           int     `json:"luma_p1"`
+	LumaP50          int     `json:"luma_p50"`
+	LumaP99          int     `json:"luma_p99"`
+	HighlightClipPct float64 `json:"highlight_clip_pct"` // any channel >= 250
+	ShadowClipPct    float64 `json:"shadow_clip_pct"`    // luma <= 3
 }
 
-// Prepared holds encoded model inputs.
-type Prepared struct {
-	FullFrame []byte
-	Tiles     [][]byte
-	TileRects []image.Rectangle
-	Width     int // oriented preview dimensions
-	Height    int
-	Stats     Stats
-}
-
-// Options controls preparation.
+// Options controls model-input preparation.
 type Options struct {
 	MaxEdge int // long edge of the full-frame image sent to the model
-	Tiles   int // number of native-resolution detail tiles
 }
 
-// Prepare decodes and processes a JPEG preview.
-func Prepare(jpegData []byte, orientation int, opt Options) (*Prepared, error) {
+// Frame is a decoded preview oriented for display, with its Rec.709 luma plane.
+type Frame struct {
+	RGBA *image.RGBA
+	Luma []float32
+	W, H int
+}
+
+// Decode decodes a JPEG preview and applies EXIF orientation.
+func Decode(jpegData []byte, orientation int) (*Frame, error) {
 	src, err := jpeg.Decode(bytes.NewReader(jpegData))
 	if err != nil {
 		return nil, fmt.Errorf("decode preview: %w", err)
 	}
 	img := orient(toRGBA(src), orientation)
 	w, h := img.Bounds().Dx(), img.Bounds().Dy()
+	return &Frame{RGBA: img, Luma: luma(img), W: w, H: h}, nil
+}
 
-	gray := luma(img)
-	stats := measure(img, gray)
-	stats.GlobalSharpness = lapVar(gray, w, 0, 0, w, h)
+// Measure computes exposure statistics.
+func Measure(f *Frame) Stats { return measure(f.RGBA, f.Luma) }
 
-	rects, peak := sharpestTiles(gray, w, h, opt.Tiles)
-	stats.PeakTileSharpness = peak
+// Downscaled encodes the whole frame with its long edge at most maxEdge.
+func (f *Frame) Downscaled(maxEdge, quality int) ([]byte, error) {
+	return encode(downscale(f.RGBA, maxEdge), quality)
+}
 
-	p := &Prepared{Width: w, Height: h, Stats: stats, TileRects: rects}
-	if p.FullFrame, err = encode(downscale(img, opt.MaxEdge), 85); err != nil {
-		return nil, err
+// Crop encodes r (clipped to the frame) at native resolution.
+func (f *Frame) Crop(r image.Rectangle, quality int) ([]byte, error) {
+	r = r.Intersect(f.RGBA.Bounds())
+	if r.Empty() {
+		return nil, fmt.Errorf("crop %v outside frame %dx%d", r, f.W, f.H)
 	}
-	for _, r := range rects {
-		b, err := encode(img.SubImage(r), 90)
-		if err != nil {
-			return nil, err
+	return encode(f.RGBA.SubImage(r), quality)
+}
+
+// DownLuma box-downscales a luma plane to 8-bit with its long edge at most
+// maxEdge; scale = dw/w (1 when no downscale was needed).
+func DownLuma(l []float32, w, h, maxEdge int) (g []uint8, dw, dh int, scale float64) {
+	long := max(w, h)
+	if maxEdge <= 0 || long <= maxEdge {
+		g = make([]uint8, w*h)
+		for i, v := range l {
+			g[i] = clamp8(v)
 		}
-		p.Tiles = append(p.Tiles, b)
+		return g, w, h, 1
 	}
-	return p, nil
+	inv := float64(long) / float64(maxEdge)
+	dw, dh = int(math.Round(float64(w)/inv)), int(math.Round(float64(h)/inv))
+	g = make([]uint8, dw*dh)
+	for y := 0; y < dh; y++ {
+		sy0, sy1 := span(y, inv, h)
+		for x := 0; x < dw; x++ {
+			sx0, sx1 := span(x, inv, w)
+			var acc float64
+			for sy := sy0; sy < sy1; sy++ {
+				row := l[sy*w:]
+				for sx := sx0; sx < sx1; sx++ {
+					acc += float64(row[sx])
+				}
+			}
+			g[y*dw+x] = clamp8(float32(acc / float64((sy1-sy0)*(sx1-sx0))))
+		}
+	}
+	return g, dw, dh, float64(dw) / float64(w)
+}
+
+func clamp8(v float32) uint8 {
+	switch {
+	case v <= 0:
+		return 0
+	case v >= 255:
+		return 255
+	}
+	return uint8(v + 0.5)
 }
 
 func toRGBA(src image.Image) *image.RGBA {
@@ -160,70 +192,6 @@ func measure(img *image.RGBA, gray []float32) Stats {
 		HighlightClipPct: round(100*float64(hi)/float64(n), 2),
 		ShadowClipPct:    round(100*float64(shadow)/float64(n), 2),
 	}
-}
-
-// lapVar is the variance of the 4-neighbour Laplacian over a region: a standard
-// focus measure. It is relative (noise and in-camera sharpening raise it), so it is
-// useful for ranking within a batch and for picking tiles, not as an absolute gate.
-func lapVar(g []float32, stride, x0, y0, x1, y1 int) float64 {
-	var sum, sumSq float64
-	n := 0
-	for y := y0 + 1; y < y1-1; y++ {
-		for x := x0 + 1; x < x1-1; x++ {
-			i := y*stride + x
-			v := float64(4*g[i] - g[i-1] - g[i+1] - g[i-stride] - g[i+stride])
-			sum += v
-			sumSq += v * v
-			n++
-		}
-	}
-	if n == 0 {
-		return 0
-	}
-	m := sum / float64(n)
-	return round(sumSq/float64(n)-m*m, 1)
-}
-
-// sharpestTiles grids the frame and returns the k tiles with the highest Laplacian
-// variance. With thin depth of field the in-focus region is where acuity must be
-// judged; if even the best tile is soft, focus was missed.
-func sharpestTiles(g []float32, w, h, k int) ([]image.Rectangle, float64) {
-	if k <= 0 {
-		return nil, 0
-	}
-	long := w
-	if h > long {
-		long = h
-	}
-	size := long / 8
-	if size < 256 {
-		size = 256
-	}
-	if size > 768 {
-		size = 768
-	}
-	type scored struct {
-		r image.Rectangle
-		v float64
-	}
-	var tiles []scored
-	for y := 0; y+size <= h; y += size {
-		for x := 0; x+size <= w; x += size {
-			tiles = append(tiles, scored{image.Rect(x, y, x+size, y+size), lapVar(g, w, x, y, x+size, y+size)})
-		}
-	}
-	if len(tiles) == 0 {
-		return []image.Rectangle{image.Rect(0, 0, w, h)}, lapVar(g, w, 0, 0, w, h)
-	}
-	sort.Slice(tiles, func(i, j int) bool { return tiles[i].v > tiles[j].v })
-	if k > len(tiles) {
-		k = len(tiles)
-	}
-	out := make([]image.Rectangle, k)
-	for i := range out {
-		out[i] = tiles[i].r
-	}
-	return out, tiles[0].v
 }
 
 // downscale is an area-average (box) filter; adequate for downsampling and stdlib-only.

@@ -22,7 +22,7 @@ var KeyFileCandidates = []string{
 // source describes where it came from; the key itself is never logged.
 func LoadAPIKey(explicitFile string) (key, source string, warnings []string, err error) {
 	if explicitFile != "" {
-		return readKeyFile(expand(explicitFile))
+		return readKeyFile(expand(explicitFile), true)
 	}
 	if k := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); k != "" {
 		return k, "env:ANTHROPIC_API_KEY", nil, nil
@@ -34,13 +34,26 @@ func LoadAPIKey(explicitFile string) (key, source string, warnings []string, err
 	for _, rel := range KeyFileCandidates {
 		p := filepath.Join(home, rel)
 		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
-			return readKeyFile(p)
+			return readKeyFile(p, true)
 		}
 	}
 	return "", "", nil, errors.New("no API key: set ANTHROPIC_API_KEY, pass --api-key-file, or create ~/" + KeyFileCandidates[0])
 }
 
-func readKeyFile(p string) (string, string, []string, error) {
+// LoadOpenAIKey resolves an optional key for OpenAI-compatible servers:
+// explicit file > OPENAI_API_KEY > none. Local servers need no key, so
+// absence is not an error; source is then "none".
+func LoadOpenAIKey(explicitFile string) (key, source string, warnings []string, err error) {
+	if explicitFile != "" {
+		return readKeyFile(expand(explicitFile), false)
+	}
+	if k := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); k != "" {
+		return k, "env:OPENAI_API_KEY", nil, nil
+	}
+	return "", "none", nil, nil
+}
+
+func readKeyFile(p string, anthropic bool) (string, string, []string, error) {
 	st, err := os.Stat(p)
 	if err != nil {
 		return "", "", nil, err
@@ -61,7 +74,7 @@ func readKeyFile(p string) (string, string, []string, error) {
 	if k == "" {
 		return "", "", nil, fmt.Errorf("%s is empty", p)
 	}
-	if !strings.HasPrefix(k, "sk-ant-") {
+	if anthropic && !strings.HasPrefix(k, "sk-ant-") {
 		warnings = append(warnings, p+": contents don't start with sk-ant-; verify it's an Anthropic API key")
 	}
 	return k, "file:" + p, warnings, nil

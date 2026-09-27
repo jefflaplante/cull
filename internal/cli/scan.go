@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 )
 
@@ -10,10 +12,11 @@ func newScanCmd(so *sharedOpts) *cobra.Command {
 		Use:   "scan <dir>",
 		Short: "Extract and measure previews without calling the API",
 		Long: `scan extracts each DNG's embedded preview and records its resolution, source,
-exposure statistics, and peak sharpness. No API key is needed and nothing is written
-next to your images; only the report is produced.
+exposure statistics, face detection, and the "where focus landed" measure. No model
+is called and nothing is written next to your images; only the report is produced.
 
-Use it to confirm the previews are large enough for focus judgement.`,
+Use it to confirm the previews are large enough for focus judgement, and with
+--save-inputs to see exactly what the model would be shown.`,
 		Example: "  gophotocull scan ~/Pictures/2026-09-26",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -24,10 +27,13 @@ Use it to confirm the previews are large enough for focus judgement.`,
 			cfg.DryRun = true
 			cfg.Concurrency = concurrency
 			rep, usage, err := runPipeline(cmd, cfg, nil)
-			printSummary(cmd, cfg.ReportPath, rep, usage)
+			printSummary(cmd, cfg.ReportPath, rep, usage, "")
+			if rep != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), ScanSummary(rep))
+			}
 			return err
 		},
 	}
-	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 8, "parallel extractions")
+	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 4, "parallel extractions (~1 GB RAM each for 60MP previews)")
 	return cmd
 }

@@ -8,49 +8,100 @@ import (
 	"testing"
 )
 
-// Left half: fine checkerboard (high Laplacian variance). Right half: flat grey.
-func synthetic(w, h int) []byte {
+// marked is a grey w×h JPEG with a 6×6 red block at stored top-left.
+func marked(w, h int) []byte {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			c := uint8(128)
-			if x < w/2 && (x/2+y/2)%2 == 0 {
-				c = 230
-			} else if x < w/2 {
-				c = 30
+			c := color.RGBA{128, 128, 128, 255}
+			if x < 6 && y < 6 {
+				c = color.RGBA{255, 0, 0, 255}
 			}
-			img.Set(x, y, color.RGBA{c, c, c, 255})
+			img.Set(x, y, c)
 		}
 	}
 	var buf bytes.Buffer
-	jpeg.Encode(&buf, img, &jpeg.Options{Quality: 95})
+	jpeg.Encode(&buf, img, &jpeg.Options{Quality: 100})
 	return buf.Bytes()
 }
 
-func TestPrepareSelectsDetailedTilesAndOrients(t *testing.T) {
-	p, err := Prepare(synthetic(2048, 1024), 1, Options{MaxEdge: 1024, Tiles: 2})
-	if err != nil {
-		t.Fatal(err)
+func isRed(c color.RGBA) bool { return c.R > 200 && c.G < 80 && c.B < 80 }
+
+func TestDecodeOrientsForDisplay(t *testing.T) {
+	const w, h = 40, 24
+	cases := []struct {
+		o          int
+		dw, dh     int
+		redX, redY int // a pixel inside the displayed marker
+	}{
+		{1, w, h, 2, 2},
+		{3, w, h, w - 3, h - 3},
+		{6, h, w, h - 3, 2}, // 90° CW: stored top-left -> displayed top-right
+		{8, h, w, 2, w - 3}, // 90° CCW: stored top-left -> displayed bottom-left
 	}
-	for _, r := range p.TileRects {
-		if r.Max.X > 1024 {
-			t.Fatalf("tile %v not in detailed (left) half", r)
+	for _, c := range cases {
+		f, err := Decode(marked(w, h), c.o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.W != c.dw || f.H != c.dh || len(f.Luma) != f.W*f.H {
+			t.Fatalf("o=%d: %dx%d luma=%d", c.o, f.W, f.H, len(f.Luma))
+		}
+		if px := f.RGBA.RGBAAt(c.redX, c.redY); !isRed(px) {
+			t.Errorf("o=%d: pixel (%d,%d) = %v, want the red marker", c.o, c.redX, c.redY, px)
 		}
 	}
-	cfg, _ := jpeg.DecodeConfig(bytes.NewReader(p.FullFrame))
-	if cfg.Width != 1024 || cfg.Height != 512 {
-		t.Fatalf("full frame %dx%d", cfg.Width, cfg.Height)
-	}
+}
 
-	p6, err := Prepare(synthetic(2048, 1024), 6, Options{MaxEdge: 1024, Tiles: 1})
+func gradientJPEG(w, h int) []byte {
+	img := image.NewGray(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetGray(x, y, color.Gray{uint8(x * 256 / w)})
+		}
+	}
+	var buf bytes.Buffer
+	jpeg.Encode(&buf, img, &jpeg.Options{Quality: 100})
+	return buf.Bytes()
+}
+
+func TestMeasureAndEncode(t *testing.T) {
+	f, err := Decode(gradientJPEG(2048, 1024), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p6.Width != 1024 || p6.Height != 2048 {
-		t.Fatalf("orientation 6 dims %dx%d", p6.Width, p6.Height)
+	s := Measure(f)
+	if s.LumaP50 < 120 || s.LumaP50 > 135 || s.LumaP1 > 6 || s.LumaP99 < 248 || s.HighlightClipPct <= 0 || s.ShadowClipPct <= 0 {
+		t.Fatalf("stats %+v", s)
 	}
-	// Stored left half becomes displayed top half after 90° CW rotation.
-	if r := p6.TileRects[0]; r.Max.Y > 1024 {
-		t.Fatalf("rotated tile %v not in top half", r)
+
+	full, err := f.Downscaled(1024, 85)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ := jpeg.DecodeConfig(bytes.NewReader(full)); cfg.Width != 1024 || cfg.Height != 512 {
+		t.Fatalf("downscaled %dx%d", cfg.Width, cfg.Height)
+	}
+	crop, err := f.Crop(image.Rect(2000, 1000, 2100, 1100), 90) // partly outside: clipped to the frame
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ := jpeg.DecodeConfig(bytes.NewReader(crop)); cfg.Width != 48 || cfg.Height != 24 {
+		t.Fatalf("crop %dx%d", cfg.Width, cfg.Height)
+	}
+}
+
+func TestDownLuma(t *testing.T) {
+	luma := make([]float32, 4000*2000)
+	for i := range luma {
+		luma[i] = 100
+	}
+	g, dw, dh, scale := DownLuma(luma, 4000, 2000, 2000)
+	if dw != 2000 || dh != 1000 || scale != 0.5 || len(g) != dw*dh || g[0] != 100 || g[len(g)-1] != 100 {
+		t.Fatalf("dw=%d dh=%d scale=%v len=%d g0=%d", dw, dh, scale, len(g), g[0])
+	}
+	g, dw, dh, scale = DownLuma(luma[:100*50], 100, 50, 2000)
+	if dw != 100 || dh != 50 || scale != 1 || len(g) != 5000 {
+		t.Fatalf("no-op downscale: dw=%d dh=%d scale=%v", dw, dh, scale)
 	}
 }

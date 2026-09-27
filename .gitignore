@@ -2,3 +2,9 @@
 *.report.json
 gophotocull-report.json
 gophotocull-report.csv
+
+# Real images never go in git
+/photos/
+*.DNG
+*.dng
+.DS_Store

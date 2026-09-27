@@ -2,21 +2,31 @@
 
 Culls Leica M11-P DNGs using a vision model on the embedded JPEG preview.
 Priority: **sharpness gates, exposure gets fixed, composition gets cropped.**
-Stdlib-only Go (no module downloads).
+Go + [cobra](https://github.com/spf13/cobra).
 
 ## Quick start
 
 ```sh
 make build
-# 1. Verify previews first (no API calls): resolution, source, peak sharpness
-./bin/gophotocull -dry-run /path/to/shoot
+# 1. Verify previews first (no API key, no API calls): resolution, source, peak sharpness
+./bin/gophotocull scan /path/to/shoot
 # 2. Evaluate
-./bin/gophotocull -csv /path/to/shoot/cull.csv /path/to/shoot
-# 3. Optionally write sidecars (never clobbers existing .xmp)
-./bin/gophotocull -resume -write-xmp /path/to/shoot
+./bin/gophotocull cull --csv /path/to/shoot/cull.csv /path/to/shoot
+# 3. Write sidecars from a resumed run (never clobbers existing .xmp)
+./bin/gophotocull cull --resume --write-xmp /path/to/shoot
 ```
 
-API key resolution: `-api-key-file` > `$ANTHROPIC_API_KEY` > `~/.anthropic/api_key`,
+| Command | Purpose |
+|---|---|
+| `scan <dir>` | Extract + measure previews; writes report only |
+| `cull <dir>` | Evaluate with the model, apply policy, optional sidecars |
+| `version` | Build version (set via `make build`) |
+| `completion <shell>` | Shell completion (cobra built-in) |
+
+Global flags: `-o/--report`, `-r/--recursive`, `--max-edge`, `--tiles`, `--min-preview-edge`.
+Run `gophotocull cull --help` for the rest.
+
+API key resolution: `--api-key-file` > `$ANTHROPIC_API_KEY` > `~/.anthropic/api_key`,
 `~/.config/anthropic/api_key`, `~/.anthropic_api_key`, `~/.anthropic`. Warns if the
 file is group/world readable.
 
@@ -52,7 +62,7 @@ file is group/world readable.
 - [ ] Verify M11-P preview dimensions with `-dry-run`. If too small for focus
       judgement, render tiles from raw (LibRaw `dcraw_emu` shell-out).
 - [ ] Raw-level clipping check (LibRaw) so `clipped` can become a real cull gate.
-- [ ] Capture One applier: generate AppleScript/JXA from the report to set rating,
+- [ ] `apply-c1` subcommand: generate AppleScript/JXA from the report to set rating,
       exposure, and crop per variant. Verify property names against the C1 scripting
       dictionary before running against a catalog.
 - [ ] `crs:Crop*` coordinate space for rotated images is an unverified assumption

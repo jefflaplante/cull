@@ -82,7 +82,7 @@ func (s *Server) Handler(addr string) http.Handler {
 }
 
 func (s *Server) page(w http.ResponseWriter, _ *http.Request) {
-	b, err := s.sheet.Page(true)
+	b, err := s.sheet.page(true, s.o.LabelsPath)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

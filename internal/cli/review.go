@@ -22,36 +22,41 @@ import (
 
 func newReviewCmd(so *sharedOpts) *cobra.Command {
 	var (
-		out                  string
-		jobs, port           int
-		force, serve, openIt bool
-		writeXMP, overwrite  bool
+		out                      string
+		jobs, port               int
+		force, static            bool
+		noOpen, noXMP, overwrite bool
 	)
 	cmd := &cobra.Command{
 		Use:   "review <dir>",
-		Short: "HTML contact sheet for checking decisions, labeling and rating frames",
-		Long: `review writes an HTML page (no network) from the report: every frame with the
-subject crop the model judged, the decision and its reasons. Label frames
-keep/review/cull (K/R/C, U clears) and rate them 1-5 stars (0 clears).
+		Short: "Review, label and rate frames in your browser; every change is saved",
+		Long: `review builds an HTML contact sheet from the report (every frame with the subject
+crop the model judged, the decision and its reasons), serves it on 127.0.0.1 and
+opens it in your browser. Label frames keep/review/cull (K/R/C, U clears) and rate
+them 1-5 stars (0 clears). Every change is saved at once to gophotocull-labels.jsonl
+beside the report, and the frame's .xmp sidecar is rewritten (your stars, verdict
+colour and keyword), which Capture One reads on import; sidecars gophotocull didn't
+write are never touched. Ctrl-C stops the server.
 
-With --serve the sheet is served on 127.0.0.1 and every change is saved at once to
-gophotocull-labels.jsonl beside the report; --write-xmp also rewrites that frame's
-sidecar (your stars, verdict colour and keyword), which Capture One reads on
-import. Without --serve, labels stay in the browser; export them from the page.
-'calibrate', 'decide --labels' and 'apply-c1 --labels' read the log. Works on scan
-reports too (labeling only).`,
-		Example: `  gophotocull review --serve --open ~/Pictures/2026-09-26
-  gophotocull review --serve --write-xmp ~/Pictures/2026-09-26`,
+--no-xmp saves only the labels log; --no-open doesn't launch the browser; --static
+writes an offline index.html instead of serving (labels then stay in the browser;
+export them from the page). 'calibrate', 'decide' and 'apply-c1' read the log.
+Works on scan reports too (labeling only).`,
+		Example: `  gophotocull review ~/Pictures/2026-09-26
+  gophotocull review --no-xmp ~/Pictures/2026-09-26     # labels only, no sidecars
+  gophotocull review --static ~/Pictures/2026-09-26     # offline page`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fl := cmd.Flags()
-			for _, name := range []string{"port", "open", "write-xmp", "overwrite-xmp"} {
-				if fl.Changed(name) && !serve {
-					return fmt.Errorf("--%s requires --serve", name)
+			if static {
+				for _, name := range []string{"port", "no-open", "no-xmp", "overwrite-xmp"} {
+					if fl.Changed(name) {
+						return fmt.Errorf("--%s can't be used with --static: it only applies when serving", name)
+					}
 				}
 			}
-			if overwrite && !writeXMP {
-				return fmt.Errorf("--overwrite-xmp requires --write-xmp")
+			if overwrite && noXMP {
+				return fmt.Errorf("--overwrite-xmp can't be used with --no-xmp")
 			}
 			cfg, err := so.base(args[0])
 			if err != nil {
@@ -68,25 +73,25 @@ reports too (labeling only).`,
 			if err != nil {
 				return err
 			}
-			if !serve {
+			if static {
 				fmt.Fprintf(cmd.ErrOrStderr(), "review sheet: %s\nopen it with: open %q\n", sheet.Index, sheet.Index)
 				return nil
 			}
 			return serveSheet(cmd, sheet, rep, review.ServeOptions{
 				ReportPath: cfg.ReportPath, LabelsPath: labels.DefaultPath(cfg.ReportPath),
-				WriteXMP: writeXMP, OverwriteXMP: overwrite,
-			}, port, fl.Changed("port"), openIt)
+				WriteXMP: !noXMP, OverwriteXMP: overwrite,
+			}, port, fl.Changed("port"), !noOpen)
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&out, "out", "", "output directory (default: gophotocull-review next to the report)")
+	f.StringVar(&out, "out", "", "output directory for the sheet's images (default: gophotocull-review next to the report)")
 	f.IntVarP(&jobs, "concurrency", "j", 4, "parallel image rendering (~200 MB RAM each)")
 	f.BoolVar(&force, "force", false, "re-render images that already exist")
-	f.BoolVar(&serve, "serve", false, "serve the sheet on 127.0.0.1 and save every label to gophotocull-labels.jsonl beside the report")
-	f.IntVar(&port, "port", 0, "port for --serve (default: fixed per report, so a restarted server keeps the page's origin and its queued changes; 0 = any free port)")
-	f.BoolVar(&openIt, "open", false, "open the served sheet in the default browser")
-	f.BoolVar(&writeXMP, "write-xmp", false, "with --serve: rewrite each changed frame's sidecar (your stars, verdict colour and keyword)")
-	f.BoolVar(&overwrite, "overwrite-xmp", false, "with --write-xmp: also overwrite sidecars gophotocull did not write")
+	f.BoolVar(&static, "static", false, "write an offline index.html instead of serving (labels stay in the browser)")
+	f.BoolVar(&noOpen, "no-open", false, "don't open the browser; open the printed URL yourself")
+	f.BoolVar(&noXMP, "no-xmp", false, "don't write sidecars; save only the labels log")
+	f.BoolVar(&overwrite, "overwrite-xmp", false, "also overwrite sidecars gophotocull did not write")
+	f.IntVar(&port, "port", 0, "port (default: fixed per report, so a restarted server keeps the page's origin and its queued changes; 0 = any free port)")
 	return cmd
 }
 
@@ -117,8 +122,11 @@ func serveSheet(cmd *cobra.Command, sheet *review.Sheet, rep *report.Report, o r
 	addr := ln.Addr().String()
 	url := "http://" + addr + "/#token=" + o.Token
 	fmt.Fprintf(w, "review server: %s\nlabels: %s\n", url, o.LabelsPath)
-	if o.WriteXMP {
-		fmt.Fprintln(w, "sidecars: written on every change (never over ones gophotocull didn't write)")
+	switch {
+	case o.WriteXMP && o.OverwriteXMP:
+		fmt.Fprintln(w, "sidecars: written on every change, including over ones gophotocull didn't write (--overwrite-xmp)")
+	case o.WriteXMP:
+		fmt.Fprintln(w, "sidecars: written on every change, never over ones gophotocull didn't write (--no-xmp to stop)")
 	}
 	fmt.Fprintln(w, "Ctrl-C to stop. Don't run cull on this report while reviewing.")
 	if openIt {

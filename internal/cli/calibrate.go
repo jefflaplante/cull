@@ -41,7 +41,7 @@ thresholds can be tuned without new model calls; apply the chosen ones with
 			}
 			verdicts := labels.Verdicts(all)
 			if len(verdicts) == 0 {
-				return fmt.Errorf("no labels in %s: label frames with 'gophotocull review --serve' first, or pass --labels", labelsPath)
+				return fmt.Errorf("no labels in %s: label frames with 'gophotocull review' first, or pass --labels", labelsPath)
 			}
 			w := cmd.OutOrStdout()
 			for _, path := range args {

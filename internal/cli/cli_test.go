@@ -323,7 +323,7 @@ func TestReviewCommandBuildsSheetNextToReport(t *testing.T) {
 	if out, err := run(t, "scan", dir); err != nil {
 		t.Fatalf("scan: %v\n%s", err, out)
 	}
-	out, err := run(t, "review", dir)
+	out, err := run(t, "review", "--static", dir)
 	if err != nil {
 		t.Fatalf("review: %v\n%s", err, out)
 	}
@@ -438,41 +438,30 @@ func TestCullHasNoCSVFlag(t *testing.T) {
 func TestReviewServeFlagValidation(t *testing.T) {
 	dir := t.TempDir()
 	for _, args := range [][]string{
-		{"review", "--write-xmp", dir},
-		{"review", "--port", "8080", dir},
-		{"review", "--open", dir},
-		{"review", "--serve", "--overwrite-xmp", dir},
+		{"review", "--static", "--port", "8080", dir},
+		{"review", "--static", "--no-open", dir},
+		{"review", "--static", "--no-xmp", dir},
+		{"review", "--static", "--overwrite-xmp", dir},
+		{"review", "--no-xmp", "--overwrite-xmp", dir},
 	} {
-		if _, err := run(t, args...); err == nil || !strings.Contains(err.Error(), "requires") {
+		if _, err := run(t, args...); err == nil || !strings.Contains(err.Error(), "with --") {
 			t.Errorf("%v: %v", args, err)
+		}
+	}
+	for _, gone := range []string{"--serve", "--open", "--write-xmp"} {
+		if _, err := run(t, "review", gone, dir); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			t.Errorf("%s should be gone (serving, opening and sidecars are the default): %v", gone, err)
 		}
 	}
 }
 
-func TestReviewServeEndToEnd(t *testing.T) {
+func TestReviewServesAndWritesSidecarsByDefault(t *testing.T) {
 	dir := t.TempDir()
 	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
 	if out, err := run(t, "scan", dir); err != nil {
 		t.Fatalf("scan: %v\n%s", err, out)
 	}
-	pr, pw := io.Pipe()
-	cmd := NewRootCmd()
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(pw)
-	cmd.SetArgs([]string{"review", "--serve", dir})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- cmd.ExecuteContext(ctx); pw.Close() }()
-	var url string
-	sc := bufio.NewScanner(pr)
-	for sc.Scan() {
-		if u, ok := strings.CutPrefix(sc.Text(), "review server: "); ok {
-			url = u
-			break
-		}
-	}
-	go io.Copy(io.Discard, pr)
+	url, _, stop := startServe(t, dir)
 	base, tok, ok := strings.Cut(url, "/#token=")
 	if !ok || !strings.HasPrefix(base, "http://127.0.0.1:") || len(tok) != 32 {
 		t.Fatalf("url %q", url)
@@ -484,24 +473,26 @@ func TestReviewServeEndToEnd(t *testing.T) {
 		t.Fatalf("post: %v %v", err, res)
 	}
 	res.Body.Close()
-	cancel()
-	if err := <-done; err != nil {
+	if err := stop(); err != nil {
 		t.Fatalf("serve exit: %v", err)
 	}
 	if m, err := labels.Read(filepath.Join(dir, labels.FileName)); err != nil || m["L1.DNG"].Stars != 3 {
 		t.Fatalf("log: %v %v", m, err)
 	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "L1.xmp")); !strings.Contains(string(b), `xmp:Rating="3"`) || !strings.Contains(string(b), `xmp:Label="Green"`) {
+		t.Fatalf("sidecar not written by default:\n%s", b)
+	}
 }
 
-// startServe runs `review --serve` until the returned stop is called, returning the
-// printed URL and the lines printed before it.
+// startServe runs `review` (serving, without opening a browser) until the returned
+// stop is called, returning the printed URL and the lines printed before it.
 func startServe(t *testing.T, args ...string) (url string, before []string, stop func() error) {
 	t.Helper()
 	pr, pw := io.Pipe()
 	cmd := NewRootCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(pw)
-	cmd.SetArgs(append([]string{"review", "--serve"}, args...))
+	cmd.SetArgs(append([]string{"review", "--no-open"}, args...))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- cmd.ExecuteContext(ctx); pw.Close() }()

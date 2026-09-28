@@ -13,9 +13,9 @@ make build
 ./bin/gophotocull scan --save-inputs /tmp/inputs /path/to/shoot
 # 2. Evaluate (pick a backend; see below)
 ./bin/gophotocull cull /path/to/shoot
-# 3. Check, label and star frames; every keypress is saved, and --write-xmp writes
-#    each frame's sidecar (Capture One reads it on import)
-./bin/gophotocull review --serve --open --write-xmp /path/to/shoot
+# 3. Check, label and star frames in your browser; every keypress is saved to the
+#    labels log and the frame's sidecar (Capture One reads it on import)
+./bin/gophotocull review /path/to/shoot
 # Optional, before importing into Capture One: move culls aside, and undo it
 ./bin/gophotocull cull --resume --move-culled /path/to/shoot
 ./bin/gophotocull restore /path/to/shoot
@@ -26,7 +26,7 @@ make build
 | `scan <dir>` | Extract + measure previews, detect faces; writes report only, calls no model |
 | `cull <dir>` | Evaluate with the model, apply policy, optional sidecars; `--move-culled` moves culls (with their `.xmp`) into `culled/` beside them |
 | `decide <dir>` | Re-apply the policy to stored assessments (no model calls); `--write-xmp` / `--move-culled` sync; `--labels` applies your verdicts and stars |
-| `review <dir>` | HTML contact sheet: subject crops, decisions, reasons; label keep/review/cull and 1–5 stars. `--serve` saves every change to `gophotocull-labels.jsonl` (and, with `--write-xmp`, the sidecar) |
+| `review <dir>` | Opens the contact sheet in your browser: subject crops, decisions, reasons; label keep/review/cull and 1–5 stars. Every change is saved to `gophotocull-labels.jsonl` and the frame's sidecar (`--no-xmp`: log only; `--static`: offline page) |
 | `calibrate REPORT...` | Agreement with your labels (the log beside the first report, or `--labels`): confusion matrix, false-cull / missed-cull / review rates, threshold sweep |
 | `apply-c1 <dir>` | AppleScript for the open Capture One document (color tag, keyword; your stars with `--labels`; optional exposure/crop); dry run by default, `--probe` first |
 | `restore <dir>` | Move frames that `--move-culled` moved back to where they were (never overwrites) |
@@ -47,21 +47,24 @@ Cost and scale (`cull`): `--estimate` (print and exit), `--max-cost USD`, `--bat
 `--escalate-backend/--escalate-model/--escalate-on` (re-evaluate doubtful frames on a
 stronger model), `--raw-clip` (on for cull, off for scan). Run `gophotocull cull --help`.
 
-Calibration loop: `cull` → `review --serve` (label) → `calibrate` → tune with
-`decide` (free). Culling pass: `review --serve --write-xmp` (confirm or override the
-model, add stars) → `decide --move-culled` → import into Capture One.
+Calibration loop: `cull` → `review` (label) → `calibrate` → tune with `decide`
+(free). Culling pass: `review` (confirm or override the model, add stars) →
+`decide --move-culled` → import into Capture One.
 
 ### Review sheet and labels
 
-`gophotocull review --serve --open <dir>` builds the sheet and serves it on 127.0.0.1
-(a port fixed per report, `--port` to pick; a per-session token in the printed URL). Keys:
-**K/R/C** keep/review/cull (advance), **U** clears, **1–5** stars (advance only
-under the *Unrated* filter), **0** clears stars, arrows move, Enter/Esc. Filters
+`gophotocull review <dir>` builds the sheet, serves it on 127.0.0.1 (a port fixed
+per report, `--port` to pick; a per-session token in the printed URL) and opens it
+in your browser (`--no-open` to skip). The header shows the shoot folder and the
+labels log. Keys: **K/R/C** keep/review/cull (advance), **U** clears, **1–5** stars
+(advance only under the *Unrated* filter), **0** clears stars, **←/→** one frame,
+**↑/↓** one grid row (one frame in the detail view), Enter/Esc. Each card's top-right
+badge (thin outline) is your label; the bottom one is the model's verdict. Filters
 combine a verdict (All/Keep/Review/Cull: your label, else the model's) with progress
 (All/Unlabeled/Unrated/Disagreements), e.g. Keep + Unrated to star the keepers. A
 frame you change stays on screen until you move on. If the server is unreachable,
-changes queue in the browser and are sent when it's back: restart `review --serve`
-and open the new URL (same port, so the same browser storage).
+changes queue in the browser and are sent when it's back: restart `review` and
+open the new URL (same port, so the same browser storage).
 
 Every change is appended to `gophotocull-labels.jsonl` beside the report, one line
 per change; the last line per file wins:
@@ -77,7 +80,7 @@ the log exists beside the report — `decide`, `apply-c1`, and `cull --move-cull
 rating; `--labels <path>` points elsewhere, `--no-labels` ignores them. `calibrate`
 reads the same log. If frames in a `-r` run share a file name, labels can't say
 which one they mean: `decide`/`apply-c1` refuse, `cull` falls back to the model.
-Without `--serve` the page works offline from `index.html` and keeps labels in the
+With `--static` the page works offline from `index.html` and keeps labels in the
 browser; export/import them as the same JSONL. Don't run `cull` on a report while
 reviewing it: both write the report.
 
@@ -134,7 +137,7 @@ sharpness gate is calibrated, look through `culled/` before deleting anything.
 | XMP sidecar → Lightroom Classic | ignored for DNG (LR uses embedded XMP) | ignored |
 | `apply-c1` (AppleScript) | yes | yes |
 
-What gets written (`cull`/`decide`/`review --serve` with `--write-xmp`, and `apply-c1`):
+What gets written (`review` unless `--no-xmp`; `cull`/`decide` with `--write-xmp`; `apply-c1`):
 
 | Field | Value |
 |---|---|
@@ -150,7 +153,7 @@ Sidecars gophotocull didn't write are never overwritten without `--overwrite-xmp
 
 - [x] Verify M11-P preview dimensions: full resolution (9504×6320), no raw rendering needed.
 - [ ] Calibrate the sharpness gate and `--face-min-q` against hand labels (tooling done:
-      `review --serve` → `calibrate` → `decide`).
+      `review` → `calibrate` → `decide`).
 - [x] Raw-level clipping check (pure Go, no LibRaw).
 - [x] `apply-c1`: names verified against C1 16.7.2's dictionary (compiles with osacompile);
       run `--probe` to confirm color-tag numbering and image naming before writing.

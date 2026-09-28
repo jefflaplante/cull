@@ -16,7 +16,7 @@ make test             # all tests use synthetic fixtures; no network, no API key
                       # sandbox this needs sandbox.network.allowLocalBinding: true)
 make vet
 ./bin/gophotocull scan --save-inputs /tmp/in <dir>   # no model calls; previews, faces
-./bin/gophotocull review --serve --open <dir>        # label/star; saves gophotocull-labels.jsonl
+./bin/gophotocull review <dir>                        # browser: label/star; saves labels log + sidecars
 ./bin/gophotocull cull <dir>                          # anthropic: spends API credits
 ./bin/gophotocull cull --backend claude-code <dir>    # subscription quota
 ./bin/gophotocull cull --backend openai --model <m> <dir>  # local OpenAI-compatible server (free)
@@ -45,7 +45,7 @@ make vet
 - `internal/group` — dHash + burst grouping (time gap + hash), best-of-burst
 - `internal/rawclip` — pure-Go lossless-JPEG (SOF3) decoder; raw highlight clipping
 - `internal/review` — HTML contact sheet (embedded page.html: labels, stars, filters) and
-  the `--serve` server (serve.go: 127.0.0.1, Host/Origin/token checks, appends labels,
+  the server `review` runs by default (serve.go: 127.0.0.1, Host/Origin/token checks, appends labels,
   optional sidecars)
 - `internal/labels` — the user's append-only JSONL labels log (last line per file wins),
   `Effective` verdict (label over model), and the one sidecar mapping (`Sidecar`,
@@ -185,7 +185,8 @@ make vet
 - Subscription run, 17 frames with all features: 165k in / 35k out tokens, 4.6 min.
 - Review sheet: the user viewed it on the 17 frames (subject crops good, verdicts clear,
   reasons sometimes terse). `review --serve` used live by the user 2026-09-27: works.
-  Requested next: up/down arrows should move by grid row (they step like left/right).
+  Follow-ups done: ↑/↓ move by grid row, your badge outlined + legend, header shows the
+  folder and labels log, and `review <dir>` serves + opens + writes sidecars by default.
 - Live `cull --batch` (claude-sonnet-5, 3 frames, with the user's approval): two rounds
   as designed. Round 1 = 1 evaluate (face frame) + 2 locates, round 2 = 2 evaluates;
   ~2 min per round, 4.2 min total. 21.2k in / 2.3k out, $0.033 at batch price
@@ -217,7 +218,7 @@ make vet
    `focus-target`; spec/plan in `docs/superpowers/`): pigo face → model locate
    fallback → native subject crop; noise-corrected "where focus landed" tile;
    `anthropic` / `claude-code` / `openai` backends; `--save-inputs`; scan summary.
-2. **Calibrate before trusting.** Tooling done 2026-09-27 (`review --serve` →
+2. **Calibrate before trusting.** Tooling done 2026-09-27 (`review` →
    `gophotocull-labels.jsonl` → `calibrate`, tune with `decide`). Waiting on the user's labeled sample set.
    Tune prompt/policy until false-cull rate is acceptable. Nothing should auto-apply
    at 1000-frame scale before this.

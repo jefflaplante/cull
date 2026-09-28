@@ -63,7 +63,9 @@ type pageData struct {
 	Backend    string `json:"backend,omitempty"`
 	Model      string `json:"model,omitempty"`
 	Escalation string `json:"escalation,omitempty"`
-	Serve      bool   `json:"serve,omitempty"` // saving through a review server (review --serve)
+	Folder     string `json:"folder"`               // the shoot folder the frames are in
+	Serve      bool   `json:"serve,omitempty"`      // saving through a review server
+	LabelsLog  string `json:"labels_log,omitempty"` // where the server appends labels
 	Cards      []card `json:"cards"`
 }
 
@@ -90,8 +92,12 @@ func Build(rep *report.Report, reportPath string, o Options, log io.Writer) (*Sh
 	close(jobs)
 	wg.Wait()
 
+	folder := rep.Dir
+	if abs, err := filepath.Abs(folder); err == nil {
+		folder = abs
+	}
 	sheet := &Sheet{Dir: o.Out, Index: filepath.Join(o.Out, "index.html"), data: pageData{
-		Title: filepath.Base(rep.Dir), Report: reportPath, Backend: rep.Backend, Model: rep.Model,
+		Title: filepath.Base(rep.Dir), Report: reportPath, Folder: folder, Backend: rep.Backend, Model: rep.Model,
 		Escalation: rep.Escalation, Cards: cards,
 	}}
 	page, err := sheet.Page(false)
@@ -108,9 +114,12 @@ type Sheet struct {
 }
 
 // Page renders the sheet. serve marks it as saving through a review server.
-func (s *Sheet) Page(serve bool) ([]byte, error) {
+func (s *Sheet) Page(serve bool) ([]byte, error) { return s.page(serve, "") }
+
+// page renders the sheet; labelsLog names the server's log for the header.
+func (s *Sheet) page(serve bool, labelsLog string) ([]byte, error) {
 	d := s.data
-	d.Serve = serve
+	d.Serve, d.LabelsLog = serve, labelsLog
 	b, err := json.Marshal(d) // Marshal escapes <, >, & so the data can't close its script
 	if err != nil {
 		return nil, err

@@ -39,7 +39,7 @@ main { padding: 16px; }
 .badge { font-size: 11px; font-weight: 600; text-transform: uppercase; border-radius: 4px; padding: 1px 6px; color: #fff; white-space: nowrap; }
 .keep { background: var(--keep); } .review { background: var(--review); } .cull { background: var(--cull); } .none { background: var(--muted); }
 .label { position: absolute; top: 6px; right: 6px; }
-.label.badge { border: 2px solid var(--panel); }
+.label.badge { border: 1px solid var(--ink); } /* yours: set apart from the model's badge */
 #detail { display: none; }
 #detail.open { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
 @media (max-width: 800px) { #detail.open { grid-template-columns: 1fr; } }
@@ -60,6 +60,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
 <header>
   <h1 id="title">gophotocull review</h1>
   <span class="meta" id="meta"></span>
+  <span class="meta" id="where"></span>
   <div class="filters" id="verdicts" role="group" aria-label="Verdict"></div>
   <div class="filters" id="progress" role="group" aria-label="Progress"></div>
   <div class="tools" id="tools">
@@ -67,7 +68,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     <label class="file">Import labels<input type="file" id="import" accept=".jsonl,application/jsonl,application/x-ndjson,text/plain"></label>
   </div>
   <span class="save" id="save"></span>
-  <span class="help">← → move · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid</span>
+  <span class="help">← → ↑ ↓ move · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid · badges: top right = you · bottom = model</span>
 </header>
 <main>
   <div id="grid"></div>
@@ -121,12 +122,16 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     return n;
   };
   const img = (name, alt) => name ? el("img", { src: encodeURIComponent(name), alt, loading: "lazy" }) : null;
-  const badge = (d, extra = "") => el("span", { cls: "badge " + (d || "none") + extra, text: d || "unscored" });
+  const badge = (d, extra = "", title = "") => el("span", { cls: "badge " + (d || "none") + extra, text: d || "unscored", title });
+  const modelBadge = d => badge(d, "", "model's verdict");
+  const yourBadge = (d, extra = "") => badge(d, extra, "your label");
   const starText = n => n ? el("span", { cls: "stars", text: "★".repeat(n), title: n + " star" + (n > 1 ? "s" : "") }) : null;
 
   document.getElementById("title").textContent = data.title + " · review";
   document.title = data.title + " · gophotocull review";
   if (serve) document.getElementById("tools").hidden = true;
+  document.getElementById("where").textContent =
+    (data.folder ? "folder: " + data.folder : "") + (data.labels_log ? " · labels: " + data.labels_log : "");
 
   function group(id, name, items, current, set) {
     document.getElementById(id).replaceChildren(el("span", { cls: "group-name", text: name }), ...items.map(([v, label]) => {
@@ -160,8 +165,8 @@ ul { margin: 4px 0 0; padding-left: 18px; }
       const c = cards[i], l = get(c.file);
       const card = el("div", { cls: "card" + (k === sel ? " sel" : ""), tabindex: "0" },
         img(c.thumb, c.file) || el("div", { cls: "empty", text: c.error || "no preview" }),
-        el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), starText(l.stars), badge(c.decision)));
-      if (l.label) card.appendChild(badge(l.label, " label"));
+        el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), starText(l.stars), modelBadge(c.decision)));
+      if (l.label) card.appendChild(yourBadge(l.label, " label"));
       card.onclick = () => { sel = k; detailOpen = true; render(); };
       return card;
     }));
@@ -226,7 +231,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
         el("p", { cls: "cap", text: `${sel + 1} / ${vis.length} · ${c.file}` }), nav),
       el("div", { cls: "pane subject" },
         c.subject ? el("div", {}, img(c.subject, "subject crop"), el("p", { cls: "cap", text: "Subject at native preview resolution (what the model judged)" })) : null,
-        el("div", {}, badge(c.decision), l.label ? el("span", { text: "  your label: " }) : null, l.label ? badge(l.label) : null,
+        el("div", {}, modelBadge(c.decision), l.label ? el("span", { text: "  your label: " }) : null, l.label ? yourBadge(l.label) : null,
           l.stars ? el("span", { text: "  " }) : null, starText(l.stars)),
         st ? el("p", { cls: "status" + (/^(not saved|rejected)|sidecar not written/.test(st) ? " warn" : ""), text: st }) : null,
         actions, starBtns, info));
@@ -246,16 +251,31 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   const setLabel = v => update({ label: v }, !!v);
   const setStars = n => update({ stars: n }, n > 0 && progress === "unrated");
 
-  // move steps from the shown frame to its neighbour in the re-filtered list.
+  // columns counts the grid's cards in the first row as laid out now, so a row
+  // step follows the window width.
+  function columns() {
+    const cs = document.getElementById("grid").querySelectorAll(".card");
+    let n = 0;
+    for (const c of cs) { if (c.offsetTop !== cs[0].offsetTop) break; n++; }
+    return Math.max(1, n);
+  }
+
+  // move steps d places in the list as shown (a just-changed frame still in it;
+  // d = ±columns for a row), then re-applies the filter and lands on the frame
+  // that was d places away. Past the end it stays put, except that a row step
+  // down from above a shorter last row lands on the last frame.
   function move(d) {
     const vis = visible();
     if (!vis.length) return;
-    const cur = vis[Math.min(sel, vis.length - 1)];
+    const p = Math.min(sel, vis.length - 1), n = vis.length, step = Math.abs(d);
+    let t = p + d;
+    if (t > n - 1) t = step > 1 && Math.floor(p / step) < Math.floor((n - 1) / step) ? n - 1 : p;
+    if (t < 0) t = p;
+    const target = vis[t];
     pinned = -1;
     const now = visible();
-    let k = -1;
-    if (d > 0) { k = now.findIndex(i => i > cur); if (k < 0) k = now.length - 1; }
-    else { for (let j = now.length - 1; j >= 0; j--) if (now[j] < cur) { k = j; break; } if (k < 0) k = 0; }
+    let k = now.indexOf(target);
+    if (k < 0) { k = now.findIndex(i => i > target); if (k < 0) k = now.length - 1; }
     sel = Math.max(0, k);
     render();
   }
@@ -317,8 +337,10 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   document.addEventListener("keydown", ev => {
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     const k = ev.key.toLowerCase();
-    if (k === "arrowright" || k === "arrowdown") { move(1); ev.preventDefault(); }
-    else if (k === "arrowleft" || k === "arrowup") { move(-1); ev.preventDefault(); }
+    if (k === "arrowright") { move(1); ev.preventDefault(); }
+    else if (k === "arrowleft") { move(-1); ev.preventDefault(); }
+    else if (k === "arrowdown") { move(detailOpen ? 1 : columns()); ev.preventDefault(); }
+    else if (k === "arrowup") { move(detailOpen ? -1 : -columns()); ev.preventDefault(); }
     else if (k === "enter") { detailOpen = true; render(); }
     else if (k === "escape") { detailOpen = false; pinned = -1; render(); }
     else if (k === "k") setLabel("keep");

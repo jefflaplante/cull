@@ -103,8 +103,8 @@ func TestServerAccessControl(t *testing.T) {
 			t.Errorf("%s: %d, want %d", c.name, rec.Code, c.want)
 		}
 	}
-	if rec := call(h, "GET", "/", "", nil); !strings.Contains(rec.Body.String(), `"serve":true`) {
-		t.Error("served page not in serve mode")
+	if rec := call(h, "GET", "/", "", nil); !strings.Contains(rec.Body.String(), `"serve":true`) || !strings.Contains(rec.Body.String(), `"labels_log":`) {
+		t.Error("served page not in serve mode, or lacks the labels log path")
 	}
 }
 

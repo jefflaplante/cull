@@ -3,6 +3,7 @@ package review
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"image"
 	"image/jpeg"
 	"io"
@@ -93,5 +94,19 @@ func TestPageMarksServeMode(t *testing.T) {
 	served, err := sheet.Page(true)
 	if err != nil || !strings.Contains(string(served), `"serve":true`) || strings.Contains(string(static), `"serve"`) {
 		t.Fatalf("serve flag: %v", err)
+	}
+}
+
+func TestPageSaysWhereTheFilesAre(t *testing.T) {
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	rep := &report.Report{Dir: dir, Results: []report.Result{{File: filepath.Join(dir, "L1.DNG")}}}
+	sheet, err := Build(rep, filepath.Join(dir, "r.json"), Options{Out: t.TempDir(), Concurrency: 1}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, _ := json.Marshal(dir)
+	if page, _ := sheet.Page(false); !strings.Contains(string(page), `"folder":`+string(folder)) {
+		t.Fatalf("page lacks the shoot folder %s", folder)
 	}
 }

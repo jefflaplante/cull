@@ -32,14 +32,23 @@ main { padding: 16px; }
 #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; }
 .card.sel { outline: 3px solid var(--accent); }
+.card.set-odd { box-shadow: inset 0 0 0 2px var(--accent); }
+.card.set-even { box-shadow: inset 0 0 0 2px var(--muted); }
 .card img { width: 100%; aspect-ratio: 3 / 2; object-fit: contain; background: #0000000d; display: block; }
 .card .row { display: flex; justify-content: space-between; gap: 6px; padding: 6px 8px; align-items: center; }
 .name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stars { color: var(--review); letter-spacing: 1px; white-space: nowrap; }
 .badge { font-size: 11px; font-weight: 600; text-transform: uppercase; border-radius: 4px; padding: 1px 6px; color: #fff; white-space: nowrap; }
 .keep { background: var(--keep); } .review { background: var(--review); } .cull { background: var(--cull); } .none { background: var(--muted); }
+.badge.set { background: var(--accent); }
 .label { position: absolute; top: 6px; right: 6px; }
 .label.badge { border: 1px solid var(--ink); } /* yours: set apart from the model's badge */
+.best { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border: 1px solid var(--ink); border-radius: 999px; padding: 1px 6px; background: var(--panel); color: var(--ink); }
+.strip { display: flex; gap: 6px; overflow-x: auto; margin-top: 6px; }
+.strip-thumb { flex: 0 0 auto; width: 64px; height: 44px; padding: 0; border: 2px solid transparent; border-radius: 4px; overflow: hidden; background: var(--bg); cursor: pointer; }
+.strip-thumb.current { border-color: var(--accent); }
+.strip-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.strip-thumb .empty { font-size: 9px; color: var(--muted); padding: 2px; }
 #detail { display: none; }
 #detail.open { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
 @media (max-width: 800px) { #detail.open { grid-template-columns: 1fr; } }
@@ -63,6 +72,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   <span class="meta" id="where"></span>
   <div class="filters" id="verdicts" role="group" aria-label="Verdict"></div>
   <div class="filters" id="progress" role="group" aria-label="Progress"></div>
+  <div class="filters" id="sets" role="group" aria-label="Sets"></div>
   <div class="tools" id="tools">
     <button id="export">Export labels</button>
     <label class="file">Import labels<input type="file" id="import" accept=".jsonl,application/jsonl,application/x-ndjson,text/plain"></label>
@@ -97,12 +107,15 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   const get = f => labels[f] || { label: "", stars: 0 };
   const effective = c => get(c.file).label || c.decision || "";
 
-  let verdict = "all", progress = "all", sel = 0, detailOpen = false, pinned = -1;
+  let verdict = "all", progress = "all", setFilter = "all", sel = 0, detailOpen = false, pinned = -1;
   const verdicts = [["all", "All"], ["keep", "Keep"], ["review", "Review"], ["cull", "Cull"]];
   const progresses = [["all", "All"], ["unlabeled", "Unlabeled"], ["unrated", "Unrated"], ["disagree", "Disagreements"]];
+  const setFilters = [["all", "All"], ["best", "Best"], ["outranked", "Outranked"]];
   const matches = i => {
-    const c = cards[i], l = get(c.file);
+    const c = cards[i], l = get(c.file), g = c.group;
     if (verdict !== "all" && effective(c) !== verdict) return false;
+    if (setFilter === "best" && !(g && g.best)) return false;
+    if (setFilter === "outranked" && !(g && g.rank > data.keep_best && data.keep_best > 0)) return false;
     switch (progress) {
       case "unlabeled": return !l.label && !c.error;
       case "unrated": return !l.stars && !c.error;
@@ -126,6 +139,9 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   const modelBadge = d => badge(d, "", "model's verdict");
   const yourBadge = (d, extra = "") => badge(d, extra, "your label");
   const starText = n => n ? el("span", { cls: "stars", text: "★".repeat(n), title: n + " star" + (n > 1 ? "s" : "") }) : null;
+  const setBadge = g => g && g.size > 1 ? el("span", { cls: "badge set", text: `set ${g.id} · #${g.rank}/${g.of}`, title: "set" }) : null;
+  const bestPill = g => g && g.best ? el("span", { cls: "best", text: "best" }) : null;
+  const setTint = g => g ? (g.id % 2 ? " set-odd" : " set-even") : "";
 
   document.getElementById("title").textContent = data.title + " · review";
   document.title = data.title + " · cull review";
@@ -150,6 +166,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
       `${cards.length} frames · model keep ${n.keep} · review ${n.review} · cull ${n.cull} · labeled ${labeled} · rated ${rated}` + (model ? ` · ${model}` : "");
     group("verdicts", "verdict", verdicts, verdict, v => { verdict = v; });
     group("progress", "show", progresses, progress, v => { progress = v; });
+    group("sets", "sets", setFilters, setFilter, v => { setFilter = v; });
     const s = document.getElementById("save");
     let text = note;
     if (!text && serve) text = pending.length ? `${pending.length} unsaved change${pending.length > 1 ? "s" : ""}` : "all changes saved";
@@ -163,10 +180,12 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     if (!vis.length) { grid.replaceChildren(el("p", { cls: "empty", text: "No frames match this filter." })); return; }
     grid.replaceChildren(...vis.map((i, k) => {
       const c = cards[i], l = get(c.file);
-      const card = el("div", { cls: "card" + (k === sel ? " sel" : ""), tabindex: "0" },
+      const card = el("div", { cls: "card" + (k === sel ? " sel" : "") + setTint(c.group), tabindex: "0" },
         img(c.thumb, c.file) || el("div", { cls: "empty", text: c.error || "no preview" }),
-        el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), starText(l.stars), modelBadge(c.decision)));
+        el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), starText(l.stars), setBadge(c.group), modelBadge(c.decision)));
       if (l.label) card.appendChild(yourBadge(l.label, " label"));
+      const pill = bestPill(c.group);
+      if (pill) card.appendChild(pill);
       card.onclick = () => { sel = k; detailOpen = true; render(); };
       return card;
     }));
@@ -200,7 +219,12 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     }
     if (c.first) row(info, "first pass", `${c.first.backend}/${c.first.model}: ${c.first.evaluation.sharpness.status} ${c.first.evaluation.sharpness.score}`);
     if (f) row(info, "subject", f.source === "none" ? "none: " + (f.reason || "") : f.source + (f.label ? ": " + f.label : "") + (f.face_q ? ` (face q ${f.face_q})` : ""));
-    if (c.group) row(info, "set", `${c.group.id} · #${c.group.rank}/${c.group.of} by ${c.group.by} (${c.group.size} frames)`);
+    if (c.group) {
+      row(info, "set", `${c.group.id} · #${c.group.rank}/${c.group.of} by ${c.group.by} (${c.group.size} frames)`);
+      row(info, "strength", c.group.strength);
+      row(info, "weakness", c.group.weakness);
+      row(info, "set summary", c.set_summary);
+    }
     row(info, "shooting", c.exif);
     if (c.raw_clip !== undefined && c.raw_clip !== null) row(info, "raw clipping", c.raw_clip.toFixed(3) + "% of samples at white level");
     row(info, "moved to", c.moved_to);
@@ -226,6 +250,26 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     nav.children[2].onclick = () => move(1);
     const st = status[c.file];
 
+    // Filmstrip: every card sharing this frame's set, regardless of the current
+    // filter; a click jumps to that frame only if it currently passes the filter.
+    let strip = null;
+    if (c.group) {
+      const members = cards.filter(m => m.group && m.group.id === c.group.id);
+      if (members.length > 1) {
+        strip = el("div", { cls: "strip" }, ...members.map(m => {
+          const b = el("button", { cls: "strip-thumb" + (m.file === c.file ? " current" : ""), title: m.file, type: "button" },
+            img(m.thumb, m.file) || el("span", { cls: "empty", text: "no preview" }));
+          b.onclick = () => {
+            const now = visible();
+            const idx = now.findIndex(x => cards[x].file === m.file);
+            if (idx < 0) return;
+            sel = idx; pinned = -1; detailOpen = true; render();
+          };
+          return b;
+        }));
+      }
+    }
+
     box.replaceChildren(
       el("div", { cls: "pane" }, img(c.thumb, c.file) || el("p", { cls: "empty", text: c.error || "no preview" }),
         el("p", { cls: "cap", text: `${sel + 1} / ${vis.length} · ${c.file}` }), nav),
@@ -234,7 +278,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
         el("div", {}, modelBadge(c.decision), l.label ? el("span", { text: "  your label: " }) : null, l.label ? yourBadge(l.label) : null,
           l.stars ? el("span", { text: "  " }) : null, starText(l.stars)),
         st ? el("p", { cls: "status" + (/^(not saved|rejected)|sidecar not written/.test(st) ? " warn" : ""), text: st }) : null,
-        actions, starBtns, info));
+        actions, starBtns, info, strip));
   }
 
   function update(change, advance) {

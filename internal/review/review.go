@@ -42,22 +42,23 @@ type Options struct {
 }
 
 type card struct {
-	File     string              `json:"file"`
-	Path     string              `json:"path"`
-	Thumb    string              `json:"thumb,omitempty"`
-	Subject  string              `json:"subject,omitempty"`
-	Decision string              `json:"decision,omitempty"`
-	Reasons  []string            `json:"reasons,omitempty"`
-	Fixups   []string            `json:"fixups,omitempty"`
-	Error    string              `json:"error,omitempty"`
-	Eval     *eval.Evaluation    `json:"eval,omitempty"`
-	First    *report.FirstPass   `json:"first,omitempty"`
-	Focus    *report.FocusTarget `json:"focus,omitempty"`
-	Group    *report.Group       `json:"group,omitempty"`
-	Exif     string              `json:"exif,omitempty"`
-	MovedTo  string              `json:"moved_to,omitempty"`
-	Cost     float64             `json:"cost,omitempty"`
-	RawClip  *float64            `json:"raw_clip,omitempty"` // percent of raw samples at white level
+	File       string              `json:"file"`
+	Path       string              `json:"path"`
+	Thumb      string              `json:"thumb,omitempty"`
+	Subject    string              `json:"subject,omitempty"`
+	Decision   string              `json:"decision,omitempty"`
+	Reasons    []string            `json:"reasons,omitempty"`
+	Fixups     []string            `json:"fixups,omitempty"`
+	Error      string              `json:"error,omitempty"`
+	Eval       *eval.Evaluation    `json:"eval,omitempty"`
+	First      *report.FirstPass   `json:"first,omitempty"`
+	Focus      *report.FocusTarget `json:"focus,omitempty"`
+	Group      *report.Group       `json:"group,omitempty"`
+	SetSummary string              `json:"set_summary,omitempty"` // the set's summary, when its group was ranked
+	Exif       string              `json:"exif,omitempty"`
+	MovedTo    string              `json:"moved_to,omitempty"`
+	Cost       float64             `json:"cost,omitempty"`
+	RawClip    *float64            `json:"raw_clip,omitempty"` // percent of raw samples at white level
 }
 
 type pageData struct {
@@ -69,6 +70,7 @@ type pageData struct {
 	Folder     string `json:"folder"`               // the shoot folder the frames are in
 	Serve      bool   `json:"serve,omitempty"`      // saving through a review server
 	LabelsLog  string `json:"labels_log,omitempty"` // where the server appends labels
+	KeepBest   int    `json:"keep_best"`            // Policy.KeepBest at the last judge or decide
 	Cards      []card `json:"cards"`
 }
 
@@ -101,7 +103,7 @@ func Build(rep *report.Report, reportPath string, o Options, log io.Writer) (*Sh
 	}
 	sheet := &Sheet{Dir: o.Out, Index: filepath.Join(o.Out, "index.html"), data: pageData{
 		Title: filepath.Base(rep.Dir), Report: reportPath, Folder: folder, Backend: rep.Backend, Model: rep.Model,
-		Escalation: rep.Escalation, Cards: cards,
+		Escalation: rep.Escalation, KeepBest: rep.KeepBest, Cards: cards,
 	}}
 	page, err := sheet.Page(false)
 	if err != nil {
@@ -135,6 +137,14 @@ func makeCard(rep *report.Report, r report.Result, o Options, log io.Writer) car
 		File: filepath.Base(r.File), Path: r.File, Decision: string(r.Decision), Reasons: r.Reasons,
 		Fixups: r.Fixups, Error: r.Error, Eval: r.Evaluation, First: r.FirstPass, Focus: r.FocusTarget,
 		Group: r.Group, MovedTo: r.MovedTo, Cost: r.CostUSD,
+	}
+	if r.Group != nil {
+		for _, s := range rep.Sets {
+			if s.ID == r.Group.ID {
+				c.SetSummary = s.Summary
+				break
+			}
+		}
 	}
 	if r.Exif != nil {
 		c.Exif = r.Exif.Summary()

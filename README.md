@@ -30,8 +30,9 @@ make build
 | Command | Purpose |
 |---|---|
 | `scan <dir>` | Extract + measure previews, detect faces; writes report only, calls no model |
-| `judge <dir>` | Evaluate with the model, apply policy, optional sidecars; `--move-culled` moves culls (with their `.xmp`) into `culled/` beside them |
-| `decide <dir>` | Re-apply the policy to stored assessments (no model calls); `--write-xmp` / `--move-culled` sync; `--labels` applies your verdicts and stars |
+| `judge <dir>` | Evaluate with the model, apply policy, optional sidecars; ranks sequences at the end unless `--no-rank`; `--move-culled` moves culls (with their `.xmp`) into `culled/` beside them |
+| `rank <dir>` | Rank the sets `judge` found (or skipped with `--no-rank`), without re-judging; see "Sequences and best of set" below |
+| `decide <dir>` | Re-apply the policy to stored assessments (no model calls); regroups sequences and re-applies stored ranks for free; `--write-xmp` / `--move-culled` sync; `--labels` applies your verdicts and stars |
 | `review <dir>` | Opens the contact sheet in your browser: subject crops, decisions, reasons; label keep/review/cull and 1–5 stars. Every change is saved to `cull-labels.jsonl` and the frame's sidecar (`--no-xmp`: log only; `--static`: offline page) |
 | `calibrate REPORT...` | Agreement with your labels (the log beside the first report, or `--labels`): confusion matrix, false-cull / missed-cull / review rates, threshold sweep |
 | `apply-c1 <dir>` | AppleScript for the open Capture One document (color tag, keyword; your stars with `--labels`; optional exposure/crop); dry run by default, `--probe` first |
@@ -42,14 +43,17 @@ make build
 Global flags: `-o/--report`, `-r/--recursive`, `--max-edge`, `--tiles` ("where focus
 landed" tiles, default 1, sent only when there is no subject crop unless
 `--landed-with-subject`), `--face-min-q` (default 80), `--save-inputs <dir>`,
-`--burst-gap` (2s; 0 disables) / `--burst-hash` (12), `--min-preview-edge`.
+`--seq-gap` (60s; 0 disables sequence grouping) / `--seq-look` (0.08; see
+"Sequences and best of set" below), `--min-preview-edge`.
 
-Policy flags (`judge`, `decide`, `calibrate`): `--review-below-sharpness`, `--eyes-closed`,
-`--duplicates`, `--raw-clipped` (each `ignore|review|cull`, default `review`),
-`--raw-clip-threshold` (0.5 % of raw samples at white level), `--min-crop-area`.
+Policy flags (`judge`, `rank`, `decide`, `calibrate`): `--review-below-sharpness`, `--eyes-closed`,
+`--outranked`, `--raw-clipped` (each `ignore|review|cull`, default `review`),
+`--raw-clip-threshold` (0.5 % of raw samples at white level), `--min-crop-area`,
+`--keep-best` (default 3).
 
 Cost and scale (`judge`): `--estimate` (print and exit), `--max-cost USD`, `--batch`
-(Message Batches API: half price; Ctrl-C safe, `--resume` re-attaches),
+(Message Batches API: half price; Ctrl-C safe, `--resume` re-attaches), `--no-rank`
+(skip end-of-run ranking; rank later with `cull rank`),
 `--escalate-backend/--escalate-model/--escalate-on` (re-evaluate doubtful frames on a
 stronger model), `--raw-clip` (on for judge, off for scan). Run `cull judge --help`.
 
@@ -107,6 +111,101 @@ never overwrite; each is recorded as `moved_to` in the report, `culled/` folders
 skipped by later runs, and `cull restore` puts everything back. Until the
 sharpness gate is calibrated, look through `culled/` before deleting anything.
 
+## Sequences and best of set
+
+The user shoots **sequences** far more than bursts: the same subject or scene over
+tens of seconds to minutes, with small changes in pose, expression, framing or
+distance. `judge` groups similar frames and asks the model to pick the strongest
+few, instead of scoring every frame in isolation.
+
+**Grouping.** Frames are ordered by capture time, then file name (frames without a
+capture time sort by file name among their neighbours). A frame joins the previous
+frame's set when both hold:
+
+- the gap to the previous frame is ≤ `--seq-gap` (default **60s**; ignored when
+  either frame has no capture time — rewritten, near-identical times leave the look
+  to decide; `0` disables sequence grouping entirely);
+- its look distance to the **previous** frame (not the first frame of the set) is ≤
+  `--seq-look` (default **0.08**). The look is an 8×8 grid of mean RGB from the
+  preview, levelled for exposure and compared over small shifts, so small reframing
+  or zoom stays close while a different scene or subject is far apart. See the
+  measurement table in `CLAUDE.md` for how the default was chosen.
+
+A set is capped at 40 frames, so a slow pan can't chain a whole walk into one set.
+Frames that failed the sharpness gate stay in their set (visible in `review`) but
+aren't ranked.
+
+**Ranking.** Once every frame in a set (of at least 2 rankable frames) is judged,
+one model call compares them side by side — the model never scored them in
+isolation, so it isn't anchored on those scores. Each frame sends a full-frame view
+(768px) and, when a focus target was found (face detection or the model's locate
+call), its crop at native resolution (capped at 512px) — both re-extracted from the
+DNG at rank time. The rubric, in priority order:
+
+1. subject sharpness where it matters (the eyes);
+2. eyes and expression (open, engaged, natural; not mid-blink or mid-word);
+3. gesture and moment;
+4. composition and background (framing, horizon, edge distractions, cropped limbs);
+5. exposure only if it can't be fixed — fixable exposure never counts against a frame.
+
+A set larger than 8 frames is split into nearly equal chunks (≤ 8 frames per call),
+each ranked, then the top finishers from each chunk go to one final call — a full
+40-frame set with the default `--keep-best` (3) makes 5 chunk calls of 8 plus 1
+final call of 5: 6 calls total. Go, not the model, then keeps the top N:
+**`--keep-best`** (default **3**, range 0–5; `0` means
+rank only, nothing is demoted) and **`--outranked`** (`ignore|review|cull`, default
+**`review`**) decide what happens to the rest. Ranking only ever *demotes*: a kept
+frame can become review or cull, but review and cull are never promoted back to
+keep, and nothing is promoted past keep.
+
+A set the model didn't rank (`--no-rank`, a failed call, or the cost budget) falls
+back to ordering by the frames' own scores (sharpness, open eyes, composition,
+exposure) — the same `--keep-best`/`--outranked` policy still applies, with the
+reason noting it wasn't compared.
+
+**Commands.** `judge --no-rank` skips ranking (judge every frame, rank later).
+`cull rank <dir>` ranks the sets in an existing report without re-judging — useful
+after `--no-rank`, after tuning `--keep-best`/`--outranked`, or to rank an older
+schema-v3 report (it computes any missing look fingerprints from the DNGs first,
+free, about 1s/frame). It takes `--force` (re-rank every set, even one that already
+has a model order), `--estimate` (exact call count and cost, no model calls),
+`--max-cost`, and `--batch` (anthropic only, half price through the Message Batches
+API; `--batch-poll`, default 30s, sets how often it checks progress). With `--batch`
+and no `--backend`, `rank` defaults to anthropic. Without `--backend`/`--model`,
+`rank` defaults to whatever the report was judged with.
+
+A `--batch` ranking run is re-attachable: Ctrl-C leaves `<report>.rank-batch.json`
+beside the report, and rerunning `cull rank --batch` picks up where it left off
+(a sync `judge` with ranking on, or a sync `cull rank`, refuses to run while that
+file exists, since it would pay for the same sets again); delete the file to
+abandon it instead.
+
+**Reuse.** A set's stored order is reused — no new model call — while every
+currently rankable member of the set appears in it. A member that drops out (say, a
+frame newly culled by a policy change) is simply removed from the stored order; the
+relative order of the rest stays valid. A new or newly rankable member makes the
+set unranked again until the next `cull rank`. `cull decide` re-applies stored
+orders (and regroups sequences) for free — it never calls a model — so retuning
+`--keep-best` or `--outranked` after ranking doesn't cost anything.
+
+**Estimates.** `judge --estimate` adds an approximate ranking cost that assumes every
+frame lands in a full 8-frame set (~10k in / ~1k out tokens per call). It is neither
+a bound nor exact, because set sizes aren't known before judging: pairs and small
+sets cost more per frame, and frames in no set cost nothing. `--max-cost` is the hard
+cap. `cull rank --estimate`
+is exact, because the sets are already known.
+
+**Sidecars, Capture One and the review sheet.** A set's best frame(s) get the
+keyword `cull:best`, in sidecars and in `apply-c1`. `calibrate` gains a sets
+section over multi-frame sets containing labelled frames: how often a frame you
+labelled keep got ranked out of the best cut, how often one you labelled cull or
+review got ranked into it, and a `--keep-best` 1–5 sweep recomputed from the stored
+ranks, without new model calls. The review sheet marks a set frame with a
+"set N · #rank/of" badge and a distinct "best" marker, adds a **Sets: All / Best /
+Outranked** filter, and the detail view shows the frame's rank with the model's
+strength/weakness notes, the set's summary, and a filmstrip of the set's thumbnails
+(click one to jump to it, if it's visible under the current filters).
+
 ## Pipeline
 
 1. `internal/dng` — walks TIFF IFDs/SubIFDs for the largest reduced-resolution JPEG
@@ -129,7 +228,8 @@ sharpness gate is calibrated, look through `culled/` before deleting anything.
    - `missed_focus` / `motion_blur` → cull; `soft` → review; optional score floor
    - raw clipping (pure-Go decode of the DNG's lossless-JPEG raw) decides exposure:
      preview "clipped" with raw headroom → no review; raw ≥ threshold → `--raw-clipped`
-   - closed eyes → `--eyes-closed`; non-best frames of a burst → `--duplicates`
+   - closed eyes → `--eyes-closed`; frames ranked below `--keep-best` in their
+     sequence → `--outranked`
    - composition never culls; invalid or < `-min-crop-area` crops are dropped
 6. `internal/report` — JSON is the source of truth (schema v4; checkpointed every
    `--checkpoint` results; `--resume` keys on path+size+mtime). Filter it with `jq`,
@@ -149,7 +249,7 @@ What gets written (`review` unless `--no-xmp`; `judge`/`decide` with `--write-xm
 |---|---|
 | Rating | your stars only; left out when you haven't rated (the model never sets stars) |
 | Colour | the verdict — yours if you labeled, else the model's: keep **Green**, review **Yellow**, cull **Red** (C1 colour tags 4/3/1 in `apply-c1`) |
-| Keywords | `cull:<verdict>`, plus `cull:labeled` when the verdict is yours |
+| Keywords | `cull:<verdict>`, plus `cull:labeled` when the verdict is yours, plus `cull:best` for a set's best frame(s) |
 
 Sidecars not written by `cull` are never overwritten without `--overwrite-xmp`.
 
@@ -166,4 +266,5 @@ Sidecars not written by `cull` are never overwritten without `--overwrite-xmp`.
 - [ ] `crs:Crop*` coordinate space for rotated images is an unverified assumption
       (stored orientation); `crs:CropAngle` not written.
 - [x] Message Batches API mode (`--batch`).
-- [x] Burst/near-duplicate grouping (`--burst-gap`, `--duplicates`).
+- [x] Sequence grouping and best-of-set ranking (`--seq-gap`, `--seq-look`, `--keep-best`,
+      `--outranked`, `cull rank`), replacing burst/near-duplicate grouping.

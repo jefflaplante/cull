@@ -190,18 +190,22 @@ func TestRankImageWorkHonoursCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	j := &setRank{set: &rep.Sets[0], files: rep.Sets[0].Members}
+	j := newSetRank(&rep.Sets[0], rep.Sets[0].Members)
 	byFile := map[string]int{}
 	for i, r := range rep.Results {
 		byFile[r.File] = i
 	}
-	if err := loadRankImages(ctx, rep, c, []*setRank{j}, byFile); !errors.Is(err, context.Canceled) {
-		t.Fatalf("loadRankImages: %v", err)
+	calls := []rankCall{j.call("S1", []int{0, 1, 2})}
+	if err := loadCallImages(ctx, rep, c, calls, byFile); !errors.Is(err, context.Canceled) {
+		t.Fatalf("loadCallImages: %v", err)
 	}
 	for pos, f := range j.frames {
-		if f.Full != nil {
+		if f.Full != nil || j.decoded[pos] {
 			t.Fatalf("frame %d decoded after cancel", pos)
 		}
+	}
+	if calls[0].Frames != nil {
+		t.Fatal("a call got frames after cancel")
 	}
 
 	for i := range rep.Results { // a v3 report: looks to compute

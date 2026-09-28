@@ -256,17 +256,26 @@ func prepareRound(cfg Config, files []string, st *batchState, build func(*prepar
 	return reqs
 }
 
-// submit sends requests in size-capped chunks, recording each batch in recs (and
-// saving) before and after its create call. what ("judge", "rank") is for the log.
+// submit sends requests in size-capped chunks (submitChunk), stopping at the first
+// chunk that fails. what ("judge") and round are for the log and the record.
 func submit(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchRecord, reqs []llm.BatchRequest, what string, round int, save func() error) error {
+	for _, chunk := range chunkRequests(cfg, reqs) {
+		if err := submitChunk(ctx, cfg, client, recs, chunk, what, round, save); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// chunkRequests splits requests into batches of at most cfg.BatchChunkBytes
+// (defaultChunkBytes when unset) and maxBatchRequests; each holds at least one.
+func chunkRequests(cfg Config, reqs []llm.BatchRequest) [][]llm.BatchRequest {
 	limit := cfg.BatchChunkBytes
 	if limit <= 0 {
 		limit = defaultChunkBytes
 	}
+	var out [][]llm.BatchRequest
 	for len(reqs) > 0 {
-		if err := ctx.Err(); err != nil {
-			return err // nothing sent for this chunk: no record, nothing to refuse later
-		}
 		n, size := 0, 0
 		for n < len(reqs) && n < maxBatchRequests {
 			size += requestSize(reqs[n])
@@ -275,35 +284,45 @@ func submit(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchR
 			}
 			n++
 		}
-		chunk := reqs[:n]
+		out = append(out, reqs[:n])
 		reqs = reqs[n:]
-		rec := &batchRecord{Round: round, Status: "submitting"}
-		for _, r := range chunk {
-			rec.CustomIDs = append(rec.CustomIDs, r.CustomID)
-		}
-		*recs = append(*recs, rec)
-		if err := save(); err != nil {
-			return err
-		}
-		id, err := client.SubmitBatch(ctx, chunk)
-		if errors.Is(err, llm.ErrRejected) {
-			*recs = (*recs)[:len(*recs)-1] // definitively refused: nothing was created
-			if serr := save(); serr != nil {
-				return serr
-			}
-			return fmt.Errorf("submit batch: %w", err)
-		}
-		if err != nil {
-			// Interrupted, timed out or a server error: the batch may exist. Keep the
-			// "submitting" record so a resume refuses instead of paying twice.
-			return fmt.Errorf("submit batch: outcome unknown (%w); check the Claude Console before resuming", err)
-		}
-		rec.ID, rec.Status = id, "submitted"
-		if err := save(); err != nil {
-			return err
-		}
-		fmt.Fprintf(cfg.Log, "submitted batch %s (%s round %d, %d requests)\n", id, what, round, len(chunk))
 	}
+	return out
+}
+
+// submitChunk creates one batch, recording it in recs (and saving) before and after
+// the create call. A definitive rejection (llm.ErrRejected) removes the record:
+// nothing was created.
+func submitChunk(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchRecord, chunk []llm.BatchRequest, what string, round int, save func() error) error {
+	if err := ctx.Err(); err != nil {
+		return err // nothing sent for this chunk: no record, nothing to refuse later
+	}
+	rec := &batchRecord{Round: round, Status: "submitting"}
+	for _, r := range chunk {
+		rec.CustomIDs = append(rec.CustomIDs, r.CustomID)
+	}
+	*recs = append(*recs, rec)
+	if err := save(); err != nil {
+		return err
+	}
+	id, err := client.SubmitBatch(ctx, chunk)
+	if errors.Is(err, llm.ErrRejected) {
+		*recs = (*recs)[:len(*recs)-1] // definitively refused: nothing was created
+		if serr := save(); serr != nil {
+			return serr
+		}
+		return fmt.Errorf("submit batch: %w", err)
+	}
+	if err != nil {
+		// Interrupted, timed out or a server error: the batch may exist. Keep the
+		// "submitting" record so a resume refuses instead of paying twice.
+		return fmt.Errorf("submit batch: outcome unknown (%w); check the Claude Console before resuming", err)
+	}
+	rec.ID, rec.Status = id, "submitted"
+	if err := save(); err != nil {
+		return err
+	}
+	fmt.Fprintf(cfg.Log, "submitted batch %s (%s round %d, %d requests)\n", id, what, round, len(chunk))
 	return nil
 }
 

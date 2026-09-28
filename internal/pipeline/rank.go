@@ -2,18 +2,12 @@ package pipeline
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
 	"io"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/jefflaplante/gophotocull/internal/dng"
@@ -35,12 +29,21 @@ const (
 	defaultRankTokens = 2048 // 8 frames' notes and a summary take a few hundred
 )
 
-// rankCall is one rank request, frames in capture order.
+// rankCall is one rank request, frames in capture order. Frames are empty until an
+// executor's loader fills them: only calls actually sent need images.
 type rankCall struct {
 	ID     string   // "S<set>"; a chunked set sends "S<set>-C<k>", then "S<set>-F"
 	Files  []string // the frames' Result.File, in the same order
 	Frames []eval.RankFrame
+
+	job *setRank // the set it ranks, and its frames' positions in it
+	pos []int
 }
+
+// loader fills the Frames of calls, decoding each frame once. A call it leaves
+// without Frames can't be sent: a frame of its set couldn't be read (the set has
+// failed), or ctx was cancelled, whose error it then returns.
+type loader func(ctx context.Context, calls []rankCall) error
 
 // rankOut answers one rankCall. R can come with an llm.ErrQuotaStop Err: keep it.
 type rankOut struct {
@@ -51,16 +54,23 @@ type rankOut struct {
 }
 
 // rankExec runs one round of rank calls and answers each, in any order (matched
-// by ID). syncExec calls a backend; batchExec submits the round as Message Batches.
+// by ID), loading images (load) only for the calls it sends. syncExec calls a
+// backend; batchExec (rank_batch.go) sends Message Batches and reuses answers it
+// has recorded.
 type rankExec interface {
-	Run(ctx context.Context, calls []rankCall) []rankOut
+	Run(ctx context.Context, calls []rankCall, load loader) []rankOut
 	// batch: calls are billed at the batch rate, and every set goes in one wave
 	// (one round of chunk calls, one of finals), since a batch can't be stopped
 	// midway. Price and wave shape follow the executor, never cfg.Batch.
 	batch() bool
-	// done: the ranking finished, every set it started recorded; drop any state
-	// kept for re-attaching.
-	done() error
+	// settle runs once every set is recorded. It returns the usage of anything
+	// paid for that no call used (a batch answer for a set that changed), which
+	// the ranking's cost must still include.
+	settle(ctx context.Context) (llm.Usage, error)
+	// commit runs once the report holding the ranking so far is saved: what was
+	// handed over is now charged in it, and when the ranking finished the
+	// executor's state goes.
+	commit(finished bool) error
 }
 
 // syncExec runs rank calls on a backend through a worker pool. After a quota stop
@@ -71,11 +81,13 @@ type syncExec struct {
 	maxTokens   int // 0 = defaultRankTokens
 }
 
-func (s syncExec) Run(ctx context.Context, calls []rankCall) []rankOut {
+func (s syncExec) Run(ctx context.Context, calls []rankCall, load loader) []rankOut {
 	tokens := s.maxTokens
 	if tokens <= 0 {
 		tokens = defaultRankTokens
 	}
+	calls = append([]rankCall(nil), calls...)
+	load(ctx, calls) // a cancelled ctx answers every call "not sent" below
 	out := make([]rankOut, len(calls))
 	var mu sync.Mutex
 	var stopped error
@@ -97,6 +109,10 @@ func (s syncExec) Run(ctx context.Context, calls []rankCall) []rankOut {
 					out[i].Err = fmt.Errorf("not sent: %w", stop)
 					continue
 				}
+				if calls[i].Frames == nil {
+					out[i].Err = errUnreadable
+					continue
+				}
 				out[i].R, out[i].U, out[i].Err = eval.Rank(ctx, s.b, calls[i].Frames, tokens)
 				if isStop(out[i].Err) {
 					mu.Lock()
@@ -116,8 +132,12 @@ func (s syncExec) Run(ctx context.Context, calls []rankCall) []rankOut {
 	return out
 }
 
-func (syncExec) batch() bool { return false }
-func (syncExec) done() error { return nil }
+func (syncExec) batch() bool                               { return false }
+func (syncExec) settle(context.Context) (llm.Usage, error) { return llm.Usage{}, nil }
+func (syncExec) commit(bool) error                         { return nil }
+
+// errUnreadable answers a call whose set has a frame that couldn't be read.
+var errUnreadable = errors.New("not sent: a frame of its set couldn't be read")
 
 // isStop: an error that ends the stage, not just one call.
 func isStop(err error) bool {
@@ -231,13 +251,14 @@ func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.R
 		MoveCulled: cfg.MoveCulled, Seq: cfg.Seq, Labels: cfg.Labels}
 	ex := syncExec{b: b, concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
 	var rankErr error
-	if _, err := redecide(rep, o, log, func() { rankErr = RankSets(ctx, rep, cfg, ex, force) }); err != nil {
+	var finished bool
+	if _, err := redecide(rep, o, log, func() { _, finished, rankErr = rankSets(ctx, rep, cfg, ex, force, &spend{}) }); err != nil {
 		return rep, err
 	}
 	if err := rep.Save(cfg.ReportPath); err != nil {
 		return rep, err
 	}
-	return rep, rankErr
+	return rep, errors.Join(rankErr, ex.commit(finished)) // only now can the executor's state go
 }
 
 // RankSets asks the model to rank the sets that need it (every set of two or more
@@ -254,14 +275,19 @@ func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.R
 // an abort, a batch left pending or a cancelled context ends the stage once the
 // wave in flight is recorded. While a batch ranking is recorded for the report, a
 // sync executor refuses to rank: it would pay for the same sets again.
+//
+// RankSets saves no report, so it commits the executor's state at once (rep holds
+// the ranking): callers that save one use rankSets, then commit after the save.
 func RankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, force bool) error {
-	_, err := rankSets(ctx, rep, cfg, ex, force, &spend{})
-	return err
+	_, finished, err := rankSets(ctx, rep, cfg, ex, force, &spend{})
+	return errors.Join(err, ex.commit(finished))
 }
 
 // rankSets is RankSets charging a run's budget, which may already hold the cost of
-// the run's judge calls. It returns the ranking's usage.
-func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, force bool, budget *spend) (llm.Usage, error) {
+// the run's judge calls, and leaving the commit to the caller. It returns the
+// ranking's usage and whether the ranking finished: every set it took on recorded
+// and settled, nothing left pending.
+func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, force bool, budget *spend) (llm.Usage, bool, error) {
 	var total llm.Usage
 	log := cfg.Log
 	if log == nil {
@@ -278,7 +304,7 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 	}
 	if len(todo) > 0 && !ex.batch() {
 		if p := rankBatchStatePath(cfg); fileExists(p) {
-			return total, fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch to re-attach to it "+
+			return total, false, fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch to re-attach to it "+
 				"(ranking without it would pay for the same sets again), or delete that file to start over", p)
 		}
 	}
@@ -290,12 +316,13 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 	for i, r := range rep.Results {
 		byFile[r.File] = i
 	}
+	var last error // the last wave's budget stop: the ranking still finished
 	for len(todo) > 0 {
 		if err := ctx.Err(); err != nil {
-			return total, err
+			return total, false, err
 		}
 		if over, spent := budget.add(0, cfg.MaxCost); over {
-			return total, fmt.Errorf("%w: $%.2f of $%.2f; %d set(s) left by scores", llm.ErrBudget, spent, cfg.MaxCost, len(todo))
+			return total, false, fmt.Errorf("%w: $%.2f of $%.2f; %d set(s) left by scores", llm.ErrBudget, spent, cfg.MaxCost, len(todo))
 		}
 		n := min(wave, len(todo))
 		u, err := rankWave(ctx, rep, cfg, ex, todo[:n], byFile, budget, log)
@@ -304,29 +331,34 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 		switch {
 		case err == nil:
 		case errors.Is(err, llm.ErrBudget) && len(todo) > 0:
-			return total, fmt.Errorf("%w; %d set(s) left by scores", err, len(todo))
-		case errors.Is(err, llm.ErrBudget): // the last wave is recorded: the ranking finished at the budget
-			return total, errors.Join(err, ex.done())
+			return total, false, fmt.Errorf("%w; %d set(s) left by scores", err, len(todo))
+		case errors.Is(err, llm.ErrBudget):
+			last = err
 		default:
-			return total, err
+			return total, false, err
 		}
 	}
-	if err := ex.done(); err != nil {
-		return total, err
+	u, err := ex.settle(ctx)
+	if c := rankPrice(cfg, u, ex.batch()); u.InputTokens+u.OutputTokens > 0 {
+		rep.RankCostUSD += c
+		total.Add(u)
+		budget.add(c, 0)
 	}
-	return total, ctx.Err()
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+	if err != nil {
+		return total, false, errors.Join(last, err)
+	}
+	if last == nil {
+		last = ctx.Err()
+	}
+	return total, true, last
 }
 
 // setRank is one set's ranking in progress. Positions index files and frames.
 type setRank struct {
 	set     *report.Set
-	files   []string // rankable members, capture order
-	frames  []eval.RankFrame
+	files   []string         // rankable members, capture order
+	frames  []eval.RankFrame // decoded on demand (loadCallImages), kept for the next round
+	decoded []bool
 	parts   [][]int // chunks of positions: one part = a single call
 	orders  [][]int // each part's answer, positions best first
 	final   []int   // positions sent to the final call, capture order
@@ -343,20 +375,28 @@ func (j *setRank) fail(err error) {
 	}
 }
 
-// rankWave ranks a group of sets: their images, round 1 (a single call per set, or
-// its chunk calls), round 2 (the chunked sets' finals), then records each set.
+// newSetRank starts a set's ranking over its rankable members.
+func newSetRank(set *report.Set, files []string) *setRank {
+	return &setRank{set: set, files: files, notes: map[int]eval.RankEntry{},
+		frames: make([]eval.RankFrame, len(files)), decoded: make([]bool, len(files))}
+}
+
+// rankWave ranks a group of sets: round 1 (a single call per set, or its chunk
+// calls), round 2 (the chunked sets' finals), then records each set. Frames are
+// decoded only for the calls the executor sends.
 func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, sets []int, byFile map[string]int, budget *spend, log io.Writer) (llm.Usage, error) {
 	var jobs []*setRank
 	for _, si := range sets {
-		j := &setRank{set: &rep.Sets[si], notes: map[int]eval.RankEntry{}}
-		for _, f := range j.set.Members {
+		var files []string
+		for _, f := range rep.Sets[si].Members {
 			if i, ok := byFile[f]; ok && rep.Results[i].Group != nil && rep.Results[i].Group.Rank > 0 {
-				j.files = append(j.files, f)
+				files = append(files, f)
 			}
 		}
-		if len(j.files) < 2 {
+		if len(files) < 2 {
 			continue // nothing to compare (groups not decided)
 		}
+		j := newSetRank(&rep.Sets[si], files)
 		j.parts = chunks(len(j.files))
 		if len(j.parts) > 1 {
 			if n := len(finalPositions(j.parts, j.parts, cfg.Policy.KeepBest)); n > maxRankFrames {
@@ -365,9 +405,7 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 		}
 		jobs = append(jobs, j)
 	}
-	if err := loadRankImages(ctx, rep, cfg, jobs, byFile); err != nil {
-		return llm.Usage{}, err // cancelled before any call: nothing spent, no set touched
-	}
+	load := func(ctx context.Context, calls []rankCall) error { return loadCallImages(ctx, rep, cfg, calls, byFile) }
 
 	// Round 1.
 	var calls []rankCall
@@ -379,7 +417,7 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 			calls = append(calls, j.call(j.partID(k), part))
 		}
 	}
-	outs := answers(ctx, ex, calls)
+	outs := answers(ctx, ex, calls, load)
 	var stop error
 	for _, j := range jobs {
 		if j.err != nil {
@@ -415,7 +453,7 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 		calls = append(calls, j.call(fmt.Sprintf("S%d-F", j.set.ID), j.final))
 	}
 	if len(calls) > 0 {
-		outs = answers(ctx, ex, calls)
+		outs = answers(ctx, ex, calls, load)
 		for _, j := range jobs {
 			if j.err != nil || len(j.parts) == 1 {
 				continue
@@ -429,16 +467,9 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 			}
 		}
 	}
-	// A batch executor re-attaches to a round only when the same calls come back.
-	// With a round left pending, rank none of the wave: the re-run then sends the
-	// same round 1 (answered from its state, not paid again) and finds round 2.
-	if errors.Is(stop, errBatchPending) {
-		for _, j := range jobs {
-			j.fail(stop)
-		}
-	}
-
-	// Record: every set pays for its calls; a complete answer ranks it.
+	// Record: every set pays for its calls; a complete answer ranks it. A set left
+	// waiting on a pending batch is ranked by a re-run, which reuses each answer
+	// recorded so far (batchExec) without paying for it again.
 	var total llm.Usage
 	over, spent := false, 0.0
 	for _, j := range jobs {
@@ -485,12 +516,11 @@ func (j *setRank) partID(k int) string {
 	return fmt.Sprintf("S%d-C%d", j.set.ID, k+1)
 }
 
-// call builds the rank call for the frames at positions.
+// call builds the rank call for the frames at positions, without images.
 func (j *setRank) call(id string, positions []int) rankCall {
-	c := rankCall{ID: id}
+	c := rankCall{ID: id, job: j, pos: positions}
 	for _, p := range positions {
 		c.Files = append(c.Files, j.files[p])
-		c.Frames = append(c.Frames, j.frames[p])
 	}
 	return c
 }
@@ -524,12 +554,12 @@ func (j *setRank) take(outs map[string]rankOut, id string, positions []int) ([]i
 }
 
 // answers runs a round and indexes its answers by call ID.
-func answers(ctx context.Context, ex rankExec, calls []rankCall) map[string]rankOut {
+func answers(ctx context.Context, ex rankExec, calls []rankCall, load loader) map[string]rankOut {
 	outs := make(map[string]rankOut, len(calls))
 	if len(calls) == 0 {
 		return outs
 	}
-	for _, o := range ex.Run(ctx, calls) {
+	for _, o := range ex.Run(ctx, calls, load) {
 		outs[o.ID] = o
 	}
 	return outs
@@ -547,16 +577,29 @@ func finalPositions(parts, orders [][]int, keepBest int) []int {
 	return out
 }
 
-// loadRankImages reads every frame the wave's sets send, cfg.Concurrency frames at
-// a time: each decode holds a full-resolution preview. Once ctx is cancelled no
-// further frame is decoded (those in progress finish) and it returns ctx's error.
-func loadRankImages(ctx context.Context, rep *report.Report, cfg Config, jobs []*setRank, byFile map[string]int) error {
+// loadCallImages fills the Frames of calls, decoding each frame they send that
+// isn't decoded yet (a set's frames are kept for its final), cfg.Concurrency at a
+// time: each decode holds a full-resolution preview. A frame that can't be read
+// fails its set, whose calls then get no Frames. Once ctx is cancelled no further
+// frame is decoded (those in progress finish), no call gets Frames, and it returns
+// ctx's error.
+func loadCallImages(ctx context.Context, rep *report.Report, cfg Config, calls []rankCall, byFile map[string]int) error {
 	type item struct {
 		j   *setRank
 		pos int
 	}
-	for _, j := range jobs {
-		j.frames = make([]eval.RankFrame, len(j.files))
+	var todo []item
+	queued := map[item]bool{}
+	for _, c := range calls {
+		if c.job == nil || c.job.err != nil {
+			continue
+		}
+		for _, p := range c.pos {
+			if it := (item{c.job, p}); !c.job.decoded[p] && !queued[it] {
+				queued[it] = true
+				todo = append(todo, it)
+			}
+		}
 	}
 	var mu sync.Mutex
 	items := make(chan item)
@@ -574,259 +617,33 @@ func loadRankImages(ctx context.Context, rep *report.Report, cfg Config, jobs []
 				mu.Lock()
 				if err != nil {
 					it.j.fail(fmt.Errorf("%s: %w", filepath.Base(f), err))
+				} else {
+					it.j.frames[it.pos], it.j.decoded[it.pos] = rf, true
 				}
-				it.j.frames[it.pos] = rf
 				mu.Unlock()
 			}
 		}()
 	}
-send:
-	for _, j := range jobs {
-		if j.err != nil {
-			continue
+	for _, it := range todo {
+		if ctx.Err() != nil {
+			break
 		}
-		for pos := range j.files {
-			if ctx.Err() != nil {
-				break send
-			}
-			items <- item{j, pos}
-		}
+		items <- it
 	}
 	close(items)
 	wg.Wait()
-	return ctx.Err()
-}
-
-// batchExec runs each round of rank calls as Message Batches (half price,
-// asynchronous). It records a round's batches in statePath before polling them, so
-// a re-run that sends the same round re-attaches instead of paying again.
-type batchExec struct {
-	client    BatchClient
-	cfg       Config
-	statePath string
-}
-
-// errBatchPending marks a rank round a batch executor couldn't finish (submit
-// outcome unknown, polling failed, Ctrl-C): what it sent stays recorded.
-var errBatchPending = errors.New("batch ranking unfinished")
-
-const rankBatchStateVersion = 1
-
-func rankBatchStatePath(cfg Config) string { return cfg.ReportPath + ".rank-batch.json" }
-
-// rankBatchState is a ranking's batches, for re-attaching after a crash or Ctrl-C.
-type rankBatchState struct {
-	Version int          `json:"version"`
-	Backend string       `json:"backend"`
-	Model   string       `json:"model"`
-	Rounds  []*rankRound `json:"rounds"`
-}
-
-// rankRound is one round of rank calls: its key (roundKey), its batches (a round
-// too big for one upload is split, as judge's are) and, once every batch is
-// collected, the answers by call ID.
-type rankRound struct {
-	Key     string                 `json:"key"`
-	Batches []*batchRecord         `json:"batches"`
-	Answers map[string]*rankAnswer `json:"answers,omitempty"`
-}
-
-type rankAnswer struct {
-	Ranking *eval.Ranking `json:"ranking,omitempty"`
-	Usage   llm.Usage     `json:"usage"`
-	Err     string        `json:"error,omitempty"`
-}
-
-func (batchExec) batch() bool { return true }
-
-func (e batchExec) log() io.Writer {
-	if e.cfg.Log == nil {
-		return io.Discard
-	}
-	return e.cfg.Log
-}
-
-// Run answers a round of calls. When the round can't finish, every call answers
-// with the same errBatchPending error, which stops the stage.
-func (e batchExec) Run(ctx context.Context, calls []rankCall) []rankOut {
-	answers, fresh, err := e.round(ctx, calls)
-	out := make([]rankOut, len(calls))
-	for i, c := range calls {
-		out[i].ID = c.ID
-		a := answers[c.ID]
-		switch {
-		case err != nil:
-			out[i].Err = err
-		case a == nil:
-			out[i].Err = errors.New("no answer in its batch")
-		default:
-			out[i].R = a.Ranking
-			if fresh { // an answer read back from the state was charged when first handed over
-				out[i].U = a.Usage
-			}
-			if a.Err != "" {
-				out[i].Err = errors.New(a.Err)
-			}
-		}
-	}
-	return out
-}
-
-// round answers a round of calls. A round already collected is answered from the
-// state (fresh false). Otherwise it submits the calls none of the round's recorded
-// batches holds, polls every batch until it ends, and hands the answers over only
-// once all are in: a partly collected round is fetched again on the re-run.
-func (e batchExec) round(ctx context.Context, calls []rankCall) (answers map[string]*rankAnswer, fresh bool, err error) {
-	cfg := e.cfg
-	cfg.Log = e.log()
-	st, err := loadRankBatchState(e.statePath)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		st = &rankBatchState{Version: rankBatchStateVersion, Backend: cfg.Backend, Model: cfg.Model}
-	case err != nil:
-		return nil, false, fmt.Errorf("%w: %w", errBatchPending, err)
-	case st.Backend != cfg.Backend || st.Model != cfg.Model:
-		return nil, false, fmt.Errorf("%w: %s belongs to %s/%s, not %s/%s: rerun with that backend and model to re-attach, or delete it to start over",
-			errBatchPending, e.statePath, st.Backend, st.Model, cfg.Backend, cfg.Model)
-	}
-	key := roundKey(calls)
-	var rd *rankRound
-	n := 0 // the round's place in the state, for the log
-	for i, r := range st.Rounds {
-		if r.Key == key {
-			rd, n = r, i+1
-		}
-	}
-	if rd != nil && rd.Answers != nil {
-		fmt.Fprintf(cfg.Log, "rank round %d: answers recorded in %s\n", n, e.statePath)
-		return rd.Answers, false, nil
-	}
-	if rd == nil {
-		rd = &rankRound{Key: key}
-		st.Rounds = append(st.Rounds, rd)
-		n = len(st.Rounds)
-	}
-	save := func() error { return saveState(e.statePath, st) }
-	pending := func(err error) error {
-		return fmt.Errorf("%w: %w (recorded in %s: rerun with --batch to re-attach)", errBatchPending, err, e.statePath)
-	}
-	sent := map[string]bool{}
-	for _, b := range rd.Batches {
-		if b.Status == "submitting" {
-			return nil, false, fmt.Errorf("%w: a rank batch submission was interrupted before its ID was recorded, so it may have been created: "+
-				"check the Batches page in the Claude Console, then delete %s to start over (not resubmitting, to avoid paying twice)", errBatchPending, e.statePath)
-		}
-		for _, id := range b.CustomIDs {
-			sent[id] = true
-		}
-	}
-	tokens := cfg.RankTokens
-	if tokens <= 0 {
-		tokens = defaultRankTokens
-	}
-	frames := make(map[string]int, len(calls)) // call ID -> frames it sent
-	var reqs []llm.BatchRequest
-	for _, c := range calls {
-		frames[c.ID] = len(c.Frames)
-		if !sent[c.ID] {
-			reqs = append(reqs, llm.BatchRequest{CustomID: c.ID, Req: eval.RankRequest(c.Frames, tokens)})
-		}
-	}
-	if err := submit(ctx, cfg, e.client, &rd.Batches, reqs, "rank", n, save); err != nil {
-		return nil, false, pending(err)
-	}
-	answers = make(map[string]*rankAnswer, len(calls))
-	schemaFor := func(string) map[string]any { return eval.RankSchema() }
-	for _, b := range rd.Batches {
-		status, err := await(ctx, cfg, e.client, b.ID)
-		if err != nil {
-			return nil, false, pending(err)
-		}
-		err = e.client.BatchResults(ctx, status.ResultsURL, schemaFor, func(r llm.BatchResult) {
-			if nf, ok := frames[r.CustomID]; ok {
-				answers[r.CustomID] = rankAnswerOf(r, nf)
-			}
-		})
-		if err != nil {
-			return nil, false, pending(fmt.Errorf("batch %s results: %w", b.ID, err))
-		}
-	}
-	rd.Answers = answers
-	for _, b := range rd.Batches {
-		b.Status = "collected"
-	}
-	if err := save(); err != nil {
-		return nil, false, pending(err) // not handed over: the re-run fetches them again
-	}
-	return answers, true, nil
-}
-
-// rankAnswerOf reads one batch result for a call that sent n frames. An answer
-// that isn't a clean order is that call's error: a batch has no retry.
-func rankAnswerOf(r llm.BatchResult, n int) *rankAnswer {
-	a := &rankAnswer{}
-	if r.Response != nil {
-		a.Usage = r.Response.Usage
-	}
-	switch {
-	case r.Err != nil:
-		a.Err = r.Err.Error()
-	case r.Response == nil:
-		a.Err = "empty answer"
-	default:
-		rk, err := eval.DecodeRank(r.Response.JSON, n)
-		if err != nil {
-			a.Err = err.Error()
-		} else {
-			a.Ranking = rk
-		}
-	}
-	return a
-}
-
-// done deletes the state: the ranking finished, so every round it recorded was
-// applied. A batch never collected belonged to sets that changed meanwhile; it is
-// named in the log, since it may still be billed.
-func (e batchExec) done() error {
-	st, err := loadRankBatchState(e.statePath)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err == nil {
-		for _, rd := range st.Rounds {
-			for _, b := range rd.Batches {
-				if b.Status != "collected" {
-					fmt.Fprintf(e.log(), "dropping rank batch %s (%s): its sets changed before it was collected\n", b.ID, b.Status)
-				}
-			}
-		}
-	}
-	if err := os.Remove(e.statePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
+	for i := range calls {
+		c := &calls[i]
+		if c.job == nil || c.job.err != nil {
+			continue
+		}
+		c.Frames = make([]eval.RankFrame, len(c.pos))
+		for k, p := range c.pos {
+			c.Frames[k] = c.job.frames[p]
+		}
+	}
 	return nil
-}
-
-// roundKey identifies a round by its calls: their IDs, sorted, each with its frame
-// files in the order sent. The same sets needing the same calls give the same key.
-func roundKey(calls []rankCall) string {
-	sorted := append([]rankCall(nil), calls...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
-	h := sha256.New()
-	for _, c := range sorted {
-		fmt.Fprintf(h, "%s\x00%s\n", c.ID, strings.Join(c.Files, "\x00"))
-	}
-	return hex.EncodeToString(h.Sum(nil)[:16])
-}
-
-func loadRankBatchState(path string) (*rankBatchState, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var st rankBatchState
-	if err := json.Unmarshal(b, &st); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return &st, nil
 }

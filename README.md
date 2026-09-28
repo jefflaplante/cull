@@ -188,9 +188,11 @@ set unranked again until the next `cull rank`. `cull decide` re-applies stored
 orders (and regroups sequences) for free — it never calls a model — so retuning
 `--keep-best` or `--outranked` after ranking doesn't cost anything.
 
-**Estimates.** `judge --estimate` includes a rough upper bound for ranking (every
-frame assumed to land in a full 8-frame set, ~10k in / ~1k out tokens/call); it's a
-ballpark, since actual set sizes aren't known before judging. `cull rank --estimate`
+**Estimates.** `judge --estimate` adds an approximate ranking cost that assumes every
+frame lands in a full 8-frame set (~10k in / ~1k out tokens per call). It is neither
+a bound nor exact, because set sizes aren't known before judging: pairs and small
+sets cost more per frame, and frames in no set cost nothing. `--max-cost` is the hard
+cap. `cull rank --estimate`
 is exact, because the sets are already known.
 
 **Sidecars, Capture One and the review sheet.** A set's best frame(s) get the

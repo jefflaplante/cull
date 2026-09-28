@@ -63,7 +63,7 @@ type Config struct {
 	Rank              bool          // at the end of the run, rank the sets that need it with the run's backend
 	RankTokens        int           // max output tokens per rank call; 0 = defaultRankTokens
 
-	rankWith    llm.Backend                         // set by Run when Rank: what finishRun ranks with; nil = no ranking
+	rankWith    rankExec                            // set by Run (sync) or RunBatch (batch) when Rank: what finishRun ranks with; nil = no ranking
 	detect      func(*imageprep.Frame) []focus.Face // test hook; nil = pigo
 	CheckpointN int
 	Log         io.Writer
@@ -188,7 +188,7 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 	// A stopped run (quota, abort, budget, Ctrl-C) makes no more calls: its sets stay
 	// by scores until cull rank.
 	if cfg.Rank && !cfg.DryRun && stopErr == nil && ctx.Err() == nil {
-		cfg.rankWith = b
+		cfg.rankWith = syncExec{b: b, concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
 	}
 	used, err := finishRun(ctx, rep, cfg, &budget)
 	total.Add(used)
@@ -459,8 +459,7 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 		if budget == nil {
 			budget = &spend{}
 		}
-		ex := syncExec{b: cfg.rankWith, concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
-		used, rankErr = rankSets(ctx, rep, cfg, ex, false, budget)
+		used, rankErr = rankSets(ctx, rep, cfg, cfg.rankWith, false, budget)
 		for _, i := range decideAll(rep, cfg.Policy, cfg.Seq) {
 			changed[i] = true
 		}

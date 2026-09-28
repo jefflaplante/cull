@@ -74,6 +74,10 @@ func frameID(path string) string {
 func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Report, llm.Usage, error) {
 	var total llm.Usage
 	statePath := batchStatePath(cfg)
+	if fileExists(rankBatchStatePath(cfg)) && !cfg.Resume {
+		// Without --resume every frame would be judged (and paid for) again.
+		return nil, total, fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch --resume to re-attach (or delete it to start over)", rankBatchStatePath(cfg))
+	}
 	st, err := loadBatchState(statePath)
 	switch {
 	case err == nil && !cfg.Resume:
@@ -95,7 +99,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 	if err != nil {
 		return nil, total, err
 	}
-	save := func() error { return saveBatchState(statePath, st) }
+	save := func() error { return saveState(statePath, st) }
 	releaseUnsent(st)
 
 	// Re-attach to anything already submitted.
@@ -128,7 +132,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 		}
 		return evalRequest(cfg, p, target)
 	})
-	if err := submit(ctx, cfg, client, st, reqs, 1, save); err != nil {
+	if err := submit(ctx, cfg, client, &st.Batches, reqs, "judge", 1, save); err != nil {
 		return rep, total, err
 	}
 	if err := collect(ctx, cfg, client, st, save); err != nil {
@@ -162,7 +166,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 			f.Locate, f.LocateErr = prev.Locate, prev.LocateErr
 		}
 	}
-	if err := submit(ctx, cfg, client, st, reqs, 2, save); err != nil {
+	if err := submit(ctx, cfg, client, &st.Batches, reqs, "judge", 2, save); err != nil {
 		return rep, total, err
 	}
 	if err := collect(ctx, cfg, client, st, save); err != nil {
@@ -175,6 +179,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	budget := &spend{} // the run's --max-cost covers the ranking too
 	for _, id := range ids {
 		f := st.Frames[id]
 		if f.Stage != "done" && f.Stage != "error" {
@@ -183,15 +188,25 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 		if cfg.Price != nil {
 			f.Result.CostUSD = cfg.Price.Cost(f.Result.Usage, true)
 		}
+		budget.add(f.Result.CostUSD, 0)
 		total.Add(f.Result.Usage)
 		rep.Results = append(rep.Results, f.Result)
 		fmt.Fprintf(cfg.Log, "%s\n", summarize(f.Result))
 	}
-	if _, err := finishRun(ctx, rep, cfg, nil); err != nil { // cfg.rankWith is nil: no sync ranking here
+	// The report now holds every judged frame: save it, then drop the judge state.
+	// The ranking below can stop (Ctrl-C while polling) after that, and a resume
+	// that found both would add the frames twice.
+	rep.Generated = time.Now()
+	if err := rep.Save(cfg.ReportPath); err != nil {
 		return rep, total, err
 	}
-	os.Remove(statePath) // the report now holds everything
-	return rep, total, nil
+	os.Remove(statePath)
+	if cfg.Rank && !cfg.DryRun {
+		cfg.rankWith = batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg)}
+	}
+	used, err := finishRun(ctx, rep, cfg, budget)
+	total.Add(used)
+	return rep, total, err
 }
 
 // evalRequest builds a frame's evaluation request.
@@ -241,14 +256,17 @@ func prepareRound(cfg Config, files []string, st *batchState, build func(*prepar
 	return reqs
 }
 
-// submit sends requests in size-capped chunks, recording each batch before and
-// after its create call.
-func submit(ctx context.Context, cfg Config, client BatchClient, st *batchState, reqs []llm.BatchRequest, round int, save func() error) error {
+// submit sends requests in size-capped chunks, recording each batch in recs (and
+// saving) before and after its create call. what ("judge", "rank") is for the log.
+func submit(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchRecord, reqs []llm.BatchRequest, what string, round int, save func() error) error {
 	limit := cfg.BatchChunkBytes
 	if limit <= 0 {
 		limit = defaultChunkBytes
 	}
 	for len(reqs) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err // nothing sent for this chunk: no record, nothing to refuse later
+		}
 		n, size := 0, 0
 		for n < len(reqs) && n < maxBatchRequests {
 			size += requestSize(reqs[n])
@@ -263,13 +281,13 @@ func submit(ctx context.Context, cfg Config, client BatchClient, st *batchState,
 		for _, r := range chunk {
 			rec.CustomIDs = append(rec.CustomIDs, r.CustomID)
 		}
-		st.Batches = append(st.Batches, rec)
+		*recs = append(*recs, rec)
 		if err := save(); err != nil {
 			return err
 		}
 		id, err := client.SubmitBatch(ctx, chunk)
 		if errors.Is(err, llm.ErrRejected) {
-			st.Batches = st.Batches[:len(st.Batches)-1] // definitively refused: nothing was created
+			*recs = (*recs)[:len(*recs)-1] // definitively refused: nothing was created
 			if serr := save(); serr != nil {
 				return serr
 			}
@@ -284,7 +302,7 @@ func submit(ctx context.Context, cfg Config, client BatchClient, st *batchState,
 		if err := save(); err != nil {
 			return err
 		}
-		fmt.Fprintf(cfg.Log, "submitted batch %s (round %d, %d requests)\n", id, round, len(chunk))
+		fmt.Fprintf(cfg.Log, "submitted batch %s (%s round %d, %d requests)\n", id, what, round, len(chunk))
 	}
 	return nil
 }
@@ -304,22 +322,9 @@ func collect(ctx context.Context, cfg Config, client BatchClient, st *batchState
 		if b.Status != "submitted" {
 			continue
 		}
-		var status llm.BatchStatus
-		for {
-			var err error
-			status, err = client.BatchStatus(ctx, b.ID)
-			if err != nil {
-				return fmt.Errorf("batch %s: %w (state saved; rerun with --batch --resume to re-attach)", b.ID, err)
-			}
-			if status.Ended {
-				break
-			}
-			fmt.Fprintf(cfg.Log, "batch %s: %s\n", b.ID, counts(status.Counts))
-			select {
-			case <-time.After(cfg.BatchPoll):
-			case <-ctx.Done():
-				return fmt.Errorf("%w (state saved; rerun with --batch --resume to re-attach)", ctx.Err())
-			}
+		status, err := await(ctx, cfg, client, b.ID)
+		if err != nil {
+			return fmt.Errorf("%w (state saved; rerun with --batch --resume to re-attach)", err)
 		}
 		schemaFor := func(id string) map[string]any {
 			if strings.HasPrefix(id, "L-") {
@@ -327,7 +332,7 @@ func collect(ctx context.Context, cfg Config, client BatchClient, st *batchState
 			}
 			return eval.EvaluationSchema()
 		}
-		err := client.BatchResults(ctx, status.ResultsURL, schemaFor, func(r llm.BatchResult) { applyResult(cfg, st, r) })
+		err = client.BatchResults(ctx, status.ResultsURL, schemaFor, func(r llm.BatchResult) { applyResult(cfg, st, r) })
 		if err != nil {
 			return fmt.Errorf("batch %s results: %w (rerun with --batch --resume)", b.ID, err)
 		}
@@ -337,6 +342,26 @@ func collect(ctx context.Context, cfg Config, client BatchClient, st *batchState
 		}
 	}
 	return nil
+}
+
+// await polls batch id every cfg.BatchPoll until it ends. Once ctx is cancelled it
+// returns ctx's error.
+func await(ctx context.Context, cfg Config, client BatchClient, id string) (llm.BatchStatus, error) {
+	for {
+		status, err := client.BatchStatus(ctx, id)
+		if err != nil {
+			return status, fmt.Errorf("batch %s: %w", id, err)
+		}
+		if status.Ended {
+			return status, nil
+		}
+		fmt.Fprintf(cfg.Log, "batch %s: %s\n", id, counts(status.Counts))
+		select {
+		case <-time.After(cfg.BatchPoll):
+		case <-ctx.Done():
+			return status, ctx.Err()
+		}
+	}
 }
 
 func counts(c map[string]int) string {
@@ -406,8 +431,8 @@ func loadBatchState(path string) (*batchState, error) {
 	return &st, nil
 }
 
-// saveBatchState writes atomically: a torn state file could lose a batch ID.
-func saveBatchState(path string, st *batchState) error {
+// saveState writes a batch state atomically: a torn state file could lose a batch ID.
+func saveState(path string, st any) error {
 	b, err := json.MarshalIndent(st, "", " ")
 	if err != nil {
 		return err

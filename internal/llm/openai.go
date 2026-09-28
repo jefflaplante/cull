@@ -201,7 +201,8 @@ func readCompletion(r io.Reader) (*Response, error) {
 		Usage *openaiUsage `json:"usage"`
 	}
 	if err := json.NewDecoder(r).Decode(&c); err != nil {
-		return nil, &transportError{fmt.Errorf("decode response: %w", err)}
+		// A 200 that isn't JSON (a proxy page, a wrong --base-url) won't fix itself.
+		return nil, fmt.Errorf("decode response (is --base-url an OpenAI-compatible /v1 endpoint?): %w", err)
 	}
 	if len(c.Choices) == 0 {
 		return nil, fmt.Errorf("response has no choices")

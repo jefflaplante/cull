@@ -8,6 +8,7 @@ import (
 
 func newScanCmd(so *sharedOpts) *cobra.Command {
 	var concurrency int
+	var rawClip bool
 	cmd := &cobra.Command{
 		Use:   "scan <dir>",
 		Short: "Extract and measure previews without calling the API",
@@ -26,6 +27,7 @@ Use it to confirm the previews are large enough for focus judgement, and with
 			}
 			cfg.DryRun = true
 			cfg.Concurrency = concurrency
+			cfg.RawClip = rawClip
 			rep, usage, err := runPipeline(cmd, cfg, nil)
 			printSummary(cmd, cfg.ReportPath, rep, usage, "")
 			if rep != nil {
@@ -34,6 +36,7 @@ Use it to confirm the previews are large enough for focus judgement, and with
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&rawClip, "raw-clip", false, "also measure highlight clipping in the raw data (~0.8 s/frame)")
 	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 4, "parallel extractions (~1 GB RAM each for 60MP previews)")
 	return cmd
 }

@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/jefflaplante/gophotocull/internal/dng"
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/focus"
 	"github.com/jefflaplante/gophotocull/internal/imageprep"
@@ -314,6 +315,9 @@ func TestFocusTargetFlow(t *testing.T) {
 			if !strings.Contains(requestText(rb.evalReq), c.wantText) {
 				t.Fatalf("evaluation request lacks %q:\n%s", c.wantText, requestText(rb.evalReq))
 			}
+			if c.detect != nil && c.wantSource != "face" && ft.FaceQ != 30 {
+				t.Fatalf("best sub-threshold face score not recorded: face_q=%v", ft.FaceQ)
+			}
 			switch c.wantSource {
 			case "face":
 				if ft.FaceQ != 120 || ft.Faces != 1 || ft.Box == nil || ft.Box.Left != 0.25 {
@@ -328,7 +332,7 @@ func TestFocusTargetFlow(t *testing.T) {
 	}
 }
 
-func TestReportV2OnDisk(t *testing.T) {
+func TestReportOnDisk(t *testing.T) {
 	dir := t.TempDir()
 	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
 	c := cfg(dir)
@@ -338,7 +342,7 @@ func TestReportV2OnDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(c.ReportPath)
-	for _, want := range []string{`"schema_version": 2`, `"backend": "openai"`, `"focus_target"`, `"source": "none"`} {
+	for _, want := range []string{fmt.Sprintf(`"schema_version": %d`, report.SchemaVersion), `"backend": "openai"`, `"focus_target"`, `"source": "none"`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("report lacks %s", want)
 		}
@@ -351,6 +355,7 @@ func TestSaveInputsRecordsExactlyWhatIsSent(t *testing.T) {
 		texturedDNG(t, filepath.Join(dir, "L1000001.DNG"))
 		c := cfg(dir)
 		c.WriteXMP, c.FaceMinQ, c.DryRun, c.SaveInputs = false, 80, dry, out
+		c.LandedWithSubject = true // record every kind of part
 		c.detect = func(*imageprep.Frame) []focus.Face {
 			return []focus.Face{{Rect: image.Rect(400, 300, 600, 500), Q: 120}}
 		}
@@ -387,6 +392,82 @@ func TestSaveInputsRecordsExactlyWhatIsSent(t *testing.T) {
 		}
 		if !strings.Contains(rec.Parts[len(rec.Parts)-1].Text, "mean luma") {
 			t.Fatalf("dry=%v: last part is not the stats text: %+v", dry, rec.Parts[len(rec.Parts)-1])
+		}
+	}
+}
+
+func TestStatsTextIncludesShootingContext(t *testing.T) {
+	f, err := imageprep.Decode(func() []byte {
+		var b bytes.Buffer
+		jpeg.Encode(&b, image.NewGray(image.Rect(0, 0, 64, 32)), nil)
+		return b.Bytes()
+	}(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := &dng.Exif{ExposureTime: 1.0 / 125, FNumber: 4.8, FNumberEstimated: true, ISO: 400, FocalLength: 35}
+	got := statsText(f, imageprep.Measure(f), ex, nil)
+	if !strings.Contains(got, "shooting: 1/125 s, ~f/4.8 (camera estimate), ISO 400, 35 mm") {
+		t.Fatalf("stats text: %s", got)
+	}
+	if got := statsText(f, imageprep.Measure(f), nil, nil); strings.Contains(got, "shooting") {
+		t.Fatalf("no exif should add no shooting line: %s", got)
+	}
+}
+
+func TestBudgetStopKeepsResultsAndRecordsCost(t *testing.T) {
+	dir := fourFiles(t)
+	c := cfg(dir)
+	c.Concurrency, c.WriteXMP = 1, false
+	c.Price = &llm.Price{In: 10_000} // fakeBackend uses 100 input tokens per call: $1 a frame
+	c.MaxCost = 2
+	rep, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
+	if !errors.Is(err, llm.ErrBudget) {
+		t.Fatalf("want ErrBudget, got %v", err)
+	}
+	if len(rep.Results) != 2 || rep.Results[0].CostUSD != 1 {
+		t.Fatalf("results=%d cost=%v", len(rep.Results), rep.Results[0].CostUSD)
+	}
+}
+
+func TestResumeAfterScanSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	c := cfg(dir)
+	c.DryRun = true
+	if _, _, err := Run(context.Background(), c, nil); err != nil {
+		t.Fatal(err)
+	}
+	c.DryRun, c.Resume, c.Backend, c.Model = false, true, "anthropic", "claude-sonnet-5"
+	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err == nil || !strings.Contains(err.Error(), "a scan report") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestLandedTileOnlyWithoutSubjectByDefault(t *testing.T) {
+	face := func(*imageprep.Frame) []focus.Face {
+		return []focus.Face{{Rect: image.Rect(400, 300, 600, 500), Q: 120}}
+	}
+	for _, c := range []struct {
+		name        string
+		detect      func(*imageprep.Frame) []focus.Face
+		withSubject bool
+		wantLanded  bool
+	}{
+		{"face, default: no landed tile", face, false, false},
+		{"face, opted in: landed tile", face, true, true},
+		{"no face: landed tile", func(*imageprep.Frame) []focus.Face { return nil }, false, true},
+	} {
+		dir := t.TempDir()
+		texturedDNG(t, filepath.Join(dir, "L1000001.DNG"))
+		conf := cfg(dir)
+		conf.WriteXMP, conf.FaceMinQ, conf.detect, conf.LandedWithSubject = false, 80, c.detect, c.withSubject
+		rb := &routedBackend{}
+		if _, _, err := Run(context.Background(), conf, rb); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(requestText(rb.evalReq), "where focus most likely landed"); got != c.wantLanded {
+			t.Errorf("%s: landed tile sent = %v", c.name, got)
 		}
 	}
 }

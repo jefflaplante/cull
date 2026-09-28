@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -30,9 +32,18 @@ type cullOpts struct {
 	xmpDevelop    bool
 	overwriteXMP  bool
 	moveCulled    bool
-	minCropArea   float64
-	checkpoint    int
-	csv           string
+	rawClip       bool
+	batch         bool
+	batchPoll     time.Duration
+	estimate      bool
+	maxCost       float64
+
+	escalateBackend string
+	escalateModel   string
+	escalateOnList  string
+	policy          policyFlags
+	checkpoint      int
+	csv             string
 }
 
 func newCullCmd(so *sharedOpts) *cobra.Command {
@@ -68,8 +79,8 @@ Backends (--backend):
 			if o.overwriteXMP && !o.writeXMP {
 				return fmt.Errorf("--overwrite-xmp requires --write-xmp")
 			}
-			if o.minCropArea <= 0 || o.minCropArea > 1 {
-				return fmt.Errorf("--min-crop-area must be in (0, 1]")
+			if _, err := o.policy.policy(); err != nil {
+				return err
 			}
 			if o.concurrency < 0 {
 				return fmt.Errorf("--concurrency must be >= 0 (0 = backend default)")
@@ -79,6 +90,28 @@ Backends (--backend):
 			}
 			if o.backend == "openai" && o.model == "" {
 				return fmt.Errorf("--backend openai requires --model (see GET <base-url>/models)")
+			}
+			if o.batch && o.backend != "anthropic" {
+				return fmt.Errorf("--batch uses the Message Batches API: --backend anthropic only")
+			}
+			if o.batch && o.escalateBackend != "" {
+				return fmt.Errorf("--batch can't be combined with --escalate-backend (escalate with a synchronous run afterwards)")
+			}
+			if o.escalateBackend != "" {
+				if _, ok := backendDefaults[o.escalateBackend]; !ok {
+					return fmt.Errorf("unknown --escalate-backend %q (want anthropic, claude-code, or openai)", o.escalateBackend)
+				}
+				if o.escalateModel == "" {
+					return fmt.Errorf("--escalate-backend requires --escalate-model")
+				}
+				for _, s := range strings.Split(o.escalateOnList, ",") {
+					if !escalateOn[strings.TrimSpace(s)] {
+						return fmt.Errorf("--escalate-on %q: want a comma list of acceptable, soft, missed_focus, motion_blur, eyes_closed", s)
+					}
+				}
+			}
+			if o.maxCost < 0 {
+				return fmt.Errorf("--max-cost must be >= 0")
 			}
 			if o.quotaStop <= 0 || o.quotaStop > 1 {
 				return fmt.Errorf("--quota-stop must be in (0, 1]")
@@ -93,10 +126,31 @@ Backends (--backend):
 			if err != nil {
 				return err
 			}
+			if o.model == "" {
+				o.model = backendDefaults[o.backend].model
+			}
+			price, priced := llm.PriceFor(o.backend, o.model)
+			if o.estimate || priced {
+				files, err := pipeline.Discover(cfg.Dir, cfg.Recursive)
+				if err != nil {
+					return err
+				}
+				printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch)
+				if o.estimate {
+					return nil
+				}
+			}
 			b, auth, err := o.newBackend(cmd)
 			if err != nil {
 				return err
 			}
+			if priced {
+				cfg.Price = &price
+			}
+			if cfg.Escalate, err = o.escalation(cmd); err != nil {
+				return err
+			}
+			cfg.MaxCost = o.maxCost
 			fmt.Fprintf(cmd.ErrOrStderr(), "backend: %s, model: %s, %s\n", b.Name(), o.model, auth)
 
 			cfg.Backend = b.Name()
@@ -111,11 +165,22 @@ Backends (--backend):
 			cfg.XMPDevelop = o.xmpDevelop
 			cfg.OverwriteXMP = o.overwriteXMP
 			cfg.MoveCulled = o.moveCulled
-			cfg.Policy = eval.Policy{MinCropArea: o.minCropArea}
+			cfg.RawClip = o.rawClip
+			cfg.Policy, _ = o.policy.policy() // validated in PreRunE
 			cfg.CheckpointN = o.checkpoint
 
-			rep, usage, err := runPipeline(cmd, cfg, b)
+			var rep *report.Report
+			var usage eval.Usage
+			if o.batch {
+				cfg.Batch, cfg.BatchPoll, cfg.Log = true, o.batchPoll, cmd.ErrOrStderr()
+				rep, usage, err = pipeline.RunBatch(cmd.Context(), cfg, b.(*llm.Anthropic))
+			} else {
+				rep, usage, err = runPipeline(cmd, cfg, b)
+			}
 			printSummary(cmd, cfg.ReportPath, rep, usage, b.Name())
+			if errors.Is(err, llm.ErrBudget) {
+				fmt.Fprintln(cmd.ErrOrStderr(), "stopped at --max-cost; rerun with --resume (and a higher --max-cost) to continue")
+			}
 			if errors.Is(err, llm.ErrQuotaStop) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "stopped early to protect your subscription quota; rerun later with --resume")
 			}
@@ -136,6 +201,14 @@ Backends (--backend):
 	f.BoolVar(&o.openaiStream, "openai-stream", true, "stream and hang up once the JSON closes (openai backend)")
 	f.StringVar(&o.claudeBin, "claude-bin", "claude", "Claude Code executable (claude-code backend)")
 	f.Float64Var(&o.quotaStop, "quota-stop", 0.9, "stop when this fraction of the 5-hour subscription window is used (claude-code backend)")
+	f.StringVar(&o.escalateBackend, "escalate-backend", "", "re-evaluate doubtful frames on a second backend (anthropic, claude-code, openai)")
+	f.StringVar(&o.escalateModel, "escalate-model", "", "model for --escalate-backend (required with it)")
+	f.StringVar(&o.escalateOnList, "escalate-on", "soft,missed_focus,motion_blur,eyes_closed", "first-pass outcomes that escalate")
+	f.BoolVar(&o.rawClip, "raw-clip", true, "measure highlight clipping in the raw data (~0.8 s/frame); the preview overstates it")
+	f.BoolVar(&o.batch, "batch", false, "use the Message Batches API (anthropic): half price, results within minutes to hours; Ctrl-C is safe, resume re-attaches")
+	f.DurationVar(&o.batchPoll, "batch-poll", 30*time.Second, "how often --batch checks progress")
+	f.BoolVar(&o.estimate, "estimate", false, "print the cost estimate and exit (no model calls, no key needed)")
+	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price (0 = no limit); resume later")
 	f.StringVar(&o.locate, "locate", "model", "when no face is found, ask the model for the focus target: model or off")
 	f.IntVarP(&o.concurrency, "concurrency", "j", 0, "parallel evaluations (0 = backend default: anthropic 4, claude-code 2, openai 4)")
 	f.BoolVar(&o.resume, "resume", false, "skip files already evaluated in the existing report")
@@ -143,7 +216,7 @@ Backends (--backend):
 	f.BoolVar(&o.xmpDevelop, "xmp-develop", false, "also write Adobe crs exposure/crop (not applied by Capture One)")
 	f.BoolVar(&o.overwriteXMP, "overwrite-xmp", false, "overwrite existing sidecars (default: never clobber)")
 	f.BoolVar(&o.moveCulled, "move-culled", false, "move frames decided cull (with their .xmp) into a culled/ folder beside them; undo with 'gophotocull restore'. Use before importing into Capture One")
-	f.Float64Var(&o.minCropArea, "min-crop-area", 0.6, "reject suggested crops retaining less than this fraction of the frame")
+	o.policy.register(f)
 	f.IntVar(&o.checkpoint, "checkpoint", 25, "save the report every N results")
 	f.StringVar(&o.csv, "csv", "", "also write a CSV summary to this path")
 	cmd.MarkFlagFilename("api-key-file")
@@ -169,20 +242,26 @@ func (o *cullOpts) newBackend(cmd *cobra.Command) (llm.Backend, string, error) {
 	if o.model == "" {
 		o.model = backendDefaults[o.backend].model
 	}
-	switch o.backend {
+	return o.buildBackend(cmd, o.backend, o.model)
+}
+
+// buildBackend constructs a backend and describes its credential source without
+// ever printing a key.
+func (o *cullOpts) buildBackend(cmd *cobra.Command, name, model string) (llm.Backend, string, error) {
+	switch name {
 	case "claude-code":
 		path, err := exec.LookPath(o.claudeBin)
 		if err != nil {
 			return nil, "", fmt.Errorf("claude binary %q not found: %w", o.claudeBin, err)
 		}
-		return llm.NewClaudeCode(path, o.model, o.quotaStop), "auth: Claude subscription via " + path, nil
+		return llm.NewClaudeCode(path, model, o.quotaStop), "auth: Claude subscription via " + path, nil
 	case "openai":
 		key, source, warnings, err := config.LoadOpenAIKey(o.openaiKeyFile)
 		if err != nil {
 			return nil, "", err
 		}
 		warn(cmd, warnings)
-		b := llm.NewOpenAI(o.baseURL, key, o.model)
+		b := llm.NewOpenAI(o.baseURL, key, model)
 		b.Stream = o.openaiStream
 		return b, "endpoint: " + b.BaseURL + ", key: " + source, nil
 	default:
@@ -191,8 +270,45 @@ func (o *cullOpts) newBackend(cmd *cobra.Command) (llm.Backend, string, error) {
 			return nil, "", err
 		}
 		warn(cmd, warnings)
-		return llm.NewAnthropic(key, o.model), "api key: " + source, nil
+		return llm.NewAnthropic(key, model), "api key: " + source, nil
 	}
+}
+
+// escalateOn are the first-pass outcomes --escalate-on accepts.
+var escalateOn = map[string]bool{"acceptable": true, "soft": true, "missed_focus": true, "motion_blur": true, "eyes_closed": true}
+
+func (o *cullOpts) escalation(cmd *cobra.Command) (*pipeline.Escalation, error) {
+	if o.escalateBackend == "" {
+		return nil, nil
+	}
+	b, auth, err := o.buildBackend(cmd, o.escalateBackend, o.escalateModel)
+	if err != nil {
+		return nil, fmt.Errorf("escalation: %w", err)
+	}
+	e := &pipeline.Escalation{Backend: b, Model: o.escalateModel, On: map[string]bool{}}
+	if p, ok := llm.PriceFor(o.escalateBackend, o.escalateModel); ok {
+		e.Price = &p
+	}
+	for _, s := range strings.Split(o.escalateOnList, ",") {
+		e.On[strings.TrimSpace(s)] = true
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "escalation: %s on %s, %s\n", e.Label(), o.escalateOnList, auth)
+	return e, nil
+}
+
+// printEstimate projects list-price cost from measured per-frame token use.
+func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch bool) {
+	w := cmd.ErrOrStderr()
+	if !priced {
+		fmt.Fprintf(w, "estimate: %d frames on %s (%s): no per-token cost (%s)\n", n, backend, model, backendDefaults[backend].basis)
+		return
+	}
+	usd, in, out := llm.Estimate(n, p, batch)
+	rate := "list price"
+	if batch {
+		rate = "batch price (50%)"
+	}
+	fmt.Fprintf(w, "estimate: %d frames × ~7k in / ~1k out tokens ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", n, in, out, usd, rate, model)
 }
 
 func warn(cmd *cobra.Command, warnings []string) {
@@ -207,6 +323,18 @@ func runPipeline(cmd *cobra.Command, cfg pipeline.Config, b llm.Backend) (*repor
 }
 
 func printSummary(cmd *cobra.Command, path string, rep *report.Report, usage eval.Usage, backend string) {
+	defer func() {
+		if rep == nil {
+			return
+		}
+		cost := 0.0
+		for _, r := range rep.Results {
+			cost += r.CostUSD
+		}
+		if cost > 0 {
+			fmt.Fprintf(cmd.ErrOrStderr(), "cost in report: $%.2f at list price\n", cost)
+		}
+	}()
 	if rep == nil {
 		return
 	}

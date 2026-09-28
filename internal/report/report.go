@@ -11,11 +11,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jefflaplante/gophotocull/internal/dng"
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/imageprep"
+	"github.com/jefflaplante/gophotocull/internal/rawclip"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 type PreviewInfo struct {
 	Width       int    `json:"width"`
@@ -24,11 +26,25 @@ type PreviewInfo struct {
 	Source      string `json:"source"`
 }
 
+// Group places a frame in a burst of near-duplicates.
+type Group struct {
+	ID   int    `json:"id"`
+	Size int    `json:"size"`
+	Best string `json:"best"` // base name of the frame kept from the burst
+}
+
+// FirstPass is the assessment a frame had before it was escalated to a second model.
+type FirstPass struct {
+	Backend    string           `json:"backend"`
+	Model      string           `json:"model"`
+	Evaluation *eval.Evaluation `json:"evaluation"`
+}
+
 // FocusTarget records what the sharpness judgement was based on.
 type FocusTarget struct {
 	Source           string        `json:"source"`                      // face | model | none
 	Box              *eval.NormBox `json:"box,omitempty"`               // normalized, display orientation
-	FaceQ            float64       `json:"face_q,omitempty"`            // pigo detection score
+	FaceQ            float64       `json:"face_q,omitempty"`            // best pigo score, even below --face-min-q
 	Faces            int           `json:"faces"`                       // confident faces found
 	Label            string        `json:"label,omitempty"`             // model's description of the subject
 	Reason           string        `json:"reason,omitempty"`            // why there is no subject crop
@@ -41,13 +57,19 @@ type Result struct {
 	Size        int64            `json:"size"`
 	ModTime     time.Time        `json:"mod_time"`
 	Preview     *PreviewInfo     `json:"preview,omitempty"`
+	Exif        *dng.Exif        `json:"exif,omitempty"`
 	Stats       *imageprep.Stats `json:"stats,omitempty"`
 	FocusTarget *FocusTarget     `json:"focus_target,omitempty"`
+	DHash       string           `json:"dhash,omitempty"` // 64-bit difference hash, hex
+	RawClip     *rawclip.Result  `json:"raw_clip,omitempty"`
+	Group       *Group           `json:"group,omitempty"`
 	Evaluation  *eval.Evaluation `json:"evaluation,omitempty"`
+	FirstPass   *FirstPass       `json:"first_pass,omitempty"` // set when escalated
 	Decision    eval.Decision    `json:"decision,omitempty"`
 	Reasons     []string         `json:"reasons,omitempty"`
 	Fixups      []string         `json:"fixups,omitempty"`
 	Usage       eval.Usage       `json:"usage"`
+	CostUSD     float64          `json:"cost_usd,omitempty"` // list price of this frame's calls
 	XMP         string           `json:"xmp,omitempty"`
 	MovedTo     string           `json:"moved_to,omitempty"` // set by --move-culled; cleared by restore
 	Error       string           `json:"error,omitempty"`
@@ -64,6 +86,7 @@ type Report struct {
 	SchemaVersion int       `json:"schema_version"`
 	Generated     time.Time `json:"generated"`
 	Backend       string    `json:"backend"`
+	Escalation    string    `json:"escalation,omitempty"` // "backend/model" frames were escalated to
 	Model         string    `json:"model"`
 	Dir           string    `json:"dir"`
 	Results       []Result  `json:"results"`
@@ -133,4 +156,12 @@ func (r *Report) WriteCSV(path string) error {
 	}
 	w.Flush()
 	return w.Error()
+}
+
+// Facts are the measurements the policy combines with a frame's assessment.
+func (r Result) Facts() eval.Facts {
+	if r.RawClip == nil {
+		return eval.Facts{}
+	}
+	return eval.Facts{RawKnown: true, RawClipPct: r.RawClip.HighlightPct}
 }

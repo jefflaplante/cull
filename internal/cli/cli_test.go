@@ -185,7 +185,7 @@ func tinyDNG(t *testing.T, path string) {
 const fakeClaudeCull = `#!/bin/sh
 cat > /dev/null
 echo '{"type":"system","subtype":"init","apiKeySource":"none"}'
-echo '{"type":"result","is_error":false,"structured_output":{"sharpness":{"score":2,"status":"missed_focus","focus_target":"x"},"exposure":{"score":7,"status":"good","ev_adjust":0,"clipping":"none","reason":""},"composition":{"score":6,"status":"good","issues":[],"crop":{"apply":false,"left":0,"top":0,"right":1,"bottom":1},"straighten_degrees":0},"notes":""},"usage":{"input_tokens":10,"output_tokens":5}}'
+echo '{"type":"result","is_error":false,"structured_output":{"sharpness":{"score":2,"status":"missed_focus","focus_target":"x"},"exposure":{"score":7,"status":"good","ev_adjust":0,"clipping":"none","reason":""},"composition":{"score":6,"status":"good","issues":[],"crop":{"apply":false,"left":0,"top":0,"right":1,"bottom":1},"straighten_degrees":0},"people":{"present":true,"eyes":"open","expression":"good"},"notes":""},"usage":{"input_tokens":10,"output_tokens":5}}'
 `
 
 func TestCullMoveCulledThenRestoreEndToEnd(t *testing.T) {
@@ -216,5 +216,139 @@ func TestCullMoveCulledThenRestoreEndToEnd(t *testing.T) {
 	}
 	if _, err := os.Stat(frame); err != nil {
 		t.Fatal("frame not restored")
+	}
+}
+
+func TestPolicyFlagValidation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	for name, args := range map[string][]string{
+		"bad eyes action":       {"cull", "--eyes-closed", "delete", dir},
+		"bad duplicates":        {"decide", "--duplicates", "burn", dir},
+		"bad raw action":        {"cull", "--raw-clipped", "maybe", dir},
+		"batch needs anthropic": {"cull", "--batch", "--backend", "openai", "--model", "m", dir},
+		"batch with escalation": {"cull", "--batch", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", dir},
+		"bad raw threshold":     {"cull", "--raw-clip-threshold", "150", dir},
+		"negative burst gap":    {"scan", "--burst-gap", "-1s", dir},
+		"bad escalate backend":  {"cull", "--escalate-backend", "gpt", "--escalate-model", "x", dir},
+		"escalate needs model":  {"cull", "--escalate-backend", "anthropic", dir},
+		"bad escalate-on":       {"cull", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", "--escalate-on", "blurry", dir},
+		"negative sharp floor":  {"cull", "--review-below-sharpness", "-1", dir},
+	} {
+		if _, err := run(t, args...); err == nil || strings.Contains(err.Error(), "unknown flag") {
+			t.Errorf("%s: want a validation error, got %v", name, err)
+		}
+	}
+}
+
+func TestCullEstimateNeedsNoKeyAndCallsNothing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	tinyDNG(t, filepath.Join(dir, "L2.DNG"))
+	out, err := run(t, "cull", "--estimate", dir)
+	if err != nil || !strings.Contains(out, "estimate: 2 frames") || !strings.Contains(out, "$") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "gophotocull-report.json")); err == nil {
+		t.Fatal("--estimate must not run the pipeline")
+	}
+	out, err = run(t, "cull", "--estimate", "--backend", "openai", "--model", "m", dir)
+	if err != nil || !strings.Contains(out, "no per-token cost") {
+		t.Fatalf("openai estimate: err=%v\n%s", err, out)
+	}
+}
+
+func TestDecideCommand(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if _, err := run(t, "decide", t.TempDir()); err == nil || !strings.Contains(err.Error(), "no such file") {
+		t.Fatalf("missing report: %v", err)
+	}
+	dir := t.TempDir()
+	frame := filepath.Join(dir, "L1000001.DNG")
+	tinyDNG(t, frame)
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("cull: %v\n%s", err, out)
+	}
+	out, err := run(t, "decide", "--eyes-closed", "cull", dir)
+	if err != nil || !strings.Contains(out, "decided 1 frame(s); no decision changed") {
+		t.Fatalf("decide: %v\n%s", err, out)
+	}
+}
+
+func TestReviewCommandBuildsSheetNextToReport(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if _, err := run(t, "review", t.TempDir()); err == nil {
+		t.Fatal("review without a report should fail")
+	}
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	if out, err := run(t, "scan", dir); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out)
+	}
+	out, err := run(t, "review", dir)
+	if err != nil {
+		t.Fatalf("review: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "gophotocull-review", "index.html")); err != nil || !strings.Contains(out, "index.html") {
+		t.Fatalf("no sheet:\n%s", out)
+	}
+}
+
+func TestCalibrateCommand(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("cull: %v\n%s", err, out)
+	}
+	labels := filepath.Join(t.TempDir(), "labels.csv")
+	os.WriteFile(labels, []byte("file,label\nL1000001.DNG,keep\n"), 0o644)
+	out, err := run(t, "calibrate", "--labels", labels, filepath.Join(dir, "gophotocull-report.json"))
+	if err != nil || !strings.Contains(out, "false-cull rate (keep → cull):   1/1") || !strings.Contains(out, "sweep") {
+		t.Fatalf("calibrate: %v\n%s", err, out)
+	}
+	if _, err := run(t, "calibrate", filepath.Join(dir, "gophotocull-report.json")); err == nil {
+		t.Fatal("calibrate without --labels should fail")
+	}
+}
+
+func TestRawClipFlagDefaults(t *testing.T) {
+	for _, c := range NewRootCmd().Commands() {
+		want := map[string]string{"cull": "true", "scan": "false"}[c.Name()]
+		if want == "" {
+			continue
+		}
+		if f := c.Flags().Lookup("raw-clip"); f == nil || f.DefValue != want {
+			t.Errorf("%s --raw-clip default: %+v, want %s", c.Name(), f, want)
+		}
+	}
+}
+
+func TestApplyC1DryRunProbeAndRun(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("cull: %v\n%s", err, out)
+	}
+	out, err := run(t, "apply-c1", dir)
+	if err != nil || !strings.Contains(out, `tell application "Capture One"`) || !strings.Contains(out, `"L1000001.DNG"`) || !strings.Contains(out, "set rating of v to 1") {
+		t.Fatalf("dry run: %v\n%s", err, out)
+	}
+	if out, err := run(t, "apply-c1", "--probe", dir); err != nil || !strings.Contains(out, "image name: ") {
+		t.Fatalf("probe: %v\n%s", err, out)
+	}
+	osa := filepath.Join(t.TempDir(), "osascript")
+	os.WriteFile(osa, []byte("#!/bin/sh\ncat >/dev/null\necho applied\n"), 0o755)
+	if out, err := run(t, "apply-c1", "--run", "--osascript", osa, dir); err != nil || !strings.Contains(out, "applied") {
+		t.Fatalf("run: %v\n%s", err, out)
 	}
 }

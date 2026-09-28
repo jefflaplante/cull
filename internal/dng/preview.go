@@ -92,7 +92,29 @@ func Best(path string, minLongEdge int) (*Preview, error) {
 
 // Extract parses TIFF structure directly. It reads only IFDs and the preview bytes,
 // never the raw image data, so memory stays bounded for 100MB+ files.
+// PreviewAtLeast returns the smallest embedded preview whose long edge is at
+// least minLongEdge, or the largest if none is. Thumbnails use it to decode the
+// M11-P's 2112×1408 preview instead of the 60MP one.
+func PreviewAtLeast(path string, minLongEdge int) (*Preview, error) {
+	return pick(path, func(p, best *Preview) bool {
+		pOK, bOK := p.LongEdge() >= minLongEdge, best.LongEdge() >= minLongEdge
+		switch {
+		case pOK != bOK:
+			return pOK
+		case pOK:
+			return p.LongEdge() < best.LongEdge()
+		}
+		return p.LongEdge() > best.LongEdge()
+	})
+}
+
+// Extract returns the largest embedded preview.
 func Extract(path string) (*Preview, error) {
+	return pick(path, func(p, best *Preview) bool { return p.Width*p.Height > best.Width*best.Height })
+}
+
+// pick reads every decodable embedded JPEG preview and keeps the one preferred.
+func pick(path string, prefer func(p, best *Preview) bool) (*Preview, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -119,8 +141,9 @@ func Extract(path string) (*Preview, error) {
 		if err != nil {
 			continue
 		}
-		if best == nil || cfg.Width*cfg.Height > best.Width*best.Height {
-			best = &Preview{Data: data, Width: cfg.Width, Height: cfg.Height, Orientation: orientation, Source: "tiff-ifd"}
+		p := &Preview{Data: data, Width: cfg.Width, Height: cfg.Height, Orientation: orientation, Source: "tiff-ifd"}
+		if best == nil || prefer(p, best) {
+			best = p
 		}
 	}
 	if best == nil {
@@ -129,7 +152,8 @@ func Extract(path string) (*Preview, error) {
 	return best, nil
 }
 
-func findCandidates(r io.ReaderAt, size int64) ([]candidate, int, error) {
+// newTIFFReader checks the TIFF header and returns a reader plus IFD0's offset.
+func newTIFFReader(r io.ReaderAt, size int64) (*tiffReader, uint32, error) {
 	var hdr [8]byte
 	if _, err := r.ReadAt(hdr[:], 0); err != nil {
 		return nil, 0, fmt.Errorf("read header: %w", err)
@@ -146,12 +170,19 @@ func findCandidates(r io.ReaderAt, size int64) ([]candidate, int, error) {
 	if bo.Uint16(hdr[2:4]) != 42 {
 		return nil, 0, errors.New("unsupported TIFF variant (BigTIFF not supported)")
 	}
-	t := &tiffReader{r: r, bo: bo, size: size}
+	return &tiffReader{r: r, bo: bo, size: size}, bo.Uint32(hdr[4:8]), nil
+}
+
+func findCandidates(r io.ReaderAt, size int64) ([]candidate, int, error) {
+	t, ifd0, err := newTIFFReader(r, size)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	orientation := 1
 	var cands []candidate
 	visited := map[uint32]bool{}
-	queue := []uint32{bo.Uint32(hdr[4:8])}
+	queue := []uint32{ifd0}
 	first := true
 	for len(queue) > 0 && len(visited) < maxIFDs {
 		off := queue[0]

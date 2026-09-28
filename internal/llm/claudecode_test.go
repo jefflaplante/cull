@@ -155,3 +155,10 @@ func TestClaudeCodeResultWithoutInitAborts(t *testing.T) {
 		t.Fatalf("want ErrAbortRun when auth can't be confirmed, got %v", err)
 	}
 }
+
+func TestClaudeCodeAllowedWarningIsNotAStop(t *testing.T) {
+	bin, _ := setupFake(t, initEvent("none"), rateEvent("allowed_warning", 0.5), okResult)
+	if _, err := NewClaudeCode(bin, "sonnet", 0.9).Call(context.Background(), tinyRequest()); err != nil {
+		t.Fatalf("allowed_warning below the threshold must not stop the run: %v", err)
+	}
+}

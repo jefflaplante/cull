@@ -43,7 +43,10 @@ func writeIFD(buf *bytes.Buffer, entries []ent, next uint32) {
 }
 
 // Layout: IFD0 = small thumbnail (subfile 1) with SubIFDs -> [raw (subfile 0, JPEG), large preview (subfile 1)].
-func TestExtractPicksLargestReducedResolutionJPEG(t *testing.T) {
+// twoPreviewDNG writes a DNG with a 64×48 preview in IFD0, a 320×240 preview in
+// a SubIFD, and a JPEG-compressed raw (subfile 0) that must be ignored.
+func twoPreviewDNG(t *testing.T) string {
+	t.Helper()
 	thumb := mkJPEG(t, 64, 48)
 	large := mkJPEG(t, 320, 240)
 	rawJunk := mkJPEG(t, 640, 480) // JPEG-compressed but subfile 0: must be ignored
@@ -105,6 +108,11 @@ func TestExtractPicksLargestReducedResolutionJPEG(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return path
+}
+
+func TestExtractPicksLargestReducedResolutionJPEG(t *testing.T) {
+	path := twoPreviewDNG(t)
 	p, err := Extract(path)
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
@@ -122,5 +130,15 @@ func TestExtractRejectsNonTIFF(t *testing.T) {
 	os.WriteFile(path, []byte("not a tiff at all"), 0o644)
 	if _, err := Extract(path); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestPreviewAtLeastPicksSmallestLargeEnough(t *testing.T) {
+	path := twoPreviewDNG(t)
+	for _, c := range []struct{ min, want int }{{50, 64}, {100, 320}, {5000, 320}} {
+		p, err := PreviewAtLeast(path, c.min)
+		if err != nil || p.Width != c.want || p.Orientation != 6 {
+			t.Errorf("min %d: got %+v %v, want width %d", c.min, p, err, c.want)
+		}
 	}
 }

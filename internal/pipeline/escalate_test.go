@@ -1,0 +1,74 @@
+package pipeline
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/jefflaplante/gophotocull/internal/eval"
+	"github.com/jefflaplante/gophotocull/internal/llm"
+)
+
+type failingBackend struct{ calls int32 }
+
+func (f *failingBackend) Name() string { return "failing" }
+func (f *failingBackend) Call(context.Context, llm.Request) (*llm.Response, error) {
+	f.calls++
+	return nil, errors.New("upstream down")
+}
+
+func escalateCfg(dir string, esc llm.Backend) Config {
+	c := moveCfg(dir)
+	c.MoveCulled, c.Concurrency = false, 1
+	c.Price = &llm.Price{In: 10_000} // $1 per 100 input tokens
+	c.Escalate = &Escalation{Backend: esc, Model: "big", Price: &llm.Price{In: 20_000},
+		On: map[string]bool{"missed_focus": true, "soft": true}}
+	return c
+}
+
+func TestEscalationReevaluatesOnlyMatchingFrames(t *testing.T) {
+	dir, primary := shoot(t) // L1 missed_focus, L2 sharp, L3 soft
+	esc := &perFileBackend{} // answers sharp
+	rep, _, err := Run(context.Background(), escalateCfg(dir, esc), primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if esc.calls != 2 || rep.Escalation != "fake/big" {
+		t.Fatalf("escalation calls=%d label=%q", esc.calls, rep.Escalation)
+	}
+	l1 := result(t, rep, "L1000001.DNG")
+	if l1.Decision != eval.Keep || l1.FirstPass == nil || l1.FirstPass.Evaluation.Sharpness.Status != "missed_focus" {
+		t.Fatalf("L1: decision=%s first=%+v", l1.Decision, l1.FirstPass)
+	}
+	if l1.Usage.InputTokens != 200 || l1.CostUSD != 3 { // $1 first pass + $2 escalation
+		t.Fatalf("L1 usage=%+v cost=%v", l1.Usage, l1.CostUSD)
+	}
+	if l2 := result(t, rep, "L1000002.DNG"); l2.FirstPass != nil || l2.CostUSD != 1 {
+		t.Fatalf("L2 escalated or mispriced: %+v %v", l2.FirstPass, l2.CostUSD)
+	}
+}
+
+func TestEscalationFailureKeepsFirstPass(t *testing.T) {
+	dir, primary := shoot(t)
+	rep, _, err := Run(context.Background(), escalateCfg(dir, &failingBackend{}), primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l1 := result(t, rep, "L1000001.DNG")
+	if l1.Error != "" || l1.Decision != eval.Cull || !strings.Contains(strings.Join(l1.Fixups, ";"), "escalation failed") {
+		t.Fatalf("L1: error=%q decision=%s fixups=%v", l1.Error, l1.Decision, l1.Fixups)
+	}
+}
+
+func TestResumeRefusesDifferentEscalation(t *testing.T) {
+	dir, primary := shoot(t)
+	c := escalateCfg(dir, &perFileBackend{})
+	if _, _, err := Run(context.Background(), c, primary); err != nil {
+		t.Fatal(err)
+	}
+	c.Resume, c.Escalate = true, nil
+	if _, _, err := Run(context.Background(), c, primary); err == nil || !strings.Contains(err.Error(), "drop --resume") {
+		t.Fatalf("want refusal, got %v", err)
+	}
+}

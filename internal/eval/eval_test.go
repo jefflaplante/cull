@@ -133,3 +133,104 @@ func TestSanitizeDropsSmallCrop(t *testing.T) {
 		t.Fatalf("crop not dropped: %+v %v", e.Composition.Crop, notes)
 	}
 }
+
+func TestPolicyPeopleAndSharpnessThreshold(t *testing.T) {
+	eyes := func(status, eyes, expr string, score float64) *Evaluation {
+		return &Evaluation{
+			Sharpness: Sharpness{Status: status, Score: score},
+			Exposure:  Exposure{Status: "good"},
+			People:    People{Present: true, Eyes: eyes, Expression: expr},
+		}
+	}
+	cases := []struct {
+		name   string
+		p      Policy
+		e      *Evaluation
+		want   Decision
+		reason string
+	}{
+		{"eyes closed default reviews", Policy{}, eyes("sharp", "closed", "good", 8), Review, "eyes closed"},
+		{"eyes closed can cull", Policy{EyesClosed: ActionCull}, eyes("sharp", "closed", "good", 8), Cull, "eyes closed"},
+		{"eyes closed can be ignored", Policy{EyesClosed: ActionIgnore}, eyes("sharp", "closed", "good", 8), Keep, ""},
+		{"partial is a note", Policy{}, eyes("sharp", "partial", "good", 8), Keep, "partially closed"},
+		{"awkward expression is a note", Policy{}, eyes("sharp", "open", "awkward", 8), Keep, "expression"},
+		{"below sharpness threshold", Policy{ReviewBelowSharpness: 6}, eyes("acceptable", "open", "good", 5.5), Review, "below 6.0"},
+		{"threshold off by default", Policy{}, eyes("acceptable", "open", "good", 2), Keep, ""},
+		{"cull outranks review", Policy{}, eyes("missed_focus", "closed", "good", 2), Cull, "sharpness: missed_focus"},
+		{"no person, no eye rules", Policy{}, &Evaluation{Sharpness: Sharpness{Status: "sharp", Score: 9}, People: People{Eyes: "not_visible"}}, Keep, ""},
+	}
+	for _, c := range cases {
+		d, reasons := c.p.Decide(c.e)
+		joined := strings.Join(reasons, "; ")
+		if d != c.want || (c.reason != "" && !strings.Contains(joined, c.reason)) || (c.reason == "" && c.want == Keep && joined != "") {
+			t.Errorf("%s: got %s %q, want %s containing %q", c.name, d, joined, c.want, c.reason)
+		}
+	}
+}
+
+func TestParseAction(t *testing.T) {
+	for in, want := range map[string]Action{"ignore": ActionIgnore, "review": ActionReview, "cull": ActionCull} {
+		if got, err := ParseAction(in); err != nil || got != want {
+			t.Errorf("%s: %v %v", in, got, err)
+		}
+	}
+	if _, err := ParseAction("delete"); err == nil {
+		t.Error("delete accepted")
+	}
+}
+
+func TestEvaluationSchemaRequiresPeople(t *testing.T) {
+	if err := llm.Validate(evaluationSchema, []byte(evalJSON)); err == nil || !strings.Contains(err.Error(), "people") {
+		t.Fatalf("an evaluation without people must be rejected, got %v", err)
+	}
+}
+
+func TestApplyDuplicate(t *testing.T) {
+	for _, c := range []struct {
+		a    Action
+		in   Decision
+		want Decision
+	}{{"", Keep, Review}, {ActionCull, Keep, Cull}, {ActionIgnore, Keep, Keep}, {"", Cull, Cull}} {
+		d, reasons := Policy{Duplicates: c.a}.ApplyDuplicate(c.in, nil, "L1.DNG", 3)
+		if d != c.want || len(reasons) != 1 || !strings.Contains(reasons[0], "duplicate of L1.DNG (burst of 3)") {
+			t.Errorf("%q on %s: got %s %v", c.a, c.in, d, reasons)
+		}
+	}
+}
+
+func TestPolicyUsesRawClipping(t *testing.T) {
+	clipped := func() *Evaluation {
+		return &Evaluation{Sharpness: Sharpness{Status: "sharp", Score: 8}, Exposure: Exposure{Status: "clipped", Clipping: "highlights"}}
+	}
+	good := func() *Evaluation {
+		return &Evaluation{Sharpness: Sharpness{Status: "sharp", Score: 8}, Exposure: Exposure{Status: "good"}}
+	}
+	cases := []struct {
+		name   string
+		p      Policy
+		e      *Evaluation
+		f      Facts
+		want   Decision
+		reason string
+	}{
+		{"no raw data: preview clipping reviews", Policy{}, clipped(), Facts{}, Review, "verify against raw"},
+		{"raw has headroom: no review", Policy{}, clipped(), Facts{RawKnown: true, RawClipPct: 0.01}, Keep, "raw retains highlights"},
+		{"raw clipped: review by default", Policy{}, clipped(), Facts{RawKnown: true, RawClipPct: 2}, Review, "raw highlights clipped: 2.00%"},
+		{"raw clipped can cull", Policy{RawClipped: ActionCull}, clipped(), Facts{RawKnown: true, RawClipPct: 2}, Cull, "raw highlights clipped"},
+		{"raw clipped though the model said good", Policy{}, good(), Facts{RawKnown: true, RawClipPct: 3}, Review, "raw highlights clipped"},
+		{"custom threshold", Policy{RawClipThreshold: 5}, good(), Facts{RawKnown: true, RawClipPct: 3}, Keep, ""},
+	}
+	for _, c := range cases {
+		d, reasons := c.p.DecideFacts(c.e, c.f)
+		joined := strings.Join(reasons, "; ")
+		if d != c.want || (c.reason != "" && !strings.Contains(joined, c.reason)) {
+			t.Errorf("%s: got %s %q, want %s containing %q", c.name, d, joined, c.want, c.reason)
+		}
+	}
+}
+
+func TestPromptWarnsAboutTextureComparisons(t *testing.T) {
+	if p := SystemPrompt(0.6); !strings.Contains(p, "always look crisper than skin") {
+		t.Fatal("prompt lacks the texture caveat")
+	}
+}

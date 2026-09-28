@@ -24,11 +24,12 @@ make vet
 ## Layout
 
 - `cmd/gophotocull` — main; signal-aware context into cobra
-- `internal/cli` — cobra tree: `scan`, `cull`, `restore`, `version` (+ built-in `completion`)
+- `internal/cli` — cobra tree: `scan`, `cull`, `decide`, `review`, `calibrate`, `apply-c1`,
+  `restore`, `version` (+ built-in `completion`)
 - `internal/dng` — pure-Go TIFF IFD/SubIFD walk for the largest reduced-resolution
   JPEG; reads IFDs + preview bytes only. `exiftool` fallback.
-- `internal/imageprep` — `Frame` (oriented RGBA + luma), downscale, native crops,
-  luma/clipping stats, `DownLuma`
+- `internal/imageprep` — `Frame`: decoder's YCbCr kept in stored orientation + display
+  `[]uint8` luma; crops/downscale cut in stored coords, only results rotated; stats
 - `internal/focus` — pigo face detection (cascades embedded, MIT), subject-crop
   geometry, "where focus landed" fine/coarse ratio tiles
 - `internal/llm` — `Backend` interface (system + text/JPEG parts + JSON Schema →
@@ -37,8 +38,15 @@ make vet
 - `internal/eval` — prompts, schemas, `Evaluate`, `Locate`, **Policy**
 - `internal/pipeline` — detect → locate → crops → evaluate → decide; worker pool,
   resume (path+size+mtime; refuses a different backend/model/schema), checkpointing,
-  quota stop, `--save-inputs`, `--move-culled` / `Restore` (move.go; Discover skips `culled/`)
-- `internal/report` — JSON source of truth + CSV
+  quota stop, `--save-inputs`, `--move-culled` / `Restore` (move.go; Discover skips `culled/`),
+  stages.go (shared frame stages), decide.go, groups.go (decideAll), batch.go (Message
+  Batches driver with re-attachable `<report>.batch.json` state), escalation, cost budget
+- `internal/group` — dHash + burst grouping (time gap + hash), best-of-burst
+- `internal/rawclip` — pure-Go lossless-JPEG (SOF3) decoder; raw highlight clipping
+- `internal/review` — offline HTML contact sheet (embedded page.html) + labeling
+- `internal/calib` — labels CSV, confusion matrix, rates, sharpness-threshold sweep
+- `internal/c1` — Capture One AppleScript generator, read-only probe, osascript runner
+- `internal/report` — JSON source of truth (schema v3) + CSV
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default
 - `internal/config` — API key resolution
 
@@ -143,7 +151,36 @@ make vet
     reports quota use (0–1) per call; `overageStatus` was `rejected`.
   - Structured output arrives via a synthetic `StructuredOutput` tool (2 turns).
 
+### Feature batch (verified 2026-09-27 on the 17 real frames)
+
+- Lean decoding: peak RSS 1.49 GB → 0.47 GB at `-j1`, 2.32 → 0.66 GB with 3 in flight;
+  same speed. Frame luma is now the JPEG Y (BT.601), which is what pigo expects.
+- M11-P EXIF: no `FNumber` (no aperture coupling); APEX `ApertureValue` is the camera's
+  estimate. `DateTimeOriginal` has 1 s resolution, no SubSec. Coded lenses report
+  focal length and `LensModel`. On this sample all 17 timestamps fall within 2 s
+  (they look rewritten), so burst grouping relied on dHash alone: 2 bursts found.
+- Raw: IFD0, lossless JPEG SOF3, 2 components × 4768 = 9536 wide, 14-bit,
+  BlackLevel 1023, WhiteLevel 16383, CFA RGGB. Pure-Go decode 0.76 s, measure 0.82 s.
+  Preview overstates clipping 4–1000× (M1103821: 3.89 % preview vs 0.50 % raw).
+- "Where focus landed" tiles bias the model: with a subject crop present, Sonnet
+  compared skin with in-plane fabric/hair and culled 4 sharp faces. Default now sends
+  landed tiles only when there is no subject crop (+ prompt caveat); a re-run kept
+  those 4 and still culled the 2 genuine misses. Model verdicts vary between runs on
+  borderline frames: calibrate before trusting.
+- Capture One 16.7.2 dictionary (bundle `Contents/Resources/CaptureOne.sdef`; the `sdef`
+  tool needs Xcode): variant rw `rating`, `color tag` (integer), `adjustments` (has
+  `exposure`, `rotation`), `crop` = {centerX, centerY, width, height}; image `name`,
+  `path`, `dimensions`; `apply keyword <existing keyword> to {variants}`. Generated
+  scripts compile with `osacompile`.
+- Subscription run, 17 frames with all features: 165k in / 35k out tokens, 4.6 min.
+
 ## Unverified assumptions — check before building on them
+
+- Capture One runtime details not in its dictionary: color-tag numbering (code assumes
+  1 red, 3 yellow), whether image `name` includes the extension (script tries both),
+  orientation of `dimensions`/`crop`, `make new keyword`. Run `apply-c1 --probe` first.
+- Message Batches mode has not run against the live API (it costs money).
+- The review sheet's look (only its behaviour was tested, in jsdom).
 
 - pigo Q threshold (~80 separated true/false on 12 frames) needs calibration on more
   shoots.
@@ -163,17 +200,14 @@ make vet
    `focus-target`; spec/plan in `docs/superpowers/`): pigo face → model locate
    fallback → native subject crop; noise-corrected "where focus landed" tile;
    `anthropic` / `claude-code` / `openai` backends; `--save-inputs`; scan summary.
-2. **Calibrate before trusting.** User hand-labels ~50 frames keep/cull; add an
-   `eval` subcommand that measures agreement (confusion matrix on the sharpness gate)
-   per backend/model report, and for `--tiles 0` vs `1` and `--face-min-q`.
+2. **Calibrate before trusting.** Tooling done 2026-09-27 (`review` → `labels.csv` →
+   `calibrate`, tune with `decide`). Waiting on the user's labeled sample set.
    Tune prompt/policy until false-cull rate is acceptable. Nothing should auto-apply
    at 1000-frame scale before this.
-3. **`apply-c1` subcommand.** Read the report, generate JXA, run via `osascript`
-   against the open catalog: rating/label/keyword, exposure for `fixable`, crop for
-   `croppable`. Default to `--dry-run` that prints the script.
-4. Raw-level clipping check so `clipped` can become a real cull gate.
-5. Message Batches API mode for large runs (async, cheaper).
-6. Burst / near-duplicate grouping: keep the best frame of a sequence.
+3. ~~`apply-c1`~~ built (dry run default); confirm with `--probe` on a real catalog.
+4. ~~Raw-level clipping~~ built (pure Go).
+5. ~~Message Batches~~ built (`--batch`); needs one small live run.
+6. ~~Burst grouping~~ built.
 
 ## Working style
 

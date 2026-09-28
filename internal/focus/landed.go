@@ -23,7 +23,7 @@ type Cell struct {
 // low-contrast one: unlike raw Laplacian variance, the ratio doesn't reward
 // contrast. Subtracting noise matters on real previews, where sensor noise would
 // otherwise make smooth bokeh look "detailed".
-func Ratio(luma []float32, stride int, r image.Rectangle, noise float64) float64 {
+func Ratio(luma []uint8, stride int, r image.Rectangle, noise float64) float64 {
 	fine, coarse := fineCoarse(luma, stride, r)
 	return ratio(fine, coarse, noise)
 }
@@ -41,7 +41,7 @@ func ratio(fine, coarse, noise float64) float64 {
 // never below a noise floor of median(fine)/4 (noise has coarse ≈ fine/16). The
 // quarter matters on real previews: smooth bokeh with sensor noise has a higher
 // ratio than sharp skin or fabric, and only its weak structure keeps it out.
-func Landed(luma []float32, w, h int, exclude image.Rectangle, k int) ([]Cell, float64) {
+func Landed(luma []uint8, w, h int, exclude image.Rectangle, k int) ([]Cell, float64) {
 	type cell struct {
 		r            image.Rectangle
 		fine, coarse float64
@@ -60,6 +60,9 @@ func Landed(luma []float32, w, h int, exclude image.Rectangle, k int) ([]Cell, f
 		return nil, 0
 	}
 	sort.Float64s(fines)
+	// Noise = fine variance of the flattest tenth of cells. On grids of ten cells
+	// or fewer that is the flattest cell itself, whose own ratio is then 0; real
+	// 60MP frames have ~400 cells, so this only shows on tiny previews and tests.
 	noise := fines[len(fines)/10]
 	if k <= 0 {
 		return nil, noise
@@ -86,22 +89,42 @@ func Landed(luma []float32, w, h int, exclude image.Rectangle, k int) ([]Cell, f
 	return out, noise
 }
 
-func fineCoarse(luma []float32, stride int, r image.Rectangle) (fine, coarse float64) {
-	fine = lapVar(luma, stride, r.Min.X, r.Min.Y, r.Dx(), r.Dy())
+func fineCoarse(luma []uint8, stride int, r image.Rectangle) (fine, coarse float64) {
+	fine = lapVar8(luma, stride, r.Min.X, r.Min.Y, r.Dx(), r.Dy())
 	cw, ch := r.Dx()/4, r.Dy()/4
 	down := make([]float32, cw*ch)
 	for y := 0; y < ch; y++ {
 		for x := 0; x < cw; x++ {
-			var s float32
+			s := 0
 			for dy := 0; dy < 4; dy++ {
 				row := luma[(r.Min.Y+4*y+dy)*stride+r.Min.X+4*x:]
-				s += row[0] + row[1] + row[2] + row[3]
+				s += int(row[0]) + int(row[1]) + int(row[2]) + int(row[3])
 			}
-			down[y*cw+x] = s / 16
+			down[y*cw+x] = float32(s) / 16
 		}
 	}
 	coarse = lapVar(down, cw, 0, 0, cw, ch)
 	return fine, coarse
+}
+
+// lapVar8 is lapVar over 8-bit luma.
+func lapVar8(g []uint8, stride, x0, y0, w, h int) float64 {
+	var sum, sumSq float64
+	n := 0
+	for y := y0 + 1; y < y0+h-1; y++ {
+		for x := x0 + 1; x < x0+w-1; x++ {
+			i := y*stride + x
+			v := float64(4*int(g[i]) - int(g[i-1]) - int(g[i+1]) - int(g[i-stride]) - int(g[i+stride]))
+			sum += v
+			sumSq += v * v
+			n++
+		}
+	}
+	if n == 0 {
+		return 0
+	}
+	m := sum / float64(n)
+	return sumSq/float64(n) - m*m
 }
 
 // lapVar is the variance of the 4-neighbour Laplacian over the interior of the

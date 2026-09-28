@@ -7,7 +7,15 @@ type Evaluation struct {
 	Sharpness   Sharpness   `json:"sharpness"`
 	Exposure    Exposure    `json:"exposure"`
 	Composition Composition `json:"composition"`
+	People      People      `json:"people"`
 	Notes       string      `json:"notes"`
+}
+
+// People flags things sharpness can't see: blinks and unflattering moments.
+type People struct {
+	Present    bool   `json:"present"`
+	Eyes       string `json:"eyes"`       // open|closed|partial|not_visible
+	Expression string `json:"expression"` // good|neutral|awkward|not_applicable
 }
 
 type Sharpness struct {
@@ -54,10 +62,60 @@ const (
 	Cull   Decision = "cull"
 )
 
+// Action is what the policy does with a signal: nothing, send to review, or cull.
+// The zero value means review, the conservative default for every new signal.
+type Action string
+
+const (
+	ActionIgnore Action = "ignore"
+	ActionReview Action = "review"
+	ActionCull   Action = "cull"
+)
+
+// ParseAction validates a flag value.
+func ParseAction(s string) (Action, error) {
+	switch a := Action(s); a {
+	case ActionIgnore, ActionReview, ActionCull:
+		return a, nil
+	}
+	return "", fmt.Errorf("%q: want ignore, review, or cull", s)
+}
+
+func (a Action) decision() (Decision, bool) {
+	switch a {
+	case ActionIgnore:
+		return Keep, false
+	case ActionCull:
+		return Cull, true
+	}
+	return Review, true
+}
+
 // Policy encodes: sharpness gates; exposure is fixed, not culled; composition is
-// cropped where possible and never culls on its own.
+// cropped where possible and never culls on its own. Other signals default to
+// review and are culled only when configured to.
 type Policy struct {
-	MinCropArea float64
+	MinCropArea          float64
+	ReviewBelowSharpness float64 // 0 = off; keep -> review when the sharpness score is lower
+	EyesClosed           Action
+	Duplicates           Action  // non-best frames of a burst
+	RawClipped           Action  // raw highlights clipped beyond RawClipThreshold
+	RawClipThreshold     float64 // percent of raw samples at white level; 0 = default 0.5
+}
+
+// Facts are measurements the policy uses beside the model's assessment.
+type Facts struct {
+	RawKnown   bool    // raw clipping was measured
+	RawClipPct float64 // percent of raw samples at the white level
+}
+
+// ApplyDuplicate raises a frame that isn't the best of its burst according to
+// the Duplicates action (review by default) and always leaves the reason.
+func (p Policy) ApplyDuplicate(d Decision, reasons []string, best string, size int) (Decision, []string) {
+	if to, act := p.Duplicates.decision(); act && rank(to) > rank(d) {
+		d = to
+	}
+	return d, append(reasons, fmt.Sprintf("duplicate of %s (burst of %d)", best, size))
 }
 
 // Sanitize clamps values and drops invalid crops. Returns human-readable fixups.
@@ -92,24 +150,71 @@ func (p Policy) Sanitize(e *Evaluation) []string {
 	return notes
 }
 
-// Decide applies the culling policy.
-func (p Policy) Decide(e *Evaluation) (Decision, []string) {
+// Decide applies the policy to an assessment alone.
+func (p Policy) Decide(e *Evaluation) (Decision, []string) { return p.DecideFacts(e, Facts{}) }
+
+// DecideFacts applies the culling policy: the most severe outcome of any rule
+// wins (cull > review > keep), and every rule that fired leaves a reason.
+func (p Policy) DecideFacts(e *Evaluation, f Facts) (Decision, []string) {
+	d := Keep
+	var reasons []string
+	raise := func(to Decision, reason string) {
+		if rank(to) > rank(d) {
+			d = to
+		}
+		reasons = append(reasons, reason)
+	}
+	note := func(reason string) { reasons = append(reasons, reason) }
+
 	switch e.Sharpness.Status {
 	case "missed_focus", "motion_blur":
-		return Cull, []string{"sharpness: " + e.Sharpness.Status}
+		raise(Cull, "sharpness: "+e.Sharpness.Status)
 	case "soft":
-		return Review, []string{"sharpness: soft"}
+		raise(Review, "sharpness: soft")
+	default:
+		if p.ReviewBelowSharpness > 0 && e.Sharpness.Score < p.ReviewBelowSharpness {
+			raise(Review, fmt.Sprintf("sharpness %.1f below %.1f", e.Sharpness.Score, p.ReviewBelowSharpness))
+		}
 	}
-	var reasons []string
-	d := Keep
-	// The preview is tone-mapped; raw usually has more headroom. Until a raw-level
-	// clipping check exists, preview clipping routes to review rather than cull.
-	if e.Exposure.Status == "clipped" {
-		d = Review
-		reasons = append(reasons, "exposure: clipped in preview ("+e.Exposure.Clipping+"), verify against raw")
+	// The preview is tone-mapped and overstates clipping; the raw decides when it
+	// was measured. Without it, preview clipping routes to review, never cull.
+	threshold := p.RawClipThreshold
+	if threshold <= 0 {
+		threshold = 0.5
+	}
+	switch {
+	case f.RawKnown && f.RawClipPct >= threshold:
+		if to, act := p.RawClipped.decision(); act {
+			raise(to, fmt.Sprintf("raw highlights clipped: %.2f%% of samples at white level", f.RawClipPct))
+		}
+	case f.RawKnown && e.Exposure.Status == "clipped":
+		note(fmt.Sprintf("exposure: preview looks clipped but the raw retains highlights (%.3f%% at white level)", f.RawClipPct))
+	case e.Exposure.Status == "clipped":
+		raise(Review, "exposure: clipped in preview ("+e.Exposure.Clipping+"), verify against raw")
 	}
 	if e.Composition.Status == "flawed" {
-		reasons = append(reasons, "composition: flawed, no crop fix")
+		note("composition: flawed, no crop fix")
+	}
+	switch e.People.Eyes {
+	case "closed":
+		if to, act := p.EyesClosed.decision(); act {
+			raise(to, "eyes closed")
+		}
+	case "partial":
+		note("eyes partially closed")
+	}
+	if e.People.Expression == "awkward" {
+		note("expression: awkward")
 	}
 	return d, reasons
+}
+
+func rank(d Decision) int {
+	switch d {
+	case Cull:
+		return 2
+	case Review:
+		return 1
+	}
+	return 0
 }

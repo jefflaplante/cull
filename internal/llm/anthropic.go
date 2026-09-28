@@ -52,7 +52,10 @@ func (a *Anthropic) Call(ctx context.Context, req Request) (*Response, error) {
 	return validated(ctx, req.Schema, func(ctx context.Context) (*Response, error) { return a.post(ctx, payload) })
 }
 
-func (a *Anthropic) body(req Request) ([]byte, error) {
+func (a *Anthropic) body(req Request) ([]byte, error) { return json.Marshal(a.params(req)) }
+
+// params is the Messages API request body; batches embed it per request.
+func (a *Anthropic) params(req Request) map[string]any {
 	content := make([]map[string]any, 0, len(req.Parts))
 	for _, p := range req.Parts {
 		if p.JPEG != nil {
@@ -63,7 +66,7 @@ func (a *Anthropic) body(req Request) ([]byte, error) {
 			content = append(content, map[string]any{"type": "text", "text": p.Text})
 		}
 	}
-	return json.Marshal(map[string]any{
+	return map[string]any{
 		"model":      a.Model,
 		"max_tokens": max(req.MaxTokens, anthropicMinTokens),
 		"system":     req.System,
@@ -71,7 +74,7 @@ func (a *Anthropic) body(req Request) ([]byte, error) {
 		"output_config": map[string]any{
 			"format": map[string]any{"type": "json_schema", "schema": Portable(req.Schema)},
 		},
-	})
+	}
 }
 
 func (a *Anthropic) post(ctx context.Context, payload []byte) (*Response, error) {

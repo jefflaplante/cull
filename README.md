@@ -24,13 +24,30 @@ make build
 |---|---|
 | `scan <dir>` | Extract + measure previews, detect faces; writes report only, calls no model |
 | `cull <dir>` | Evaluate with the model, apply policy, optional sidecars; `--move-culled` moves culls (with their `.xmp`) into `culled/` beside them |
+| `decide <dir>` | Re-apply the policy to stored assessments (no model calls); `--write-xmp` / `--move-culled` sync |
+| `review <dir>` | Offline HTML contact sheet: subject crops, decisions, reasons; keyboard labeling → `labels.csv` |
+| `calibrate --labels labels.csv REPORT...` | Agreement with your labels: confusion matrix, false-cull / missed-cull / review rates, threshold sweep |
+| `apply-c1 <dir>` | AppleScript for the open Capture One document (rating, color tag, keyword; optional exposure/crop); dry run by default, `--probe` first |
 | `restore <dir>` | Move frames that `--move-culled` moved back to where they were (never overwrites) |
 | `version` | Build version (set via `make build`) |
 | `completion <shell>` | Shell completion (cobra built-in) |
 
 Global flags: `-o/--report`, `-r/--recursive`, `--max-edge`, `--tiles` ("where focus
-landed" tiles, default 1), `--face-min-q` (default 80), `--save-inputs <dir>`,
-`--min-preview-edge`. Run `gophotocull cull --help` for the rest.
+landed" tiles, default 1, sent only when there is no subject crop unless
+`--landed-with-subject`), `--face-min-q` (default 80), `--save-inputs <dir>`,
+`--burst-gap` (2s; 0 disables) / `--burst-hash` (12), `--min-preview-edge`.
+
+Policy flags (`cull`, `decide`, `calibrate`): `--review-below-sharpness`, `--eyes-closed`,
+`--duplicates`, `--raw-clipped` (each `ignore|review|cull`, default `review`),
+`--raw-clip-threshold` (0.5 % of raw samples at white level), `--min-crop-area`.
+
+Cost and scale (`cull`): `--estimate` (print and exit), `--max-cost USD`, `--batch`
+(Message Batches API: half price; Ctrl-C safe, `--resume` re-attaches),
+`--escalate-backend/--escalate-model/--escalate-on` (re-evaluate doubtful frames on a
+stronger model), `--raw-clip` (on for cull, off for scan). Run `gophotocull cull --help`.
+
+Calibration loop: `cull` → `review` (label, export `labels.csv`) → `calibrate` → tune
+with `decide` (free) → `apply-c1` / `--move-culled`.
 
 ### Backends (`cull --backend`)
 
@@ -68,8 +85,10 @@ sharpness gate is calibrated, look through `culled/` before deleting anything.
    Schema) implemented by the `anthropic`, `claude-code` and `openai` backends; every
    answer is schema-validated in Go, with one retry.
 5. `eval.Policy` — **deterministic decision in Go**, not the model's call:
-   - `missed_focus` / `motion_blur` → cull; `soft` → review
-   - exposure `clipped` → review (preview clipping overstates raw clipping)
+   - `missed_focus` / `motion_blur` → cull; `soft` → review; optional score floor
+   - raw clipping (pure-Go decode of the DNG's lossless-JPEG raw) decides exposure:
+     preview "clipped" with raw headroom → no review; raw ≥ threshold → `--raw-clipped`
+   - closed eyes → `--eyes-closed`; non-best frames of a burst → `--duplicates`
    - composition never culls; invalid or < `-min-crop-area` crops are dropped
 6. `internal/report` — JSON is the source of truth (schema v2, with `backend` and a
    per-frame `focus_target`; checkpointed every `-checkpoint` results; `-resume` keys
@@ -89,11 +108,10 @@ sharpness gate is calibrated, look through `culled/` before deleting anything.
 
 - [x] Verify M11-P preview dimensions: full resolution (9504×6320), no raw rendering needed.
 - [ ] Calibrate the sharpness gate and `--face-min-q` against hand labels (`eval` subcommand).
-- [ ] Raw-level clipping check (LibRaw) so `clipped` can become a real cull gate.
-- [ ] `apply-c1` subcommand: generate AppleScript/JXA from the report to set rating,
-      exposure, and crop per variant. Verify property names against the C1 scripting
-      dictionary before running against a catalog.
+- [x] Raw-level clipping check (pure Go, no LibRaw).
+- [x] `apply-c1`: names verified against C1 16.7.2's dictionary (compiles with osacompile);
+      run `--probe` to confirm color-tag numbering and image naming before writing.
 - [ ] `crs:Crop*` coordinate space for rotated images is an unverified assumption
       (stored orientation); `crs:CropAngle` not written.
-- [ ] Message Batches API mode (async, cheaper) for large runs.
-- [ ] Burst/near-duplicate grouping so only the best frame of a sequence is kept.
+- [x] Message Batches API mode (`--batch`).
+- [x] Burst/near-duplicate grouping (`--burst-gap`, `--duplicates`).

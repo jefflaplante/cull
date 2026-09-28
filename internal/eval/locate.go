@@ -60,26 +60,43 @@ var focusTargetSchema = map[string]any{
 	},
 }
 
-// Locate asks the backend where the intended focus target is in a downscaled
-// frame. Like Evaluate, a result delivered with llm.ErrQuotaStop is returned
-// together with that error.
-func Locate(ctx context.Context, b llm.Backend, frame []byte, maxTokens int) (*LocateResult, Usage, error) {
-	resp, err := b.Call(ctx, llm.Request{
+// LocateRequest builds the locate call for a downscaled frame.
+func LocateRequest(frame []byte, maxTokens int) llm.Request {
+	return llm.Request{
 		System:     locatePrompt,
 		Parts:      []llm.Part{llm.Text("Find the intended focus target in this photograph:"), llm.JPEG(frame)},
 		SchemaName: "focus_target",
 		Schema:     focusTargetSchema,
 		MaxTokens:  maxTokens,
-	})
+	}
+}
+
+// LocateSchema is the locate call's JSON Schema (for validating batch results).
+func LocateSchema() map[string]any { return focusTargetSchema }
+
+// DecodeLocate parses a locate answer.
+func DecodeLocate(raw []byte) (*LocateResult, error) {
+	var loc LocateResult
+	if err := json.Unmarshal(raw, &loc); err != nil {
+		return nil, fmt.Errorf("decode focus target: %w", err)
+	}
+	return &loc, nil
+}
+
+// Locate asks the backend where the intended focus target is in a downscaled
+// frame. Like Evaluate, a result delivered with llm.ErrQuotaStop is returned
+// together with that error.
+func Locate(ctx context.Context, b llm.Backend, frame []byte, maxTokens int) (*LocateResult, Usage, error) {
+	resp, err := b.Call(ctx, LocateRequest(frame, maxTokens))
 	if resp == nil || resp.JSON == nil {
 		if resp != nil {
 			return nil, resp.Usage, err
 		}
 		return nil, Usage{}, err
 	}
-	var loc LocateResult
-	if uerr := json.Unmarshal(resp.JSON, &loc); uerr != nil {
-		return nil, resp.Usage, fmt.Errorf("decode focus target: %w", uerr)
+	loc, derr := DecodeLocate(resp.JSON)
+	if derr != nil {
+		return nil, resp.Usage, derr
 	}
-	return &loc, resp.Usage, err
+	return loc, resp.Usage, err
 }

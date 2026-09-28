@@ -25,9 +25,21 @@ func marked(w, h int) []byte {
 	return buf.Bytes()
 }
 
-func isRed(c color.RGBA) bool { return c.R > 200 && c.G < 80 && c.B < 80 }
+func isRed(c color.Color) bool {
+	r, g, b, _ := c.RGBA()
+	return r>>8 > 200 && g>>8 < 90 && b>>8 < 90
+}
 
-func TestDecodeOrientsForDisplay(t *testing.T) {
+func decodeJPEG(t *testing.T, b []byte) image.Image {
+	t.Helper()
+	img, err := jpeg.Decode(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return img
+}
+
+func TestFrameIsOrientedForDisplay(t *testing.T) {
 	const w, h = 40, 24
 	cases := []struct {
 		o          int
@@ -47,10 +59,32 @@ func TestDecodeOrientsForDisplay(t *testing.T) {
 		if f.W != c.dw || f.H != c.dh || len(f.Luma) != f.W*f.H {
 			t.Fatalf("o=%d: %dx%d luma=%d", c.o, f.W, f.H, len(f.Luma))
 		}
-		if px := f.RGBA.RGBAAt(c.redX, c.redY); !isRed(px) {
-			t.Errorf("o=%d: pixel (%d,%d) = %v, want the red marker", c.o, c.redX, c.redY, px)
+		// Luma: red is much darker than the grey around it.
+		if y := f.Luma[c.redY*f.W+c.redX]; y > 100 {
+			t.Errorf("o=%d: luma at marker %d, want dark", c.o, y)
+		}
+		if y := f.Luma[(f.H/2)*f.W+f.W/2]; y < 120 || y > 136 {
+			t.Errorf("o=%d: luma at centre %d, want grey", c.o, y)
+		}
+		// Full frame, unscaled.
+		full := decodeJPEG(t, mustBytes(f.Downscaled(10000, 100)))
+		if full.Bounds().Dx() != c.dw || !isRed(full.At(c.redX, c.redY)) || isRed(full.At(f.W/2, f.H/2)) {
+			t.Errorf("o=%d: downscaled frame %v, marker pixel %v", c.o, full.Bounds(), full.At(c.redX, c.redY))
+		}
+		// A display-space crop around the marker.
+		r := image.Rect(c.redX-2, c.redY-2, c.redX+2, c.redY+2)
+		crop := decodeJPEG(t, mustBytes(f.Crop(r, 100)))
+		if crop.Bounds().Dx() != 4 || crop.Bounds().Dy() != 4 || !isRed(crop.At(2, 2)) {
+			t.Errorf("o=%d: crop %v centre %v", c.o, crop.Bounds(), crop.At(2, 2))
 		}
 	}
+}
+
+func mustBytes(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 func gradientJPEG(w, h int) []byte {
@@ -65,8 +99,8 @@ func gradientJPEG(w, h int) []byte {
 	return buf.Bytes()
 }
 
-func TestMeasureAndEncode(t *testing.T) {
-	f, err := Decode(gradientJPEG(2048, 1024), 1)
+func TestMeasureAndEncodeIncludingGrayscaleJPEG(t *testing.T) {
+	f, err := Decode(gradientJPEG(2048, 1024), 1) // Go encodes *image.Gray as a 1-component JPEG
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,10 +123,13 @@ func TestMeasureAndEncode(t *testing.T) {
 	if cfg, _ := jpeg.DecodeConfig(bytes.NewReader(crop)); cfg.Width != 48 || cfg.Height != 24 {
 		t.Fatalf("crop %dx%d", cfg.Width, cfg.Height)
 	}
+	if _, err := f.Crop(image.Rect(5000, 5000, 5100, 5100), 90); err == nil {
+		t.Fatal("crop fully outside the frame should fail")
+	}
 }
 
 func TestDownLuma(t *testing.T) {
-	luma := make([]float32, 4000*2000)
+	luma := make([]uint8, 4000*2000)
 	for i := range luma {
 		luma[i] = 100
 	}

@@ -35,10 +35,8 @@ func moveCulled(rep *report.Report, log io.Writer) int {
 			fmt.Fprintf(log, "not moved %s: %v\n", filepath.Base(r.File), err)
 			continue
 		}
+		followSidecar(r, r.File, sidecar)
 		r.MovedTo = dst
-		if sidecar != "" {
-			r.XMP = sidecar
-		}
 		n++
 	}
 	return n
@@ -69,9 +67,7 @@ func Restore(reportPath string, log io.Writer) (int, error) {
 			fmt.Fprintf(log, "not restored %s: %v\n", filepath.Base(r.File), err)
 			continue
 		}
-		if sidecar != "" {
-			r.XMP = sidecar
-		}
+		followSidecar(r, r.MovedTo, sidecar)
 		r.MovedTo = ""
 		n++
 	}
@@ -116,4 +112,18 @@ func relocate(src, dst string) (string, error) {
 		return "", fmt.Errorf("sidecar: %w", err)
 	}
 	return dstXMP, nil
+}
+
+// followSidecar updates the report's claim on a sidecar that moved with its
+// frame from `from`. Only a sidecar that was ours stays ours: a foreign one
+// travels with its frame but never becomes something decide may overwrite.
+func followSidecar(r *report.Result, from, newSidecar string) {
+	if newSidecar == "" {
+		return
+	}
+	if r.XMP == xmp.Path(from) {
+		r.XMP = newSidecar
+	} else {
+		r.XMP = ""
+	}
 }

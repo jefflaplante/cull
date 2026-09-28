@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gophotocull review</title>
+<style>
+:root {
+  --bg: #f6f6f4; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #deded8;
+  --keep: #2f7d4f; --review: #b7791f; --cull: #b83a3a; --accent: #2b5fb4; --focus: #2b5fb433;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151514; --panel: #1f1f1d; --ink: #ececea; --muted: #9b9b95; --line: #34342f;
+    --keep: #5fbf85; --review: #e0a846; --cull: #e36b6b; --accent: #7aa7ff; --focus: #7aa7ff33;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, "Helvetica Neue", Arial, sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+header h1 { font-size: 16px; margin: 0; }
+.meta { color: var(--muted); font-size: 12px; }
+.filters, .tools { display: flex; gap: 6px; flex-wrap: wrap; }
+button, .file { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button[aria-pressed="true"] { border-color: var(--accent); background: var(--focus); }
+button:focus-visible { outline: 2px solid var(--accent); }
+.file input { display: none; }
+main { padding: 16px; }
+#grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; }
+.card.sel { outline: 3px solid var(--accent); }
+.card img { width: 100%; aspect-ratio: 3 / 2; object-fit: contain; background: #0000000d; display: block; }
+.card .row { display: flex; justify-content: space-between; gap: 6px; padding: 6px 8px; align-items: center; }
+.name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { font-size: 11px; font-weight: 600; text-transform: uppercase; border-radius: 4px; padding: 1px 6px; color: #fff; white-space: nowrap; }
+.keep { background: var(--keep); } .review { background: var(--review); } .cull { background: var(--cull); } .none { background: var(--muted); }
+.label { position: absolute; top: 6px; right: 6px; }
+.label.badge { border: 2px solid var(--panel); }
+#detail { display: none; }
+#detail.open { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
+@media (max-width: 800px) { #detail.open { grid-template-columns: 1fr; } }
+.pane { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+.pane img { max-width: 100%; display: block; margin: 0 auto; }
+.subject img { image-rendering: auto; }
+.cap { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 12px 0 0; }
+dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
+ul { margin: 4px 0 0; padding-left: 18px; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.help { color: var(--muted); font-size: 12px; }
+.empty { color: var(--muted); padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">gophotocull review</h1>
+  <span class="meta" id="meta"></span>
+  <div class="filters" id="filters" role="group" aria-label="Filter"></div>
+  <div class="tools">
+    <button id="export">Export labels.csv</button>
+    <label class="file">Import labels.csv<input type="file" id="import" accept=".csv,text/csv"></label>
+  </div>
+  <span class="help">← → move · K keep · R review · C cull · U clear · Enter open · Esc grid</span>
+</header>
+<main>
+  <div id="grid"></div>
+  <div id="detail"></div>
+</main>
+<script id="data" type="application/json">/*__DATA__*/null</script>
+<script>
+(() => {
+  const data = JSON.parse(document.getElementById("data").textContent);
+  const cards = data.cards;
+  const key = "gophotocull-labels:" + data.report;
+  let labels = {};
+  try { labels = JSON.parse(localStorage.getItem(key) || "{}"); } catch (e) { labels = {}; }
+  const save = () => { try { localStorage.setItem(key, JSON.stringify(labels)); } catch (e) {} };
+
+  let filter = "all", sel = 0, detailOpen = false;
+  const filters = [["all", "All"], ["keep", "Keep"], ["review", "Review"], ["cull", "Cull"],
+    ["unlabeled", "Unlabeled"], ["disagree", "Disagreements"]];
+  const visible = () => cards.map((c, i) => i).filter(i => {
+    const c = cards[i], l = labels[c.file];
+    switch (filter) {
+      case "all": return true;
+      case "unlabeled": return !l && !c.error;
+      case "disagree": return !!l && !!c.decision && l !== c.decision;
+      default: return c.decision === filter;
+    }
+  });
+
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "text") n.textContent = v; else if (k === "cls") n.className = v; else n.setAttribute(k, v);
+    }
+    kids.flat().forEach(k => k && n.appendChild(k));
+    return n;
+  };
+  const img = (name, alt) => name ? el("img", { src: encodeURIComponent(name), alt, loading: "lazy" }) : null;
+  const badge = (d, extra = "") => el("span", { cls: "badge " + (d || "none") + extra, text: d || "unscored" });
+
+  document.getElementById("title").textContent = data.title + " · review";
+  document.title = data.title + " · gophotocull review";
+
+  function renderHeader() {
+    const n = { keep: 0, review: 0, cull: 0 };
+    cards.forEach(c => { if (n[c.decision] !== undefined) n[c.decision]++; });
+    const labeled = cards.filter(c => labels[c.file]).length;
+    const model = [data.backend, data.model].filter(Boolean).join(" ") + (data.escalation ? " → " + data.escalation : "");
+    document.getElementById("meta").textContent =
+      `${cards.length} frames · keep ${n.keep} · review ${n.review} · cull ${n.cull} · labeled ${labeled}` + (model ? ` · ${model}` : "");
+    const f = document.getElementById("filters");
+    f.replaceChildren(...filters.map(([id, name]) => {
+      const b = el("button", { text: name, "aria-pressed": String(filter === id) });
+      b.onclick = () => { filter = id; sel = 0; render(); };
+      return b;
+    }));
+  }
+
+  function renderGrid() {
+    const grid = document.getElementById("grid");
+    const vis = visible();
+    if (!vis.length) { grid.replaceChildren(el("p", { cls: "empty", text: "No frames match this filter." })); return; }
+    grid.replaceChildren(...vis.map((i, k) => {
+      const c = cards[i];
+      const card = el("div", { cls: "card" + (k === sel ? " sel" : ""), tabindex: "0" },
+        img(c.thumb, c.file) || el("div", { cls: "empty", text: c.error || "no preview" }),
+        el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), badge(c.decision)));
+      if (labels[c.file]) card.appendChild(badge(labels[c.file], " label"));
+      card.onclick = () => { sel = k; detailOpen = true; render(); };
+      return card;
+    }));
+    const s = grid.querySelector(".sel");
+    if (s) s.scrollIntoView({ block: "nearest" });
+  }
+
+  function row(dl, term, value) {
+    if (value === undefined || value === null || value === "" || (Array.isArray(value) && !value.length)) return;
+    dl.appendChild(el("dt", { text: term }));
+    dl.appendChild(Array.isArray(value) ? el("dd", {}, el("ul", {}, ...value.map(v => el("li", { text: v }))))
+                                        : el("dd", { text: String(value) }));
+  }
+
+  function renderDetail() {
+    const box = document.getElementById("detail");
+    const vis = visible();
+    if (!vis.length) { box.replaceChildren(); return; }
+    sel = Math.min(sel, vis.length - 1);
+    const c = cards[vis[sel]], e = c.eval, f = c.focus;
+    const info = el("dl");
+    row(info, "decision", c.decision || "unscored");
+    row(info, "reasons", c.reasons);
+    if (e) {
+      row(info, "sharpness", `${e.sharpness.score} (${e.sharpness.status})`);
+      row(info, "focus", e.sharpness.focus_target);
+      if (e.people && e.people.present) row(info, "people", `eyes ${e.people.eyes} · expression ${e.people.expression}`);
+      row(info, "exposure", `${e.exposure.score} (${e.exposure.status}, ${e.exposure.ev_adjust >= 0 ? "+" : ""}${e.exposure.ev_adjust} EV)`);
+      row(info, "composition", `${e.composition.score} (${e.composition.status})`);
+      row(info, "notes", e.notes);
+    }
+    if (c.first) row(info, "first pass", `${c.first.backend}/${c.first.model}: ${c.first.evaluation.sharpness.status} ${c.first.evaluation.sharpness.score}`);
+    if (f) row(info, "subject", f.source === "none" ? "none: " + (f.reason || "") : f.source + (f.label ? ": " + f.label : "") + (f.face_q ? ` (face q ${f.face_q})` : ""));
+    if (c.group) row(info, "burst", `${c.group.size} frames, best ${c.group.best}`);
+    row(info, "shooting", c.exif);
+    if (c.raw_clip !== undefined && c.raw_clip !== null) row(info, "raw clipping", c.raw_clip.toFixed(3) + "% of samples at white level");
+    row(info, "moved to", c.moved_to);
+    row(info, "notes (tool)", c.fixups);
+    row(info, "error", c.error);
+    row(info, "cost", c.cost ? "$" + c.cost.toFixed(3) : "");
+    row(info, "file", c.path);
+
+    const actions = el("div", { cls: "actions" }, ...[["keep", "Keep (K)"], ["review", "Review (R)"], ["cull", "Cull (C)"], ["", "Clear (U)"]].map(([l, name]) => {
+      const b = el("button", { text: name, "aria-pressed": String((labels[c.file] || "") === l && !!l) });
+      b.onclick = () => setLabel(l);
+      return b;
+    }));
+    const nav = el("div", { cls: "actions" },
+      el("button", { text: "← Prev" }), el("button", { text: "Grid (Esc)" }), el("button", { text: "Next →" }));
+    nav.children[0].onclick = () => move(-1); nav.children[1].onclick = () => { detailOpen = false; render(); }; nav.children[2].onclick = () => move(1);
+
+    box.replaceChildren(
+      el("div", { cls: "pane" }, img(c.thumb, c.file) || el("p", { cls: "empty", text: c.error || "no preview" }),
+        el("p", { cls: "cap", text: `${sel + 1} / ${vis.length} · ${c.file}` }), nav),
+      el("div", { cls: "pane subject" },
+        c.subject ? el("div", {}, img(c.subject, "subject crop"), el("p", { cls: "cap", text: "Subject at native preview resolution (what the model judged)" })) : null,
+        el("div", {}, badge(c.decision), labels[c.file] ? el("span", { text: "  your label: " }) : null, labels[c.file] ? badge(labels[c.file]) : null),
+        actions, info));
+  }
+
+  function setLabel(l) {
+    const vis = visible();
+    if (!vis.length) return;
+    const c = cards[vis[sel]];
+    if (l) labels[c.file] = l; else delete labels[c.file];
+    save();
+    if (detailOpen && l && filter !== "unlabeled") move(1); else render();
+  }
+  function move(d) {
+    const n = visible().length;
+    if (!n) return;
+    sel = Math.max(0, Math.min(n - 1, sel + d));
+    render();
+  }
+  function render() {
+    renderHeader();
+    document.getElementById("grid").style.display = detailOpen ? "none" : "";
+    document.getElementById("detail").className = detailOpen ? "open" : "";
+    if (detailOpen) renderDetail(); else renderGrid();
+  }
+
+  document.addEventListener("keydown", ev => {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const k = ev.key.toLowerCase();
+    if (k === "arrowright" || k === "arrowdown") { move(1); ev.preventDefault(); }
+    else if (k === "arrowleft" || k === "arrowup") { move(-1); ev.preventDefault(); }
+    else if (k === "enter") { detailOpen = true; render(); }
+    else if (k === "escape") { detailOpen = false; render(); }
+    else if (k === "k") setLabel("keep");
+    else if (k === "r") setLabel("review");
+    else if (k === "c") setLabel("cull");
+    else if (k === "u") setLabel("");
+  });
+
+  document.getElementById("export").onclick = () => {
+    const rows = ["file,label"].concat(cards.filter(c => labels[c.file]).map(c => `"${c.file.replace(/"/g, '""')}",${labels[c.file]}`));
+    const a = el("a", { href: URL.createObjectURL(new Blob([rows.join("\n") + "\n"], { type: "text/csv" })), download: "labels.csv" });
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  document.getElementById("import").onchange = ev => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    file.text().then(text => {
+      for (const line of text.split(/\r?\n/)) {
+        const m = line.match(/^\s*(?:"((?:[^"]|"")*)"|([^,]*)),\s*(keep|review|cull)\s*$/i);
+        if (m) labels[(m[1] !== undefined ? m[1].replace(/""/g, '"') : m[2]).trim()] = m[3].toLowerCase();
+      }
+      save(); render();
+    });
+  };
+
+  render();
+})();
+</script>
+</body>
+</html>

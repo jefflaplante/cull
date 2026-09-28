@@ -66,9 +66,21 @@ func Evaluate(ctx context.Context, b llm.Backend, in Input) (*Evaluation, Usage,
 		}
 		return nil, Usage{}, err
 	}
-	var e Evaluation
-	if uerr := json.Unmarshal(resp.JSON, &e); uerr != nil {
-		return nil, resp.Usage, fmt.Errorf("decode evaluation: %w", uerr)
+	e, derr := DecodeEvaluation(resp.JSON)
+	if derr != nil {
+		return nil, resp.Usage, derr
 	}
-	return &e, resp.Usage, err
+	return e, resp.Usage, err
+}
+
+// EvaluationSchema is the evaluation call's JSON Schema (for validating batch results).
+func EvaluationSchema() map[string]any { return evaluationSchema }
+
+// DecodeEvaluation parses an evaluation answer.
+func DecodeEvaluation(raw []byte) (*Evaluation, error) {
+	var e Evaluation
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return nil, fmt.Errorf("decode evaluation: %w", err)
+	}
+	return &e, nil
 }

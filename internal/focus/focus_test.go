@@ -76,8 +76,9 @@ func blur(g []float32, w int, rect image.Rectangle, rad, passes int) {
 func TestRatioPrefersSharpOverBlurredSameTexture(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	const w, h = 768, 384
-	g := blocks(rng, w, h, 60, 200)
-	blur(g, w, image.Rect(384, 0, 768, 384), 1, 2)
+	gf := blocks(rng, w, h, 60, 200)
+	blur(gf, w, image.Rect(384, 0, 768, 384), 1, 2)
+	g := u8(gf)
 	sharp := Ratio(g, w, image.Rect(0, 0, 384, 384), 0)
 	soft := Ratio(g, w, image.Rect(384, 0, 768, 384), 0)
 	if !(sharp > 2*soft) {
@@ -88,11 +89,11 @@ func TestRatioPrefersSharpOverBlurredSameTexture(t *testing.T) {
 // scene: 8×4 cells of 384px. Mostly smooth noisy background (like bokeh), one
 // high-contrast out-of-focus patch (sunlit litter) and one low-contrast sharp
 // patch (the subject). This is the failure seen on real M11-P frames.
-func scene(t *testing.T) (luma []float32, w, h int, sharpPatch, oofPatch image.Rectangle) {
+func scene(t *testing.T) (lum []uint8, w, h int, sharpPatch, oofPatch image.Rectangle) {
 	t.Helper()
 	rng := rand.New(rand.NewSource(2))
 	w, h = 8*CellSize, 4*CellSize
-	luma = make([]float32, w*h)
+	luma := make([]float32, w*h)
 	for i := range luma {
 		luma[i] = 110 + float32(rng.NormFloat64()*2)
 	}
@@ -107,7 +108,16 @@ func scene(t *testing.T) (luma []float32, w, h int, sharpPatch, oofPatch image.R
 	paint(oofPatch, 0, 255)
 	blur(luma, w, oofPatch, 1, 1) // mild defocus, full contrast: sunlit litter
 	paint(sharpPatch, 100, 120)   // in focus, low contrast: skin, fabric
-	return
+	return u8(luma), w, h, sharpPatch, oofPatch
+}
+
+// u8 quantizes a synthetic float scene to the 8-bit luma the pipeline uses.
+func u8(f []float32) []uint8 {
+	out := make([]uint8, len(f))
+	for i, v := range f {
+		out[i] = uint8(min(max(v+0.5, 0), 255))
+	}
+	return out
 }
 
 func TestLandedPicksLowContrastSharpOverHighContrastBlur(t *testing.T) {
@@ -144,15 +154,15 @@ func TestLandedExcludesSubjectAndHandlesEdgeCases(t *testing.T) {
 	if got, _ := Landed(luma, w, h, image.Rectangle{}, 0); len(got) != 0 {
 		t.Errorf("k=0: got %d cells", len(got))
 	}
-	if got, _ := Landed(make([]float32, 300*200), 300, 200, image.Rectangle{}, 1); len(got) != 0 {
+	if got, _ := Landed(make([]uint8, 300*200), 300, 200, image.Rectangle{}, 1); len(got) != 0 {
 		t.Errorf("frame smaller than a cell: got %d cells", len(got))
 	}
-	if got, _ := Landed(make([]float32, w*h), w, h, image.Rectangle{}, 1); len(got) != 0 {
+	if got, _ := Landed(make([]uint8, w*h), w, h, image.Rectangle{}, 1); len(got) != 0 {
 		t.Errorf("flat frame has no structure: got %d cells", len(got))
 	}
 }
 
-func fineOf(luma []float32, w int, r image.Rectangle) float64 {
+func fineOf(luma []uint8, w int, r image.Rectangle) float64 {
 	f, _ := fineCoarse(luma, w, r)
 	return f
 }
@@ -160,11 +170,11 @@ func fineOf(luma []float32, w int, r image.Rectangle) float64 {
 // bokehScene reproduces the failure seen on real previews: most of the frame is
 // smooth out-of-focus bokeh whose blotchy low-frequency structure plus sensor
 // noise gives a high fine/coarse ratio, and a smaller sharp low-contrast subject.
-func bokehScene(t *testing.T) (luma []float32, w, h int, sharpPatch image.Rectangle) {
+func bokehScene(t *testing.T) (lum []uint8, w, h int, sharpPatch image.Rectangle) {
 	t.Helper()
 	rng := rand.New(rand.NewSource(4))
 	w, h = 8*CellSize, 4*CellSize
-	luma = blocks(rng, w, h, 90, 150)
+	luma := blocks(rng, w, h, 90, 150)
 	blur(luma, w, image.Rect(0, 0, w, h), 3, 2) // smooth blotches
 	for i := range luma {
 		luma[i] += float32(rng.NormFloat64() * 2) // sensor noise
@@ -174,7 +184,7 @@ func bokehScene(t *testing.T) (luma []float32, w, h int, sharpPatch image.Rectan
 	for y := 0; y < sharpPatch.Dy(); y++ {
 		copy(luma[(sharpPatch.Min.Y+y)*w+sharpPatch.Min.X:], tex[y*sharpPatch.Dx():(y+1)*sharpPatch.Dx()])
 	}
-	return luma, w, h, sharpPatch
+	return u8(luma), w, h, sharpPatch
 }
 
 func TestLandedIgnoresNoisyBokeh(t *testing.T) {
@@ -201,10 +211,11 @@ func TestLandedIgnoresNoisyBokeh(t *testing.T) {
 func TestRatioSubtractsNoise(t *testing.T) {
 	rng := rand.New(rand.NewSource(5))
 	const w, h = 384, 384
-	g := make([]float32, w*h)
-	for i := range g {
-		g[i] = 120 + float32(rng.NormFloat64()*2)
+	gf := make([]float32, w*h)
+	for i := range gf {
+		gf[i] = 120 + float32(rng.NormFloat64()*2)
 	}
+	g := u8(gf)
 	r := image.Rect(0, 0, w, h)
 	raw := Ratio(g, w, r, 0)
 	fine, _ := fineCoarse(g, w, r)

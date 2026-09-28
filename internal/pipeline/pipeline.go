@@ -19,8 +19,10 @@ import (
 	"github.com/jefflaplante/gophotocull/internal/dng"
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/focus"
+	"github.com/jefflaplante/gophotocull/internal/group"
 	"github.com/jefflaplante/gophotocull/internal/imageprep"
 	"github.com/jefflaplante/gophotocull/internal/llm"
+	"github.com/jefflaplante/gophotocull/internal/rawclip"
 	"github.com/jefflaplante/gophotocull/internal/report"
 	"github.com/jefflaplante/gophotocull/internal/xmp"
 )
@@ -41,14 +43,48 @@ type Config struct {
 	Policy         eval.Policy
 	Backend        string // recorded in the report; resume refuses a mismatch
 	Model          string
-	LandedTiles    int     // "where focus landed" tiles per frame
-	FaceMinQ       float64 // pigo detection score for a confident face
-	Locate         bool    // ask the backend for the focus target when no face is found
-	SaveInputs     string  // directory for exactly what the model is sent; "" = off
+	LandedTiles    int // "where focus landed" tiles per frame
+	// LandedWithSubject also sends landed tiles when there is a subject crop. Off by
+	// default: on real frames the model compared smooth skin with crisper fabric in
+	// the same plane and called sharp faces missed_focus.
+	LandedWithSubject bool
+	FaceMinQ          float64       // pigo detection score for a confident face
+	Locate            bool          // ask the backend for the focus target when no face is found
+	SaveInputs        string        // directory for exactly what the model is sent; "" = off
+	Price             *llm.Price    // per-token price of the backend; nil = not billed per token
+	Batch             bool          // priced at the batch rate
+	MaxCost           float64       // stop dispatch once the run's cost reaches this (USD); 0 = off
+	Escalate          *Escalation   // re-evaluate matching frames on a second model; nil = off
+	RawClip           bool          // measure highlight clipping in the raw data (~0.8 s/frame)
+	BatchPoll         time.Duration // batch mode: time between status checks
+	BatchChunkBytes   int           // batch mode: max request bytes per batch (0 = 180 MB)
+	GroupGap          time.Duration // burst: max time between frames; 0 = no grouping
+	GroupHamming      int           // burst: max dHash distance between neighbours
 
 	detect      func(*imageprep.Frame) []focus.Face // test hook; nil = pigo
 	CheckpointN int
 	Log         io.Writer
+}
+
+// Escalation re-evaluates frames whose first assessment matches On (sharpness
+// statuses, or "eyes_closed") on a second, usually stronger, model.
+type Escalation struct {
+	Backend llm.Backend
+	Model   string
+	Price   *llm.Price // nil = not billed per token
+	On      map[string]bool
+}
+
+// Label identifies the escalation target in the report and the resume guard.
+func (e *Escalation) Label() string {
+	if e == nil {
+		return ""
+	}
+	return e.Backend.Name() + "/" + e.Model
+}
+
+func (e *Escalation) matches(ev *eval.Evaluation) bool {
+	return e.On[ev.Sharpness.Status] || (e.On["eyes_closed"] && ev.People.Eyes == "closed")
 }
 
 func Discover(dir string, recursive bool) ([]string, error) {
@@ -78,48 +114,13 @@ func Discover(dir string, recursive bool) ([]string, error) {
 // are dispatched; in-flight frames finish and everything done so far is saved.
 func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Usage, error) {
 	var total llm.Usage
-	files, err := Discover(cfg.Dir, cfg.Recursive)
+	if _, err := os.Stat(batchStatePath(cfg)); err == nil {
+		return nil, total, fmt.Errorf("an unfinished batch run is recorded in %s: finish it with --batch --resume (or delete that file to start over)", batchStatePath(cfg))
+	}
+	rep, todo, err := startRun(&cfg)
 	if err != nil {
 		return nil, total, err
 	}
-	if cfg.detect == nil {
-		d, err := focus.NewDetector()
-		if err != nil {
-			return nil, total, err
-		}
-		cfg.detect = func(f *imageprep.Frame) []focus.Face { return d.Detect(f.Luma, f.W, f.H) }
-	}
-	rep := &report.Report{SchemaVersion: report.SchemaVersion, Backend: cfg.Backend, Model: cfg.Model, Dir: cfg.Dir}
-	done := map[string]bool{}
-	if cfg.Resume {
-		prev, err := report.Load(cfg.ReportPath)
-		switch {
-		case err == nil:
-			// Mixing backends or models in one report would corrupt calibration comparisons.
-			if prev.SchemaVersion != report.SchemaVersion || prev.Backend != cfg.Backend || prev.Model != cfg.Model {
-				return nil, total, fmt.Errorf("resume: %s was produced by schema v%d, backend %q, model %q; "+
-					"this run is schema v%d, backend %q, model %q: drop --resume or use -o for a separate report",
-					cfg.ReportPath, prev.SchemaVersion, prev.Backend, prev.Model, report.SchemaVersion, cfg.Backend, cfg.Model)
-			}
-			for _, r := range prev.Results {
-				if r.Error == "" && (r.Evaluation != nil || cfg.DryRun) {
-					rep.Results = append(rep.Results, r)
-					done[r.Key()] = true
-				}
-			}
-		case !errors.Is(err, fs.ErrNotExist):
-			return nil, total, fmt.Errorf("resume: %w", err)
-		}
-	}
-
-	var todo []string
-	for _, f := range files {
-		st, err := os.Stat(f)
-		if err != nil || !done[report.Key(f, st.Size(), st.ModTime())] {
-			todo = append(todo, f)
-		}
-	}
-	fmt.Fprintf(cfg.Log, "%d DNGs found, %d already done, %d to process\n", len(files), len(files)-len(todo), len(todo))
 
 	jobs := make(chan string)
 	results := make(chan report.Result)
@@ -127,6 +128,7 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 	var stopOnce sync.Once
 	var stopErr error
 	halt := func(err error) { stopOnce.Do(func() { stopErr = err; close(stop) }) }
+	var budget spend
 
 	var wg sync.WaitGroup
 	for i := 0; i < max(1, cfg.Concurrency); i++ {
@@ -139,9 +141,15 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 					continue // drained unprocessed; --resume picks it up
 				default:
 				}
-				res, serr := processOne(ctx, cfg, b, f)
+				res, escUsage, serr := processOne(ctx, cfg, b, f)
+				res.CostUSD = cost(cfg, res.Usage, escUsage)
 				if serr != nil {
 					halt(serr)
+				}
+				// Checked before the result is handed over, like the quota stop, so no
+				// worker picks up another frame once the budget is spent.
+				if over, total := budget.add(res.CostUSD, cfg.MaxCost); over {
+					halt(fmt.Errorf("%w: $%.2f of $%.2f", llm.ErrBudget, total, cfg.MaxCost))
 				}
 				results <- res
 			}
@@ -174,14 +182,7 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 			}
 		}
 	}
-	if cfg.MoveCulled && !cfg.DryRun {
-		// After a quota stop or Ctrl-C too: those decisions are final.
-		if n := moveCulled(rep, cfg.Log); n > 0 {
-			fmt.Fprintf(cfg.Log, "moved %d culled frame(s) into %s/ (undo: gophotocull restore %s)\n", n, CulledDir, cfg.Dir)
-		}
-	}
-	rep.Generated = time.Now()
-	if err := rep.Save(cfg.ReportPath); err != nil {
+	if err := finishRun(rep, cfg); err != nil {
 		return rep, total, err
 	}
 	if stopErr != nil {
@@ -193,95 +194,43 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 // processOne evaluates one file. The error return is reserved for conditions that
 // must stop the whole run (llm.ErrQuotaStop, llm.ErrAbortRun); per-frame failures
 // are recorded in the result.
-func processOne(ctx context.Context, cfg Config, b llm.Backend, path string) (report.Result, error) {
-	res := report.Result{File: path}
-	if st, err := os.Stat(path); err == nil {
-		res.Size, res.ModTime = st.Size(), st.ModTime()
+func processOne(ctx context.Context, cfg Config, b llm.Backend, path string) (report.Result, llm.Usage, error) {
+	var escUsage llm.Usage // escalation calls, priced separately
+	p, err := prepareFrame(cfg, path)
+	if err != nil {
+		return p.res, escUsage, nil
 	}
-	fail := func(stage string, err error) report.Result {
-		res.Error = stage + ": " + err.Error()
-		return res
-	}
+	res := &p.res
+	target, needLocate := faceTarget(cfg, p.frame, res.FocusTarget)
 	var stopErr error
+	if needLocate {
+		small, err := p.frame.Downscaled(locateEdge, 85)
+		var loc *eval.LocateResult
+		if err == nil {
+			var u llm.Usage
+			loc, u, err = eval.Locate(ctx, b, small, locateMaxTokens)
+			res.Usage.Add(u)
+		}
+		switch {
+		case errors.Is(err, llm.ErrAbortRun):
+			res.Error = "locate: " + err.Error()
+			return *res, escUsage, err
+		case errors.Is(err, llm.ErrQuotaStop):
+			// Use the answer if there is one, then stop dispatching. This frame's
+			// evaluation still runs, so one call lands past --quota-stop: in-flight
+			// work finishes, as everywhere else a stop is signalled.
+			stopErr, err = err, nil
+		}
+		target = applyLocate(res.FocusTarget, loc, err, p.frame)
+	}
 
-	pv, err := dng.Best(path, cfg.MinPreviewEdge)
+	in, err := buildInput(cfg, p, target)
 	if err != nil {
-		return fail("preview", err), nil
-	}
-	res.Preview = &report.PreviewInfo{Width: pv.Width, Height: pv.Height, Orientation: pv.Orientation, Source: pv.Source}
-
-	frame, err := imageprep.Decode(pv.Data, pv.Orientation)
-	if err != nil {
-		return fail("decode", err), nil
-	}
-	stats := imageprep.Measure(frame)
-	res.Stats = &stats
-	if pv.LongEdge() < cfg.MinPreviewEdge {
-		res.Fixups = append(res.Fixups, fmt.Sprintf("preview long edge %dpx < %dpx: focus judgement unreliable", pv.LongEdge(), cfg.MinPreviewEdge))
-	}
-
-	ft := &report.FocusTarget{}
-	res.FocusTarget = ft
-	target, serr := locateTarget(ctx, cfg, b, frame, ft, &res.Usage)
-	if errors.Is(serr, llm.ErrAbortRun) {
-		return fail("locate", serr), serr
-	}
-	stopErr = serr
-
-	var subjectRect image.Rectangle
-	if target != nil {
-		subjectRect = focus.SubjectRect(*target, frame.W, frame.H)
-	}
-	cells, noise := focus.Landed(frame.Luma, frame.W, frame.H, subjectRect, cfg.LandedTiles)
-	if len(cells) > 0 {
-		ft.LandedSharpness = round(cells[0].Ratio, 3)
-	}
-	var subject *eval.Labeled
-	if target != nil {
-		ft.SubjectSharpness = round(focus.Ratio(frame.Luma, frame.W, subjectRect, noise), 3)
-		jb, err := frame.Crop(subjectRect, 90)
-		if err != nil {
-			return fail("crop", err), stopErr
-		}
-		subject = &eval.Labeled{Label: subjectLabel(ft), JPEG: jb}
-	}
-	var landed []eval.Labeled
-	for _, c := range cells {
-		jb, err := frame.Crop(c.Crop, 90)
-		if err != nil {
-			return fail("crop", err), stopErr
-		}
-		landed = append(landed, eval.Labeled{Label: landedLabel, JPEG: jb})
-	}
-	if cfg.DryRun && cfg.SaveInputs == "" {
-		return res, nil
-	}
-	full, err := frame.Downscaled(cfg.Prep.MaxEdge, 85)
-	if err != nil {
-		return fail("encode", err), stopErr
-	}
-	in := eval.Input{
-		Filename:    filepath.Base(path),
-		FullFrame:   full,
-		Subject:     subject,
-		Landed:      landed,
-		StatsText:   statsText(frame, stats),
-		MinCropArea: cfg.Policy.MinCropArea,
-	}
-	if cfg.SaveInputs != "" {
-		names := []string{"full"}
-		if subject != nil {
-			names = append(names, "subject")
-		}
-		for i := range landed {
-			names = append(names, fmt.Sprintf("landed-%d", i+1))
-		}
-		if err := saveInputs(cfg.SaveInputs, inputsBase(cfg.Dir, path), eval.EvalRequest(in), names, ft); err != nil {
-			res.Fixups = append(res.Fixups, "save-inputs: "+err.Error())
-		}
+		res.Error = err.Error()
+		return *res, escUsage, stopErr
 	}
 	if cfg.DryRun {
-		return res, nil
+		return *res, escUsage, nil
 	}
 
 	e, usage, err := eval.Evaluate(ctx, b, in)
@@ -290,88 +239,38 @@ func processOne(ctx context.Context, cfg Config, b llm.Backend, path string) (re
 	case errors.Is(err, llm.ErrQuotaStop) && e != nil:
 		stopErr = err // this frame's result is good; stop dispatching more
 	case errors.Is(err, llm.ErrQuotaStop), errors.Is(err, llm.ErrAbortRun):
-		return fail("evaluate", err), err
+		res.Error = "evaluate: " + err.Error()
+		return *res, escUsage, err
 	case err != nil:
-		return fail("evaluate", err), stopErr
+		res.Error = "evaluate: " + err.Error()
+		return *res, escUsage, stopErr
 	}
-	res.Fixups = append(res.Fixups, cfg.Policy.Sanitize(e)...)
-	res.Evaluation = e
-	res.Decision, res.Reasons = cfg.Policy.Decide(e)
-
-	if cfg.WriteXMP {
-		sc := buildSidecar(res, pv.Orientation, cfg.XMPDevelop)
-		p := xmp.Path(path)
-		switch err := xmp.Write(p, sc, cfg.OverwriteXMP); {
-		case err == nil:
-			res.XMP = p
-		case errors.Is(err, xmp.ErrExists):
-			res.Fixups = append(res.Fixups, "xmp: sidecar exists, not overwritten")
+	if esc := cfg.Escalate; esc != nil && esc.matches(e) {
+		e2, u2, err := eval.Evaluate(ctx, esc.Backend, in)
+		escUsage.Add(u2)
+		res.Usage.Add(u2)
+		switch {
+		case e2 != nil && (err == nil || errors.Is(err, llm.ErrQuotaStop)):
+			res.FirstPass = &report.FirstPass{Backend: b.Name(), Model: cfg.Model, Evaluation: e}
+			e = e2
+			if err != nil {
+				stopErr = err
+			}
+		case errors.Is(err, llm.ErrAbortRun), errors.Is(err, llm.ErrQuotaStop):
+			res.Fixups = append(res.Fixups, "escalation failed: "+err.Error())
+			stopErr = err
 		default:
-			res.Fixups = append(res.Fixups, "xmp: "+err.Error())
+			res.Fixups = append(res.Fixups, "escalation failed: "+err.Error())
 		}
 	}
-	return res, stopErr
+	finish(cfg, res, e, p.orientation)
+	return *res, escUsage, stopErr
 }
 
 const (
 	locateEdge      = 1024 // the locate call sees a small frame: finding a subject needs no detail
 	locateMaxTokens = 256
 )
-
-// locateTarget decides what should be sharp: the most confident face, else (for
-// cull with --locate model) the subject the model points at. It fills ft,
-// including why there is no target. The error is reserved for run-stopping
-// conditions (llm.ErrAbortRun, llm.ErrQuotaStop); a failed locate call only
-// means "no subject crop" and the frame is still evaluated.
-func locateTarget(ctx context.Context, cfg Config, b llm.Backend, frame *imageprep.Frame, ft *report.FocusTarget, usage *llm.Usage) (*focus.Target, error) {
-	faces := focus.Confident(cfg.detect(frame), cfg.FaceMinQ)
-	ft.Faces = len(faces)
-	if len(faces) > 0 {
-		t := focus.FaceTarget(faces[0])
-		ft.Source, ft.FaceQ, ft.Box = "face", round(faces[0].Q, 1), normBox(faces[0].Rect, frame.W, frame.H)
-		return &t, nil
-	}
-	ft.Source = "none"
-	switch {
-	case cfg.DryRun:
-		ft.Reason = "no face; scan does not call a model"
-		return nil, nil
-	case !cfg.Locate:
-		ft.Reason = "no face; locate off"
-		return nil, nil
-	}
-	small, err := frame.Downscaled(locateEdge, 85)
-	if err != nil {
-		ft.Reason = "locate failed: " + err.Error()
-		return nil, nil
-	}
-	loc, u, err := eval.Locate(ctx, b, small, locateMaxTokens)
-	usage.Add(u)
-	var stop error
-	switch {
-	case errors.Is(err, llm.ErrAbortRun):
-		return nil, err
-	case errors.Is(err, llm.ErrQuotaStop):
-		stop = err // use the answer if there is one, then stop dispatching
-	case err != nil:
-		ft.Reason = "locate failed: " + err.Error()
-		return nil, nil
-	}
-	switch {
-	case loc == nil:
-		ft.Reason = "locate failed: no result"
-	case !loc.Confident || loc.Kind == "none":
-		ft.Reason = "model: no clear subject"
-	case !loc.Box.Valid():
-		ft.Reason = fmt.Sprintf("model: invalid box %+v", loc.Box)
-	default:
-		box := loc.Box
-		t := focus.BoxTarget(denorm(box, frame.W, frame.H))
-		ft.Source, ft.Box, ft.Label = "model", &box, loc.Subject
-		return &t, stop
-	}
-	return nil, stop
-}
 
 func subjectLabel(ft *report.FocusTarget) string {
 	if ft.Source == "face" {
@@ -400,11 +299,20 @@ func round(v float64, places int) float64 {
 
 const landedLabel = "Region with the most fine detail relative to its local contrast, at native preview resolution: where focus most likely landed."
 
-func statsText(f *imageprep.Frame, s imageprep.Stats) string {
-	return fmt.Sprintf(
+func statsText(f *imageprep.Frame, s imageprep.Stats, ex *dng.Exif, rc *rawclip.Result) string {
+	t := fmt.Sprintf(
 		"preview %dx%d; mean luma %.1f/255; luma p1/p50/p99 = %d/%d/%d; "+
 			"highlight clip (any channel >=250) %.2f%%; shadow clip (luma <=3) %.2f%%",
 		f.W, f.H, s.MeanLuma, s.LumaP1, s.LumaP50, s.LumaP99, s.HighlightClipPct, s.ShadowClipPct)
+	if ex != nil {
+		if sum := ex.Summary(); sum != "" {
+			t += "\nshooting: " + sum
+		}
+	}
+	if rc != nil {
+		t += fmt.Sprintf("\nraw data: %.3f%% of samples at the sensor's white level (the preview's clipping overstates this)", rc.HighlightPct)
+	}
+	return t
 }
 
 // buildSidecar maps a decision to metadata. Ratings: keep=3, review=2, cull=1.
@@ -459,4 +367,105 @@ func focusBrief(ft *report.FocusTarget) string {
 		return "[model: " + ft.Label + "]"
 	}
 	return "[no subject: " + ft.Reason + "]"
+}
+
+// spend is a run's running cost, shared by the workers.
+type spend struct {
+	mu    sync.Mutex
+	total float64
+}
+
+// add records cost and reports whether max (when set) has been reached.
+func (s *spend) add(cost, max float64) (bool, float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.total += cost
+	return max > 0 && s.total >= max, s.total
+}
+
+// cost prices a frame: the primary model for everything but the escalation
+// calls, which use the escalation model's price.
+func cost(cfg Config, total, esc llm.Usage) float64 {
+	primary := llm.Usage{InputTokens: total.InputTokens - esc.InputTokens, OutputTokens: total.OutputTokens - esc.OutputTokens}
+	c := 0.0
+	if cfg.Price != nil {
+		c += cfg.Price.Cost(primary, cfg.Batch)
+	}
+	if cfg.Escalate != nil && cfg.Escalate.Price != nil {
+		c += cfg.Escalate.Price.Cost(esc, cfg.Batch)
+	}
+	return c
+}
+
+// startRun discovers the frames, applies the resume guard, and returns the report
+// (holding resumed results) and the frames still to process.
+func startRun(cfg *Config) (*report.Report, []string, error) {
+	files, err := Discover(cfg.Dir, cfg.Recursive)
+	if err != nil {
+		return nil, nil, err
+	}
+	if cfg.detect == nil {
+		d, err := focus.NewDetector()
+		if err != nil {
+			return nil, nil, err
+		}
+		cfg.detect = func(f *imageprep.Frame) []focus.Face { return d.Detect(f.Luma, f.W, f.H) }
+	}
+	rep := &report.Report{SchemaVersion: report.SchemaVersion, Backend: cfg.Backend, Model: cfg.Model,
+		Escalation: cfg.Escalate.Label(), Dir: cfg.Dir}
+	done := map[string]bool{}
+	if cfg.Resume {
+		prev, err := report.Load(cfg.ReportPath)
+		switch {
+		case err == nil:
+			// Mixing backends or models in one report would corrupt calibration comparisons.
+			if prev.SchemaVersion != report.SchemaVersion || prev.Backend != cfg.Backend || prev.Model != cfg.Model ||
+				prev.Escalation != rep.Escalation {
+				scan := ""
+				if prev.Backend == "" {
+					scan = " (a scan report)"
+				}
+				return nil, nil, fmt.Errorf("resume: %s%s was produced by schema v%d, backend %q, model %q, escalation %q; "+
+					"this run is schema v%d, backend %q, model %q, escalation %q: drop --resume or use -o for a separate report",
+					cfg.ReportPath, scan, prev.SchemaVersion, prev.Backend, prev.Model, prev.Escalation,
+					report.SchemaVersion, cfg.Backend, cfg.Model, rep.Escalation)
+			}
+			for _, r := range prev.Results {
+				if r.Error == "" && (r.Evaluation != nil || cfg.DryRun) {
+					rep.Results = append(rep.Results, r)
+					done[r.Key()] = true
+				}
+			}
+		case !errors.Is(err, fs.ErrNotExist):
+			return nil, nil, fmt.Errorf("resume: %w", err)
+		}
+	}
+	var todo []string
+	for _, f := range files {
+		st, err := os.Stat(f)
+		if err != nil || !done[report.Key(f, st.Size(), st.ModTime())] {
+			todo = append(todo, f)
+		}
+	}
+	fmt.Fprintf(cfg.Log, "%d DNGs found, %d already done, %d to process\n", len(files), len(files)-len(todo), len(todo))
+	return rep, todo, nil
+}
+
+// finishRun decides bursts (they span frames, so only once everything is in),
+// rewrites our sidecars where that changed a decision, moves culls when asked,
+// and saves the report.
+func finishRun(rep *report.Report, cfg Config) error {
+	for _, i := range decideAll(rep, cfg.Policy, group.Options{Gap: cfg.GroupGap, MaxHamming: cfg.GroupHamming}) {
+		if cfg.WriteXMP {
+			writeDecidedSidecar(&rep.Results[i], DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP})
+		}
+	}
+	if cfg.MoveCulled && !cfg.DryRun {
+		// After a quota stop or Ctrl-C too: those decisions are final.
+		if n := moveCulled(rep, cfg.Log); n > 0 {
+			fmt.Fprintf(cfg.Log, "moved %d culled frame(s) into %s/ (undo: gophotocull restore %s)\n", n, CulledDir, cfg.Dir)
+		}
+	}
+	rep.Generated = time.Now()
+	return rep.Save(cfg.ReportPath)
 }

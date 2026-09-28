@@ -11,14 +11,14 @@ import (
 	"testing"
 )
 
-func lumaOf(img image.Image) ([]float32, int, int) {
+func lumaOf(img image.Image) ([]uint8, int, int) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
-	l := make([]float32, w*h)
+	l := make([]uint8, w*h)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			r, g, bl, _ := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
-			l[y*w+x] = (0.2126*float32(r) + 0.7152*float32(g) + 0.0722*float32(bl)) / 257
+			l[y*w+x] = uint8((0.299*float32(r) + 0.587*float32(g) + 0.114*float32(bl)) / 257)
 		}
 	}
 	return l, w, h
@@ -70,7 +70,7 @@ func TestDetectFlatFrameHasNoConfidentFace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l := make([]float32, 3000*2000)
+	l := make([]uint8, 3000*2000)
 	for i := range l {
 		l[i] = 120
 	}

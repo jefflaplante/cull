@@ -183,3 +183,17 @@ func TestOpenAIIncompleteOutputErrorIsOneLineWithTail(t *testing.T) {
 		t.Fatalf("want a one-line error quoting the tail, got %q", msg)
 	}
 }
+
+func TestOpenAINonJSONBodyFailsFast(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		fmt.Fprint(w, "<html>proxy login</html>")
+	}))
+	defer srv.Close()
+	o := NewOpenAI(srv.URL, "", "m")
+	o.Stream = false
+	if _, err := o.Call(context.Background(), tinyRequest()); err == nil || calls != 1 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+}

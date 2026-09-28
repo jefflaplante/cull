@@ -117,3 +117,12 @@ func TestValidatedDoesNotRetryCallErrors(t *testing.T) {
 		t.Fatalf("calls=%d err=%v", calls, err)
 	}
 }
+
+func TestValidatedKeepsQuotaStopWhenOutputIsInvalid(t *testing.T) {
+	_, err := validated(context.Background(), testSchema, func(context.Context) (*Response, error) {
+		return &Response{JSON: json.RawMessage(`{}`)}, ErrQuotaStop
+	})
+	if !errors.Is(err, ErrQuotaStop) || !strings.Contains(err.Error(), "schema") {
+		t.Fatalf("want quota stop plus the schema problem, got %v", err)
+	}
+}

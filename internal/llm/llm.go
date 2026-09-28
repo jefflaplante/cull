@@ -101,10 +101,10 @@ func validated(ctx context.Context, schema map[string]any, attempt func(context.
 			return nil, fmt.Errorf("backend returned no response")
 		}
 		if verr := Validate(schema, resp.JSON); verr != nil {
-			lastErr = verr
-			if err != nil { // quota stop: don't spend another call
-				break
+			if err != nil { // quota stop: don't spend another call, and keep the stop signal
+				return nil, fmt.Errorf("%w; also, model output does not match schema: %v", err, verr)
 			}
+			lastErr = verr
 			continue
 		}
 		resp.Usage = total

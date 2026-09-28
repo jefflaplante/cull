@@ -54,7 +54,7 @@ func NewDetector() (*Detector, error) {
 
 // Detect returns clustered face detections sorted by Q, highest first. A panic
 // inside pigo is treated as "no face": detection is advisory, never fatal.
-func (d *Detector) Detect(luma []float32, w, h int) (faces []Face) {
+func (d *Detector) Detect(luma []uint8, w, h int) (faces []Face) {
 	defer func() {
 		if recover() != nil {
 			faces = nil

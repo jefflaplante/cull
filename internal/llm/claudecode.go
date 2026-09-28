@@ -131,7 +131,9 @@ func (c *ClaudeCode) quotaErr(q *Quota) error {
 	if q == nil {
 		return nil
 	}
-	if (q.Status != "" && q.Status != "allowed") || (c.QuotaStop > 0 && q.FiveHour >= c.QuotaStop) {
+	// Any "allowed…" status (e.g. allowed_warning near the limit) still allows the
+	// call; --quota-stop is what decides when to stop.
+	if (q.Status != "" && !strings.HasPrefix(q.Status, "allowed")) || (c.QuotaStop > 0 && q.FiveHour >= c.QuotaStop) {
 		return fmt.Errorf("%w: status %s, 5-hour window %.0f%% used (stop at %.0f%%)", ErrQuotaStop, q.Status, 100*q.FiveHour, 100*c.QuotaStop)
 	}
 	return nil

@@ -123,17 +123,21 @@ func TestBurstDuplicatesGoToReviewAndDecideCanCullThem(t *testing.T) {
 	}
 	c := moveCfg(dir)
 	c.MoveCulled, c.WriteXMP = false, true
-	c.GroupGap, c.GroupHamming = 2*time.Second, 12
+	c.GroupGap = 2 * time.Second
 	rep, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	best := result(t, rep, "L1000001.DNG")
-	if best.Group == nil || best.Group.Size != 3 || best.Group.Best != "L1000001.DNG" || best.Decision != eval.Keep || best.DHash == "" {
-		t.Fatalf("best: group=%+v decision=%s dhash=%q", best.Group, best.Decision, best.DHash)
+	best := result(t, rep, "L1000001.DNG") // equal scores: capture (file-name) order decides
+	if g := best.Group; g == nil || g.ID != 1 || g.Size != 3 || g.Rank != 1 || g.Of != 3 || g.By != "scores" || !g.Best ||
+		best.Decision != eval.Keep || best.Look == "" {
+		t.Fatalf("best: group=%+v decision=%s look=%q", best.Group, best.Decision, best.Look)
 	}
-	for _, n := range []string{"L1000002.DNG", "L1000003.DNG"} {
+	for rank, n := range []string{"L1000002.DNG", "L1000003.DNG"} {
 		r := result(t, rep, n)
+		if g := r.Group; g == nil || g.ID != 1 || g.Rank != rank+2 || g.Best {
+			t.Fatalf("%s: group=%+v", n, r.Group)
+		}
 		if r.Decision != eval.Review || !strings.Contains(strings.Join(r.Reasons, ";"), "duplicate of L1000001.DNG (burst of 3)") {
 			t.Fatalf("%s: decision=%s reasons=%v", n, r.Decision, r.Reasons)
 		}
@@ -143,7 +147,7 @@ func TestBurstDuplicatesGoToReviewAndDecideCanCullThem(t *testing.T) {
 	}
 
 	sum, err := Decide(c.ReportPath, DecideOptions{
-		Policy: eval.Policy{MinCropArea: 0.6, Duplicates: eval.ActionCull}, GroupGap: 2 * time.Second, GroupHamming: 12,
+		Policy: eval.Policy{MinCropArea: 0.6, Duplicates: eval.ActionCull}, GroupGap: 2 * time.Second,
 	}, io.Discard)
 	if err != nil || sum.Changed["review→cull"] != 2 {
 		t.Fatalf("decide: %+v %v", sum, err)

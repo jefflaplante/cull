@@ -1,52 +1,15 @@
-// Package group finds bursts and near-duplicates: consecutive frames close in
-// capture time whose difference hashes are nearly identical.
+// Package group finds sequences of similar frames: consecutive frames close in
+// capture time that look alike (LookDistance), such as a burst or several takes of
+// one set-up.
 package group
 
 import (
 	"math"
-	"math/bits"
 	"sort"
 	"time"
 )
 
-// DHash is a 64-bit difference hash: the image box-averaged to 9×8 luma cells,
-// one bit per horizontal neighbour comparison. Robust to small shifts and
-// exposure changes, sensitive to a different scene.
-func DHash(luma []uint8, w, h int) uint64 {
-	var cells [8][9]float64
-	for cy := 0; cy < 8; cy++ {
-		y0, y1 := cy*h/8, (cy+1)*h/8
-		for cx := 0; cx < 9; cx++ {
-			x0, x1 := cx*w/9, (cx+1)*w/9
-			sum, n := 0, 0
-			for y := y0; y < y1; y += 2 { // every other pixel is plenty for a 72-cell average
-				row := luma[y*w:]
-				for x := x0; x < x1; x += 2 {
-					sum += int(row[x])
-					n++
-				}
-			}
-			if n > 0 {
-				cells[cy][cx] = float64(sum) / float64(n)
-			}
-		}
-	}
-	var hash uint64
-	for cy := 0; cy < 8; cy++ {
-		for cx := 0; cx < 8; cx++ {
-			hash <<= 1
-			if cells[cy][cx] > cells[cy][cx+1] {
-				hash |= 1
-			}
-		}
-	}
-	return hash
-}
-
-// Hamming is the number of differing bits.
-func Hamming(a, b uint64) int { return bits.OnesCount64(a ^ b) }
-
-// Score ranks frames within a group.
+// Score ranks frames within a set.
 type Score struct {
 	Evaluated bool
 	Sharp     float64
@@ -59,29 +22,36 @@ type Frame struct {
 	Key     string // file path; orders frames with equal or missing times
 	Time    time.Time
 	HasTime bool
-	Hash    uint64
-	HasHash bool
+	Look    []uint8 // look fingerprint (imageprep Grid(LookSize)); nil = never links
 	Score   Score
 }
 
-// MaxBurst caps a burst: real bursts rarely exceed a few seconds at 4.5 fps,
-// and a runaway group would turn a session into "duplicates".
-const MaxBurst = 15
+// MaxSequence caps a set, so a slow walk down a street can't chain into one.
+const MaxSequence = 40
+
+// DefaultLook is the default Options.MaxLook, measured on 17 real frames
+// (2026-09-28, CLAUDE.md): the two known pairs sit at 0.022 and 0.034, the nearest
+// other consecutive pair at 0.118.
+const DefaultLook = 0.08
 
 // Options: Gap 0 disables grouping.
 type Options struct {
-	Gap        time.Duration // max time between consecutive frames of a burst
-	MaxHamming int           // max dHash distance between consecutive frames
+	Gap     time.Duration // max capture-time gap to the previous frame (ignored when either lacks a time)
+	MaxLook float64       // max LookDistance to the previous frame
 }
 
-// Groups returns bursts of two or more frames as indices into frames, each in
-// capture order. Frames are ordered by capture time, then key; a frame joins the
-// current burst when it is within Gap of its neighbour (or both lack a time),
-// within MaxHamming of both its neighbour and the burst's first frame, and the
-// burst has fewer than MaxBurst frames.
-func Groups(frames []Frame, o Options) [][]int {
+// Sequences returns sets of two or more similar frames as indices into frames,
+// each in capture order. Frames are ordered by capture time then key when every
+// frame has a time, otherwise by key (Leica numbers are sequential). A frame joins
+// the current set when it is within Gap of the previous frame and looks like the
+// previous frame (not the first: sequences drift), up to MaxSequence frames.
+func Sequences(frames []Frame, o Options) [][]int {
 	if o.Gap <= 0 || len(frames) < 2 {
 		return nil
+	}
+	allTimed := true
+	for _, f := range frames {
+		allTimed = allTimed && f.HasTime
 	}
 	order := make([]int, len(frames))
 	for i := range order {
@@ -89,27 +59,21 @@ func Groups(frames []Frame, o Options) [][]int {
 	}
 	sort.SliceStable(order, func(a, b int) bool {
 		fa, fb := frames[order[a]], frames[order[b]]
-		if fa.HasTime && fb.HasTime && !fa.Time.Equal(fb.Time) {
+		if allTimed && !fa.Time.Equal(fb.Time) {
 			return fa.Time.Before(fb.Time)
-		}
-		if fa.HasTime != fb.HasTime {
-			return fa.HasTime // timed frames first; untimed ones by name after
 		}
 		return fa.Key < fb.Key
 	})
-	var groups [][]int
+	var sets [][]int
 	cur := []int{order[0]}
 	flush := func() {
 		if len(cur) > 1 {
-			groups = append(groups, cur)
+			sets = append(sets, cur)
 		}
 	}
 	for k := 1; k < len(order); k++ {
-		prev, next, first := frames[order[k-1]], frames[order[k]], frames[cur[0]]
-		// A frame joins when it follows its neighbour closely AND still resembles
-		// the burst's first frame: timestamps can be unreliable (rewritten on
-		// export), and neighbour-only linking would chain a whole session.
-		if linked(prev, next, o) && Hamming(first.Hash, next.Hash) <= o.MaxHamming && len(cur) < MaxBurst {
+		prev, next := frames[order[k-1]], frames[order[k]]
+		if linked(prev, next, o) && len(cur) < MaxSequence {
 			cur = append(cur, order[k])
 			continue
 		}
@@ -117,30 +81,26 @@ func Groups(frames []Frame, o Options) [][]int {
 		cur = []int{order[k]}
 	}
 	flush()
-	return groups
+	return sets
 }
 
 func linked(a, b Frame, o Options) bool {
-	if !a.HasHash || !b.HasHash || Hamming(a.Hash, b.Hash) > o.MaxHamming {
+	if len(a.Look) == 0 || len(b.Look) == 0 || LookDistance(a.Look, b.Look) > o.MaxLook {
 		return false
 	}
 	if a.HasTime && b.HasTime {
 		d := b.Time.Sub(a.Time)
 		return d >= 0 && d <= o.Gap
 	}
-	return a.HasTime == b.HasTime // two untimed neighbours: the hash decides
+	return true
 }
 
-// Best picks the frame to keep: evaluated first, then sharpness score, open
-// eyes, composition, exposure; earliest on a tie.
-func Best(frames []Frame, group []int) int {
-	best := group[0]
-	for _, i := range group[1:] {
-		if better(frames[i].Score, frames[best].Score) {
-			best = i
-		}
-	}
-	return best
+// ScoreOrder orders a set best first by the frames' own scores: evaluated, then
+// sharpness, open eyes, composition, exposure; capture order on a tie.
+func ScoreOrder(frames []Frame, set []int) []int {
+	out := append([]int(nil), set...)
+	sort.SliceStable(out, func(a, b int) bool { return better(frames[out[a]].Score, frames[out[b]].Score) })
+	return out
 }
 
 func better(a, b Score) bool {
@@ -169,7 +129,12 @@ const LookSize = 8
 // say — is diluted to near zero by dozens of unchanged background cells if averaged
 // over the whole grid, but survives in the worst quarter. Taking the smallest score
 // over the 9 shifts still lets small reframing align through the search.
+// A malformed look (not LookSize×LookSize×3 bytes, as from a hand-edited report)
+// is as far as looks go: 1.
 func LookDistance(a, b []uint8) float64 {
+	if len(a) != LookSize*LookSize*3 || len(b) != len(a) {
+		return 1
+	}
 	na, nb := levelled(a), levelled(b)
 	best := 1.0
 	var diffs []float64

@@ -331,11 +331,7 @@ func printSummary(cmd *cobra.Command, path string, rep *report.Report, usage eva
 		if rep == nil {
 			return
 		}
-		cost := 0.0
-		for _, r := range rep.Results {
-			cost += r.CostUSD
-		}
-		if cost > 0 {
+		if cost := rep.Cost(); cost > 0 {
 			fmt.Fprintf(cmd.ErrOrStderr(), "cost in report: $%.2f at %s\n", cost, rate(batch))
 		}
 	}()

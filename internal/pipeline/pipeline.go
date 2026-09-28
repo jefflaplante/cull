@@ -59,8 +59,8 @@ type Config struct {
 	RawClip           bool          // measure highlight clipping in the raw data (~0.8 s/frame)
 	BatchPoll         time.Duration // batch mode: time between status checks
 	BatchChunkBytes   int           // batch mode: max request bytes per batch (0 = 180 MB)
-	GroupGap          time.Duration // burst: max time between frames; 0 = no grouping
-	GroupHamming      int           // burst: max dHash distance between neighbours
+	GroupGap          time.Duration // sequence: max capture-time gap between neighbours; 0 = no grouping
+	GroupHamming      int           // unused: sequences link by look (group.DefaultLook); goes with --burst-hash
 
 	detect      func(*imageprep.Frame) []focus.Face // test hook; nil = pigo
 	CheckpointN int
@@ -426,7 +426,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 	return rep, todo, nil
 }
 
-// finishRun decides bursts (they span frames, so only once everything is in),
+// finishRun decides sequences (they span frames, so only once everything is in),
 // rewrites our sidecars where that changed a decision, moves culls when asked,
 // and saves the report.
 func finishRun(rep *report.Report, cfg Config) error {
@@ -435,7 +435,7 @@ func finishRun(rep *report.Report, cfg Config) error {
 		fmt.Fprintf(cfg.Log, "warning: frames share a file name, so your labels can't tell them apart; sidecars and moves follow the model's verdicts: %s\n", strings.Join(dups, "; "))
 		lab = nil
 	}
-	for _, i := range decideAll(rep, cfg.Policy, group.Options{Gap: cfg.GroupGap, MaxHamming: cfg.GroupHamming}) {
+	for _, i := range decideAll(rep, cfg.Policy, group.Options{Gap: cfg.GroupGap, MaxLook: group.DefaultLook}) {
 		if cfg.WriteXMP {
 			writeDecidedSidecar(&rep.Results[i], DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP, Labels: lab})
 		}

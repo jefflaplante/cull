@@ -3,6 +3,7 @@
 package report
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,7 +16,7 @@ import (
 	"github.com/jefflaplante/gophotocull/internal/rawclip"
 )
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 type PreviewInfo struct {
 	Width       int    `json:"width"`
@@ -24,11 +25,36 @@ type PreviewInfo struct {
 	Source      string `json:"source"`
 }
 
-// Group places a frame in a burst of near-duplicates.
+// Group places a frame in a sequence of similar frames (a set).
 type Group struct {
-	ID   int    `json:"id"`
-	Size int    `json:"size"`
-	Best string `json:"best"` // base name of the frame kept from the burst
+	ID       int    `json:"id"`
+	Size     int    `json:"size"`               // frames in the set
+	Rank     int    `json:"rank"`               // 1 = best; 0 = not ranked
+	Of       int    `json:"of"`                 // rankable frames in the set
+	By       string `json:"by"`                 // "model" or "scores"
+	Best     bool   `json:"best"`               // rank 1..KeepBest (rank 1 when KeepBest is 0)
+	Strength string `json:"strength,omitempty"` // the model's note, when ranked by the model
+	Weakness string `json:"weakness,omitempty"`
+}
+
+// Set is one sequence of similar frames. Members and Order hold Result.File paths;
+// Order is the model's ranking of the rankable members, empty until ranked.
+type Set struct {
+	ID      int        `json:"id"`
+	Members []string   `json:"members"`
+	Order   []string   `json:"order,omitempty"`
+	Notes   []RankNote `json:"notes,omitempty"`
+	Summary string     `json:"summary,omitempty"`
+	By      string     `json:"by"`
+	Usage   eval.Usage `json:"usage"`
+	CostUSD float64    `json:"cost_usd,omitempty"` // list price of the set's rank calls
+}
+
+// RankNote is the model's note on one ranked frame.
+type RankNote struct {
+	File     string `json:"file"`
+	Strength string `json:"strength"`
+	Weakness string `json:"weakness"`
 }
 
 // FirstPass is the assessment a frame had before it was escalated to a second model.
@@ -58,7 +84,7 @@ type Result struct {
 	Exif        *dng.Exif        `json:"exif,omitempty"`
 	Stats       *imageprep.Stats `json:"stats,omitempty"`
 	FocusTarget *FocusTarget     `json:"focus_target,omitempty"`
-	DHash       string           `json:"dhash,omitempty"` // 64-bit difference hash, hex
+	Look        string           `json:"look,omitempty"` // look fingerprint (imageprep Grid), base64
 	RawClip     *rawclip.Result  `json:"raw_clip,omitempty"`
 	Group       *Group           `json:"group,omitempty"`
 	Evaluation  *eval.Evaluation `json:"evaluation,omitempty"`
@@ -87,7 +113,33 @@ type Report struct {
 	Escalation    string    `json:"escalation,omitempty"` // "backend/model" frames were escalated to
 	Model         string    `json:"model"`
 	Dir           string    `json:"dir"`
+	KeepBest      int       `json:"keep_best"` // Policy.KeepBest used at the last judge or decide
 	Results       []Result  `json:"results"`
+	Sets          []Set     `json:"sets,omitempty"`
+}
+
+// EncodeLook stores a look fingerprint compactly.
+func EncodeLook(g []uint8) string { return base64.StdEncoding.EncodeToString(g) }
+
+// LookBytes decodes the look fingerprint.
+func (r Result) LookBytes() ([]uint8, bool) {
+	if r.Look == "" {
+		return nil, false
+	}
+	b, err := base64.StdEncoding.DecodeString(r.Look)
+	return b, err == nil && len(b) > 0
+}
+
+// Cost is everything the report's model calls cost at list price.
+func (r *Report) Cost() float64 {
+	c := 0.0
+	for _, x := range r.Results {
+		c += x.CostUSD
+	}
+	for _, s := range r.Sets {
+		c += s.CostUSD
+	}
+	return c
 }
 
 func Load(path string) (*Report, error) {

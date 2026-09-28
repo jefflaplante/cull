@@ -2,17 +2,16 @@ package pipeline
 
 import (
 	"path/filepath"
-	"strconv"
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/group"
 	"github.com/jefflaplante/gophotocull/internal/report"
 )
 
-// decideAll records burst groups on every measured frame and re-derives every
+// decideAll records sequence sets on every measured frame and re-derives every
 // evaluated frame's decision from its stored assessment: the policy first, then
-// the Duplicates action for frames that aren't the best of their burst. It
-// returns the indices whose decision changed.
+// the Duplicates action for frames that aren't the best of their set by scores.
+// It returns the indices whose decision changed.
 func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 	var frames []group.Frame
 	var idx []int // frames[k] is rep.Results[idx[k]]
@@ -26,8 +25,8 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 		if r.Exif != nil {
 			f.Time, f.HasTime = r.Exif.CaptureTime()
 		}
-		if h, err := strconv.ParseUint(r.DHash, 16, 64); err == nil && r.DHash != "" {
-			f.Hash, f.HasHash = h, true
+		if look, ok := r.LookBytes(); ok {
+			f.Look = look
 		}
 		if e := r.Evaluation; e != nil {
 			f.Score = group.Score{Evaluated: true, Sharp: e.Sharpness.Score, EyesOpen: e.People.Eyes == "open",
@@ -44,14 +43,14 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 			decisions[i], reasons[i] = p.DecideFacts(e, rep.Results[i].Facts())
 		}
 	}
-	for gid, g := range group.Groups(frames, o) {
-		best := group.Best(frames, g)
-		bestName := filepath.Base(frames[best].Key)
-		for _, k := range g {
+	for sid, set := range group.Sequences(frames, o) {
+		order := group.ScoreOrder(frames, set)
+		bestName := filepath.Base(frames[order[0]].Key)
+		for pos, k := range order {
 			i := idx[k]
-			rep.Results[i].Group = &report.Group{ID: gid + 1, Size: len(g), Best: bestName}
-			if k != best && rep.Results[i].Evaluation != nil {
-				decisions[i], reasons[i] = p.ApplyDuplicate(decisions[i], reasons[i], bestName, len(g))
+			rep.Results[i].Group = &report.Group{ID: sid + 1, Size: len(set), Rank: pos + 1, Of: len(set), By: "scores", Best: pos == 0}
+			if pos > 0 && rep.Results[i].Evaluation != nil {
+				decisions[i], reasons[i] = p.ApplyDuplicate(decisions[i], reasons[i], bestName, len(set))
 			}
 		}
 	}

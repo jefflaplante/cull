@@ -3,135 +3,111 @@ package group
 import (
 	"fmt"
 	"math"
-	"math/rand"
+	"reflect"
 	"testing"
 	"time"
 )
 
-// picture is a w×h luma plane of random 16px blocks (a "scene"), shifted and
-// brightened slightly to mimic the next frame of a burst.
-func picture(seed int64, w, h, shift int, gain float64) []uint8 {
-	rng := rand.New(rand.NewSource(seed))
-	blocks := make([]uint8, (w/16+2)*(h/16+2))
-	for i := range blocks {
-		blocks[i] = uint8(rng.Intn(256))
-	}
-	g := make([]uint8, w*h)
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			v := float64(blocks[(y/16)*(w/16+2)+(x+shift)/16]) * gain
-			g[y*w+x] = uint8(min(v, 255))
-		}
-	}
-	return g
+func seqFrame(key string, sec int, look []uint8) Frame {
+	return Frame{Key: key, Time: time.Unix(1_800_000_000+int64(sec), 0), HasTime: true, Look: look}
 }
 
-func TestDHashSimilarVsDifferent(t *testing.T) {
-	a := DHash(picture(1, 640, 480, 0, 1), 640, 480)
-	b := DHash(picture(1, 640, 480, 3, 1.05), 640, 480) // same scene, next frame
-	c := DHash(picture(2, 640, 480, 0, 1), 640, 480)    // another scene
-	if a != DHash(picture(1, 640, 480, 0, 1), 640, 480) {
-		t.Fatal("hash not deterministic")
+func TestSequencesLinkByGapAndLookToPrevious(t *testing.T) {
+	a := scene(park, coat, 0.5, 0.5, 0, 0, 1, 1)
+	drift := func(i int) []uint8 { return scene(park, coat, 0.5, 0.5, 6*i, 0, 1, 1) } // walks away slowly
+	frames := []Frame{seqFrame("L1", 0, a)}
+	for i := 1; i < 10; i++ {
+		frames = append(frames, seqFrame(fmt.Sprintf("L%d", i+1), 20*i, drift(i)))
 	}
-	if d := Hamming(a, b); d > 8 {
-		t.Fatalf("burst neighbours too far apart: %d", d)
-	}
-	if d := Hamming(a, c); d < 20 {
-		t.Fatalf("different scenes too close: %d", d)
+	frames = append(frames, seqFrame("L11", 400, a)) // same look, but 220 s later: new set
+	sets := Sequences(frames, Options{Gap: 60 * time.Second, MaxLook: 0.08})
+	if len(sets) != 1 || len(sets[0]) != 10 {
+		t.Fatalf("sets %v: the 10 drifting frames link via their neighbours; the late one stands alone", sets)
 	}
 }
 
-func TestGroupsByTimeAndHash(t *testing.T) {
-	t0 := time.Date(2025, 12, 28, 0, 5, 59, 0, time.UTC)
-	h, far := uint64(0xF0F0F0F0F0F0F0F0), uint64(0x0F0F0F0F0F0F0F0F)
+// A subject walking across a fixed view: each frame looks like the one before it,
+// but the last looks nothing like the first. Linking to the previous frame keeps
+// the walk in one set.
+func TestSequencesFollowASubjectAcrossTheFrame(t *testing.T) {
+	var frames []Frame
+	for i := 0; i < 10; i++ {
+		frames = append(frames, seqFrame(fmt.Sprintf("L%d", i+1), 2*i, scene(park, coat, 0.2+0.04*float64(i), 0.5, 0, 0, 1, 1)))
+	}
+	o := Options{Gap: 60 * time.Second, MaxLook: 0.08}
+	if d := LookDistance(frames[0].Look, frames[9].Look); d <= o.MaxLook {
+		t.Fatalf("premise: the first and last frames must not link directly (%.3f)", d)
+	}
+	if sets := Sequences(frames, o); len(sets) != 1 || len(sets[0]) != 10 {
+		t.Fatalf("sets %v", sets)
+	}
+}
+
+func TestSequencesSplitDifferentScenes(t *testing.T) {
 	frames := []Frame{
-		{Key: "a", Time: t0, HasTime: true, Hash: h, HasHash: true},
-		{Key: "b", Time: t0, HasTime: true, Hash: h ^ 0x3, HasHash: true},                   // same second: 2 bits off
-		{Key: "c", Time: t0.Add(time.Second), HasTime: true, Hash: h ^ 0x7, HasHash: true},  // 1 s later
-		{Key: "d", Time: t0.Add(10 * time.Second), HasTime: true, Hash: h, HasHash: true},   // similar but 9 s gap
-		{Key: "e", Time: t0.Add(11 * time.Second), HasTime: true, Hash: far, HasHash: true}, // close in time, different scene
-		{Key: "f", Hash: far, HasHash: true},                                                // no time: grouped by name order + hash
-		{Key: "g", Hash: far ^ 0x1, HasHash: true},
+		seqFrame("L1", 0, scene(park, coat, 0.5, 0.5, 0, 0, 1, 1)),
+		seqFrame("L2", 5, scene(park, coat, 0.52, 0.5, 0, 0, 1, 1)),
+		seqFrame("L3", 10, scene(wall, shirt, 0.3, 0.6, 0, 0, 1, 1)),
+		seqFrame("L4", 15, scene(wall, shirt, 0.31, 0.6, 0, 0, 1, 1)),
+		seqFrame("L5", 20, scene(park, shirt, 0.3, 0.5, 0, 0, 1, 1)), // same place, different subject
 	}
-	got := Groups(frames, Options{Gap: 2 * time.Second, MaxHamming: 12})
-	want := [][]string{{"a", "b", "c"}, {"f", "g"}}
-	if len(got) != len(want) {
-		t.Fatalf("groups %v", keys(frames, got))
-	}
-	for i := range want {
-		if g := keys(frames, got)[i]; len(g) != len(want[i]) || g[0] != want[i][0] || g[len(g)-1] != want[i][len(want[i])-1] {
-			t.Fatalf("groups %v, want %v", keys(frames, got), want)
-		}
-	}
-	if len(Groups(frames, Options{Gap: 0, MaxHamming: 12})) != 0 {
-		t.Fatal("a zero gap must disable grouping")
+	sets := Sequences(frames, Options{Gap: 60 * time.Second, MaxLook: 0.08})
+	if len(sets) != 2 || len(sets[0]) != 2 || len(sets[1]) != 2 {
+		t.Fatalf("sets %v", sets)
 	}
 }
 
-func keys(frames []Frame, groups [][]int) [][]string {
-	var out [][]string
-	for _, g := range groups {
-		var ks []string
-		for _, i := range g {
-			ks = append(ks, frames[i].Key)
-		}
-		out = append(out, ks)
+func TestSequencesCapAndOrdering(t *testing.T) {
+	look := scene(park, coat, 0.5, 0.5, 0, 0, 1, 1)
+	var frames []Frame
+	for i := 0; i < 45; i++ {
+		frames = append(frames, Frame{Key: fmt.Sprintf("L%03d", 45-i), Look: look}) // no times, reverse input order
 	}
-	return out
+	sets := Sequences(frames, Options{Gap: 60 * time.Second, MaxLook: 0.08})
+	if len(sets) != 2 || len(sets[0]) != MaxSequence || len(sets[1]) != 5 {
+		t.Fatalf("cap: %d sets, sizes %d/%d", len(sets), len(sets[0]), len(sets[len(sets)-1]))
+	}
+	if frames[sets[0][0]].Key != "L001" {
+		t.Fatalf("untimed frames go in file-name order, got %s first", frames[sets[0][0]].Key)
+	}
+	if Sequences(frames, Options{Gap: 0, MaxLook: 0.08}) != nil {
+		t.Fatal("Gap 0 disables grouping")
+	}
 }
 
-func TestBestPrefersSharpThenEyesThenComposition(t *testing.T) {
+func TestSequencesOfNothing(t *testing.T) {
+	o := Options{Gap: time.Minute, MaxLook: 0.08}
+	if s := Sequences(nil, o); s != nil {
+		t.Fatalf("got %v", s)
+	}
+	if s := Sequences([]Frame{{Key: "a", Look: scene(park, coat, 0.5, 0.5, 0, 0, 1, 1)}}, o); s != nil {
+		t.Fatalf("one frame is not a set: %v", s)
+	}
+	if s := Sequences([]Frame{{Key: "a"}, {Key: "b"}}, o); s != nil {
+		t.Fatalf("frames without a look never link: %v", s)
+	}
+}
+
+func TestScoreOrder(t *testing.T) {
 	frames := []Frame{
-		{Key: "a", Score: Score{Evaluated: true, Sharp: 7, EyesOpen: true, Comp: 9}},
-		{Key: "b", Score: Score{Evaluated: true, Sharp: 8, EyesOpen: false, Comp: 5}},
-		{Key: "c", Score: Score{Evaluated: true, Sharp: 8, EyesOpen: true, Comp: 4}},
-		{Key: "d", Score: Score{Evaluated: false}},
+		{Key: "a", Score: Score{Evaluated: true, Sharp: 7}},
+		{Key: "b", Score: Score{Evaluated: true, Sharp: 9}},
+		{Key: "c", Score: Score{Evaluated: true, Sharp: 9, EyesOpen: true}},
 	}
-	if b := Best(frames, []int{0, 1, 2, 3}); frames[b].Key != "c" {
-		t.Fatalf("best = %s, want c (sharpest with open eyes)", frames[b].Key)
-	}
-	if b := Best(frames, []int{3, 0}); frames[b].Key != "a" {
-		t.Fatalf("an evaluated frame beats an unevaluated one, got %s", frames[b].Key)
+	if got := ScoreOrder(frames, []int{0, 1, 2}); !reflect.DeepEqual(got, []int{2, 1, 0}) {
+		t.Fatalf("%v", got)
 	}
 }
 
-func TestGroupsOfNothing(t *testing.T) {
-	if g := Groups(nil, Options{Gap: time.Second, MaxHamming: 12}); g != nil {
-		t.Fatalf("got %v", g)
+func TestScoreOrderPrefersEvaluatedThenCompositionThenCaptureOrder(t *testing.T) {
+	frames := []Frame{
+		{Key: "a", Score: Score{Evaluated: false}},
+		{Key: "b", Score: Score{Evaluated: true, Sharp: 8, EyesOpen: true, Comp: 4}},
+		{Key: "c", Score: Score{Evaluated: true, Sharp: 8, EyesOpen: true, Comp: 6}},
+		{Key: "d", Score: Score{Evaluated: true, Sharp: 8, EyesOpen: true, Comp: 6}},
 	}
-	if g := Groups([]Frame{{Key: "a", HasHash: true}}, Options{Gap: time.Second, MaxHamming: 12}); g != nil {
-		t.Fatalf("one frame is not a burst: %v", g)
-	}
-}
-
-func TestGroupsDoNotChainAcrossASession(t *testing.T) {
-	t0 := time.Date(2025, 12, 28, 0, 5, 59, 0, time.UTC)
-	o := Options{Gap: 2 * time.Second, MaxHamming: 12}
-	// Timestamps all equal (as on the sample's rewritten files); each frame differs
-	// from its neighbour by 3 bits, so the hash drifts far over the session.
-	var drift []Frame
-	var h uint64
-	for i := 0; i < 40; i++ {
-		drift = append(drift, Frame{Key: fmt.Sprintf("M%04d", i), Time: t0, HasTime: true, Hash: h, HasHash: true})
-		h ^= 0x7 << (3 * (i % 21))
-	}
-	for _, g := range Groups(drift, o) {
-		first := drift[g[0]].Hash
-		for _, i := range g {
-			if Hamming(first, drift[i].Hash) > o.MaxHamming {
-				t.Fatalf("burst chained to a frame %d bits from its first frame", Hamming(first, drift[i].Hash))
-			}
-		}
-	}
-	// Forty identical frames still split into bursts of at most MaxBurst.
-	var same []Frame
-	for i := 0; i < 40; i++ {
-		same = append(same, Frame{Key: fmt.Sprintf("S%04d", i), Time: t0, HasTime: true, Hash: 42, HasHash: true})
-	}
-	for _, g := range Groups(same, o) {
-		if len(g) > MaxBurst {
-			t.Fatalf("burst of %d exceeds %d", len(g), MaxBurst)
-		}
+	if got := ScoreOrder(frames, []int{0, 1, 2, 3}); !reflect.DeepEqual(got, []int{2, 3, 1, 0}) {
+		t.Fatalf("%v: want c, d (tie: capture order), b, then the unevaluated a", got)
 	}
 }
 
@@ -203,5 +179,22 @@ func TestLookDistanceSeparatesScenes(t *testing.T) {
 	}
 	if d := LookDistance(base, base); d != 0 {
 		t.Errorf("identical: %.3f", d)
+	}
+}
+
+// A hand-edited or truncated report must not crash decide: a malformed look is
+// as far as looks go.
+func TestLookDistanceRejectsMalformedLooks(t *testing.T) {
+	good := scene(park, coat, 0.5, 0.5, 0, 0, 1, 1)
+	long := append(append([]uint8(nil), good...), 1, 2, 3)
+	for name, pair := range map[string][2][]uint8{
+		"truncated":     {good, good[:100]},
+		"missing":       {nil, good},
+		"both short":    {good[:3], good[:3]},
+		"both too long": {long, long},
+	} {
+		if d := LookDistance(pair[0], pair[1]); d != 1 {
+			t.Errorf("%s: distance %v, want 1", name, d)
+		}
 	}
 }

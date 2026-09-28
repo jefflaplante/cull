@@ -54,7 +54,7 @@ func prepareFrame(cfg Config, path string) (*prepared, error) {
 	}
 	p.stats = imageprep.Measure(p.frame)
 	res.Stats = &p.stats
-	res.DHash = fmt.Sprintf("%016x", group.DHash(p.frame.Luma, p.frame.W, p.frame.H))
+	res.Look = report.EncodeLook(p.frame.Grid(group.LookSize))
 	if cfg.RawClip {
 		if rc, err := rawclip.Measure(path); err == nil {
 			res.RawClip = rc

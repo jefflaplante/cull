@@ -131,7 +131,7 @@ sharpness gate is calibrated, look through `culled/` before deleting anything.
      preview "clipped" with raw headroom → no review; raw ≥ threshold → `--raw-clipped`
    - closed eyes → `--eyes-closed`; non-best frames of a burst → `--duplicates`
    - composition never culls; invalid or < `-min-crop-area` crops are dropped
-6. `internal/report` — JSON is the source of truth (schema v3; checkpointed every
+6. `internal/report` — JSON is the source of truth (schema v4; checkpointed every
    `--checkpoint` results; `--resume` keys on path+size+mtime). Filter it with `jq`,
    e.g. `jq '.results[] | select(.decision=="cull") | .file'`.
 

@@ -349,6 +349,21 @@ func TestReportOnDisk(t *testing.T) {
 	}
 }
 
+func TestRunRecordsLook(t *testing.T) {
+	dir, b := shoot(t)
+	c := moveCfg(dir)
+	c.MoveCulled, c.WriteXMP = false, false
+	rep, _, err := Run(context.Background(), c, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rep.Results {
+		if g, ok := r.LookBytes(); !ok || len(g) != 192 {
+			t.Fatalf("%s: look %v %v", r.File, g, ok)
+		}
+	}
+}
+
 func TestSaveInputsRecordsExactlyWhatIsSent(t *testing.T) {
 	for _, dry := range []bool{false, true} {
 		dir, out := t.TempDir(), t.TempDir()

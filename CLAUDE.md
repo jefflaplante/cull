@@ -47,7 +47,8 @@ make vet
   quota stop, `--save-inputs`, `--move-culled` / `Restore` (move.go; Discover skips `culled/`),
   stages.go (shared frame stages), decide.go, groups.go (decideAll), batch.go (Message
   Batches driver with re-attachable `<report>.batch.json` state), escalation, cost budget
-- `internal/group` — dHash + burst grouping (time gap + hash), best-of-burst
+- `internal/group` — look fingerprint (8×8 mean RGB) + sequence grouping (time gap +
+  look to the previous frame), score order
 - `internal/rawclip` — pure-Go lossless-JPEG (SOF3) decoder; raw highlight clipping
 - `internal/review` — HTML contact sheet (index.html from embedded page.html: labels, stars,
   filters; images in its assets/ folder) and
@@ -58,7 +59,7 @@ make vet
   `WriteSidecar`) used by cull, decide, the server; apply-c1 mirrors it
 - `internal/calib` — confusion matrix, rates, sharpness-threshold sweep
 - `internal/c1` — Capture One AppleScript generator, read-only probe, osascript runner
-- `internal/report` — JSON source of truth (schema v3)
+- `internal/report` — JSON source of truth (schema v4)
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default
 - `internal/config` — API key resolution
 
@@ -200,6 +201,43 @@ make vet
   prepared concurrently, raw clip on). Verdicts: M1103823 keep 8.5, M1104114 keep 8.0
   (the pre-feature-batch sync run said 5.5 with a landed tile), M1103817 review 3.5
   "soft" (the subscription run called it missed_focus → cull; it is soft at 100%).
+
+### Sequences: look distances on the 17 sample frames (2026-09-28)
+
+`scan -o <tmp>` looks, `group.LookDistance` between consecutive frames in `Sequences`
+order (capture time, then file name; all 17 times fall within 00:05:59–00:06:00, so
+effectively file-name order and the time gap never splits). Set-ups judged from thumbnails.
+
+| pair | distance | what changes |
+|---|---|---|
+| 3813→3817 | 0.206 | headshot → seated on bridge (landscape) |
+| 3817→3821 | 0.174 | **same pose**, zoomed out ~1.5× |
+| 3821→3823 | 0.285 | new outfit and place |
+| 3823→3865 | 0.337 | new place |
+| 3865→3880 | 0.406 | new outfit and place |
+| 3880→3902 | 0.203 | standing full length → seated on a stump |
+| 3902→3971 | 0.232 | → headshot, green bokeh |
+| 3971→3979 | 0.155 | headshot → seated on a log |
+| 3979→4110 | 0.172 | new outfit and place |
+| 4110→4112 | 0.127 | same spot: twirl → look back (landscape) |
+| 4112→4114 | 0.152 | same spot, new pose (portrait) |
+| **4114→4115** | **0.034** | known pair: link |
+| 4115→4116 | 0.167 | same spot, new pose |
+| **4116→4117** | **0.022** | known pair: link |
+| 4117→4118 | 0.162 | same spot, new pose |
+| 4118→4119 | 0.118 | **same pose**, stepped back, hands moved |
+
+- **`group.DefaultLook = 0.08`** (`--seq-look` default). Any value in (0.034, 0.118)
+  gives the same sets here, exactly {4114, 4115} and {4116, 4117} (checked with
+  `Sequences` and end to end through `scan`). 0.08 sits near the midpoint, leaning
+  up because takes of one set-up drift more than these near-identical pairs; synthetic
+  10% shift, +1 stop and 5% zoom all measure ≤ 0.045.
+- Across all 136 pairs, the known pairs are the only ones under 0.118. Other minima:
+  4110↔4114 0.120 and 4110↔4115 0.122 (same spot, twirl vs posed).
+- Limit: the look links near-identical framing only. Reframed takes of the same pose
+  (3817→3821 at 0.174, 4118→4119 at 0.118) aren't linked by any threshold that keeps
+  different poses at the same spot apart (4110→4112 at 0.127). A portrait↔landscape
+  switch is always far, because the grid is in display orientation.
 
 ## Unverified assumptions — check before building on them
 

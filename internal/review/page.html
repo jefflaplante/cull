@@ -200,7 +200,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     }
     if (c.first) row(info, "first pass", `${c.first.backend}/${c.first.model}: ${c.first.evaluation.sharpness.status} ${c.first.evaluation.sharpness.score}`);
     if (f) row(info, "subject", f.source === "none" ? "none: " + (f.reason || "") : f.source + (f.label ? ": " + f.label : "") + (f.face_q ? ` (face q ${f.face_q})` : ""));
-    if (c.group) row(info, "burst", `${c.group.size} frames, best ${c.group.best}`);
+    if (c.group) row(info, "set", `${c.group.id} · #${c.group.rank}/${c.group.of} by ${c.group.by} (${c.group.size} frames)`);
     row(info, "shooting", c.exif);
     if (c.raw_clip !== undefined && c.raw_clip !== null) row(info, "raw clipping", c.raw_clip.toFixed(3) + "% of samples at white level");
     row(info, "moved to", c.moved_to);

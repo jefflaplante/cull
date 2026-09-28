@@ -263,7 +263,7 @@ func TestRankBatchRefusesInterruptedSubmission(t *testing.T) {
 // calls no current set makes: judge's batches refuse the same way.
 func TestRankBatchRefusesAnySubmittingRecord(t *testing.T) {
 	c, rep := seqShoot(t, 3)
-	state := `{"version":1,"backend":"","model":"","batches":[{"round":0,"custom_ids":["S9-0000000000000000"],"status":"submitting"}]}`
+	state := `{"version":2,"backend":"","model":"","batches":[{"round":0,"custom_ids":["S9-0000000000000000"],"status":"submitting"}]}`
 	if err := os.WriteFile(c.ReportPath+".rank-batch.json", []byte(state), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -525,5 +525,124 @@ func TestBatchJudgeRankReattachesOnResume(t *testing.T) {
 	}
 	if exists(c.ReportPath + ".rank-batch.json") {
 		t.Fatal("rank state left behind")
+	}
+}
+
+// cancelAfterSubmit cancels the run right after its first batch is created (Ctrl-C
+// between two chunk uploads).
+type cancelAfterSubmit struct {
+	*fakeBatch
+	cancel func()
+	n      int
+}
+
+func (c *cancelAfterSubmit) SubmitBatch(ctx context.Context, reqs []llm.BatchRequest) (string, error) {
+	id, err := c.fakeBatch.SubmitBatch(ctx, reqs)
+	c.n++
+	if c.n == 1 && c.cancel != nil {
+		c.cancel()
+	}
+	return id, err
+}
+
+// Re-review repro (a): Ctrl-C between the two chunk batches of a 9-frame set, then
+// a frame of chunk 2 becomes unreadable. On the re-run chunk 1's paid answer is
+// handed over, but its set fails before taking it: the ranking's cost must still
+// hold it, exactly once.
+func TestRankBatchChargesAnswerOfASetThatFailed(t *testing.T) {
+	c, rep := seqShoot(t, 9)
+	p := llm.Price{In: 2, Out: 10}
+	c.Price, c.BatchChunkBytes = &p, 1
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fb := &fakeBatch{}
+	cl := &cancelAfterSubmit{fakeBatch: fb, cancel: cancel}
+	ex := batchExec{client: cl, cfg: c, statePath: c.ReportPath + ".rank-batch.json"}
+	if err := RankSets(ctx, rep, c, ex, false); !errors.Is(err, context.Canceled) || len(fb.submitted) != 1 {
+		t.Fatalf("run 1: %v, %d batches", err, len(fb.submitted))
+	}
+	if err := os.Remove(rep.Sets[0].Members[6]); err != nil { // L7, in chunk 2
+		t.Fatal(err)
+	}
+	cl.cancel = nil
+	if err := RankSets(context.Background(), rep, c, ex, false); err != nil {
+		t.Fatal(err)
+	}
+	one := p.Cost(llm.Usage{InputTokens: 1000, OutputTokens: 100}, true)
+	if rep.Sets[0].By == "model" || math.Abs(rep.RankCostUSD-one) > 1e-12 || exists(ex.statePath) {
+		t.Fatalf("set by %s, RankCostUSD %v, want %v (chunk 1's answer, once), state kept %v", rep.Sets[0].By, rep.RankCostUSD, one, exists(ex.statePath))
+	}
+}
+
+// failFirstSave runs finishRun once with the report's save failing, then returns
+// the report as the re-run finds it on disk (without that run's ranking).
+func failFirstSave(t *testing.T, c Config, rep *report.Report) *report.Report {
+	t.Helper()
+	if err := os.Mkdir(c.ReportPath+".tmp", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := finishRun(context.Background(), rep, c, nil); err == nil {
+		t.Fatal("the report save must fail")
+	}
+	if err := os.Remove(c.ReportPath + ".tmp"); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := report.Load(c.ReportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return saved
+}
+
+// Re-review repro (b): a run hands both sets' answers over but its report save
+// fails; before the re-run set 2 changes, so its old answer is no longer asked for.
+// No saved report holds that answer, so the re-run must charge it.
+func TestRankBatchChargesUnsavedAnswerWhenItsSetChanges(t *testing.T) {
+	c, rep := fiveInTwoSets(t)
+	p := llm.Price{In: 2, Out: 10}
+	fb := &fakeBatch{}
+	c.Price = &p
+	c.Rank, c.rankWith = true, rankEx(fb, c)
+	rep = failFirstSave(t, c, rep)
+	for i := 2; i < 5; i++ {
+		rep.Results[i].Look = brightLook()
+	}
+	rep.Results[4].Error = "evaluate: simulated" // set 2 becomes {L3, L4}
+	if _, err := finishRun(context.Background(), rep, c, nil); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := report.Load(c.ReportPath)
+	three := p.Cost(llm.Usage{InputTokens: 3000, OutputTokens: 300}, true) // S1, the old S2 (paid, unused), the new S2
+	if err != nil || len(fb.submitted) != 2 || math.Abs(saved.RankCostUSD-three) > 1e-12 {
+		t.Fatalf("%v: %d batches, saved RankCostUSD %v, want %v", err, len(fb.submitted), saved.RankCostUSD, three)
+	}
+}
+
+// Re-review repro (c): a run hands an answer over but its report save fails; the
+// next run stops before the wave (budget) and saves a report without it. That
+// commit must not mark the answer charged: the run after that pays for it.
+func TestRankBatchStopBeforeWaveKeepsUnsavedAnswerUncharged(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	p := llm.Price{In: 2, Out: 10}
+	fb := &fakeBatch{}
+	c.Price = &p
+	c.Rank, c.rankWith = true, rankEx(fb, c)
+	rep = failFirstSave(t, c, rep)
+	c.MaxCost = 0.5
+	if _, err := finishRun(context.Background(), rep, c, &spend{total: 1}); !errors.Is(err, llm.ErrBudget) {
+		t.Fatalf("budget stop expected, got %v", err)
+	}
+	rep, err := report.Load(c.ReportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.MaxCost = 0
+	if _, err := finishRun(context.Background(), rep, c, nil); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := report.Load(c.ReportPath)
+	one := p.Cost(llm.Usage{InputTokens: 1000, OutputTokens: 100}, true)
+	if err != nil || len(fb.submitted) != 1 || saved.Sets[0].By != "model" || math.Abs(saved.RankCostUSD-one) > 1e-12 {
+		t.Fatalf("%v: %d batches, saved RankCostUSD %v, want %v", err, len(fb.submitted), saved.RankCostUSD, one)
 	}
 }

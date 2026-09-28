@@ -51,6 +51,14 @@ type rankOut struct {
 	R   *eval.Ranking
 	U   eval.Usage
 	Err error
+	key string // the recorded batch answer it carries (framesKey); "" from a sync call
+}
+
+// rankRun is what one ranking run put in the report, for the executor's commit
+// once that report is saved.
+type rankRun struct {
+	finished bool     // every set it took on recorded and settled, nothing left pending
+	charged  []string // the batch answers (framesKeys) whose usage reached the report
 }
 
 // rankExec runs one round of rank calls and answers each, in any order (matched
@@ -63,14 +71,15 @@ type rankExec interface {
 	// (one round of chunk calls, one of finals), since a batch can't be stopped
 	// midway. Price and wave shape follow the executor, never cfg.Batch.
 	batch() bool
-	// settle runs once every set is recorded. It returns the usage of anything
-	// paid for that no call used (a batch answer for a set that changed), which
-	// the ranking's cost must still include.
-	settle(ctx context.Context) (llm.Usage, error)
-	// commit runs once the report holding the ranking so far is saved: what was
-	// handed over is now charged in it, and when the ranking finished the
-	// executor's state goes.
-	commit(finished bool) error
+	// settle runs once every set is recorded. It returns the usage of anything paid
+	// for that isn't in used (the answers this run took into the report) and was
+	// never charged to a saved report: an answer for a set that changed, one handed
+	// to a set that failed, or one from a run whose report was never saved. The
+	// ranking's cost must still include it.
+	settle(ctx context.Context, used map[string]bool) (llm.Usage, error)
+	// commit runs once the report holding the run is saved: run.charged is now
+	// charged in it, and when the ranking finished the executor's state goes.
+	commit(run rankRun) error
 }
 
 // syncExec runs rank calls on a backend through a worker pool. After a quota stop
@@ -132,9 +141,11 @@ func (s syncExec) Run(ctx context.Context, calls []rankCall, load loader) []rank
 	return out
 }
 
-func (syncExec) batch() bool                               { return false }
-func (syncExec) settle(context.Context) (llm.Usage, error) { return llm.Usage{}, nil }
-func (syncExec) commit(bool) error                         { return nil }
+func (syncExec) batch() bool { return false }
+func (syncExec) settle(context.Context, map[string]bool) (llm.Usage, error) {
+	return llm.Usage{}, nil
+}
+func (syncExec) commit(rankRun) error { return nil }
 
 // errUnreadable answers a call whose set has a frame that couldn't be read.
 var errUnreadable = errors.New("not sent: a frame of its set couldn't be read")
@@ -251,14 +262,14 @@ func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.R
 		MoveCulled: cfg.MoveCulled, Seq: cfg.Seq, Labels: cfg.Labels}
 	ex := syncExec{b: b, concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
 	var rankErr error
-	var finished bool
-	if _, err := redecide(rep, o, log, func() { _, finished, rankErr = rankSets(ctx, rep, cfg, ex, force, &spend{}) }); err != nil {
+	var run rankRun
+	if _, err := redecide(rep, o, log, func() { _, run, rankErr = rankSets(ctx, rep, cfg, ex, force, &spend{}) }); err != nil {
 		return rep, err
 	}
 	if err := rep.Save(cfg.ReportPath); err != nil {
 		return rep, err
 	}
-	return rep, errors.Join(rankErr, ex.commit(finished)) // only now can the executor's state go
+	return rep, errors.Join(rankErr, ex.commit(run)) // only now can the executor's state go
 }
 
 // RankSets asks the model to rank the sets that need it (every set of two or more
@@ -279,15 +290,15 @@ func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.R
 // RankSets saves no report, so it commits the executor's state at once (rep holds
 // the ranking): callers that save one use rankSets, then commit after the save.
 func RankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, force bool) error {
-	_, finished, err := rankSets(ctx, rep, cfg, ex, force, &spend{})
-	return errors.Join(err, ex.commit(finished))
+	_, run, err := rankSets(ctx, rep, cfg, ex, force, &spend{})
+	return errors.Join(err, ex.commit(run))
 }
 
 // rankSets is RankSets charging a run's budget, which may already hold the cost of
 // the run's judge calls, and leaving the commit to the caller. It returns the
-// ranking's usage and whether the ranking finished: every set it took on recorded
-// and settled, nothing left pending.
-func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, force bool, budget *spend) (llm.Usage, bool, error) {
+// ranking's usage and what the run put in rep (see rankRun).
+func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, force bool, budget *spend) (llm.Usage, rankRun, error) {
+	var run rankRun
 	var total llm.Usage
 	log := cfg.Log
 	if log == nil {
@@ -304,7 +315,7 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 	}
 	if len(todo) > 0 && !ex.batch() {
 		if p := rankBatchStatePath(cfg); fileExists(p) {
-			return total, false, fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch to re-attach to it "+
+			return total, run, fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch to re-attach to it "+
 				"(ranking without it would pay for the same sets again), or delete that file to start over", p)
 		}
 	}
@@ -319,38 +330,44 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 	var last error // the last wave's budget stop: the ranking still finished
 	for len(todo) > 0 {
 		if err := ctx.Err(); err != nil {
-			return total, false, err
+			return total, run, err
 		}
 		if over, spent := budget.add(0, cfg.MaxCost); over {
-			return total, false, fmt.Errorf("%w: $%.2f of $%.2f; %d set(s) left by scores", llm.ErrBudget, spent, cfg.MaxCost, len(todo))
+			return total, run, fmt.Errorf("%w: $%.2f of $%.2f; %d set(s) left by scores", llm.ErrBudget, spent, cfg.MaxCost, len(todo))
 		}
 		n := min(wave, len(todo))
-		u, err := rankWave(ctx, rep, cfg, ex, todo[:n], byFile, budget, log)
+		u, charged, err := rankWave(ctx, rep, cfg, ex, todo[:n], byFile, budget, log)
 		total.Add(u)
+		run.charged = append(run.charged, charged...)
 		todo = todo[n:]
 		switch {
 		case err == nil:
 		case errors.Is(err, llm.ErrBudget) && len(todo) > 0:
-			return total, false, fmt.Errorf("%w; %d set(s) left by scores", err, len(todo))
+			return total, run, fmt.Errorf("%w; %d set(s) left by scores", err, len(todo))
 		case errors.Is(err, llm.ErrBudget):
 			last = err
 		default:
-			return total, false, err
+			return total, run, err
 		}
 	}
-	u, err := ex.settle(ctx)
+	used := make(map[string]bool, len(run.charged))
+	for _, k := range run.charged {
+		used[k] = true
+	}
+	u, err := ex.settle(ctx, used)
 	if c := rankPrice(cfg, u, ex.batch()); u.InputTokens+u.OutputTokens > 0 {
 		rep.RankCostUSD += c
 		total.Add(u)
 		budget.add(c, 0)
 	}
 	if err != nil {
-		return total, false, errors.Join(last, err)
+		return total, run, errors.Join(last, err)
 	}
 	if last == nil {
 		last = ctx.Err()
 	}
-	return total, true, last
+	run.finished = true
+	return total, run, last
 }
 
 // setRank is one set's ranking in progress. Positions index files and frames.
@@ -366,6 +383,7 @@ type setRank struct {
 	notes   map[int]eval.RankEntry
 	summary string
 	usage   llm.Usage
+	keys    []string // batch answers whose usage is in usage
 	err     error
 }
 
@@ -383,8 +401,10 @@ func newSetRank(set *report.Set, files []string) *setRank {
 
 // rankWave ranks a group of sets: round 1 (a single call per set, or its chunk
 // calls), round 2 (the chunked sets' finals), then records each set. Frames are
-// decoded only for the calls the executor sends.
-func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, sets []int, byFile map[string]int, budget *spend, log io.Writer) (llm.Usage, error) {
+// decoded only for the calls the executor sends. It also returns the batch answers
+// (framesKeys) whose usage it put in rep; an answer a failed set never took is not
+// among them, so settle charges it.
+func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, sets []int, byFile map[string]int, budget *spend, log io.Writer) (llm.Usage, []string, error) {
 	var jobs []*setRank
 	for _, si := range sets {
 		var files []string
@@ -471,10 +491,12 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 	// waiting on a pending batch is ranked by a re-run, which reuses each answer
 	// recorded so far (batchExec) without paying for it again.
 	var total llm.Usage
+	var charged []string
 	over, spent := false, 0.0
 	for _, j := range jobs {
 		s := j.set
 		c := rankPrice(cfg, j.usage, ex.batch())
+		charged = append(charged, j.keys...)
 		s.Usage.Add(j.usage)
 		s.CostUSD += c
 		rep.RankCostUSD += c
@@ -501,11 +523,11 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 	}
 	switch {
 	case stop != nil:
-		return total, stop
+		return total, charged, stop
 	case over:
-		return total, fmt.Errorf("%w: $%.2f of $%.2f", llm.ErrBudget, spent, cfg.MaxCost)
+		return total, charged, fmt.Errorf("%w: $%.2f of $%.2f", llm.ErrBudget, spent, cfg.MaxCost)
 	}
-	return total, nil
+	return total, charged, nil
 }
 
 // partID is the call ID of round-1 part k: "S<set>" when the set fits one call.
@@ -535,6 +557,9 @@ func (j *setRank) take(outs map[string]rankOut, id string, positions []int) ([]i
 		return nil, nil
 	}
 	j.usage.Add(o.U)
+	if o.key != "" { // its usage reaches rep when the set is recorded, ranked or not
+		j.keys = append(j.keys, o.key)
+	}
 	if o.R == nil {
 		err := o.Err
 		if err == nil {

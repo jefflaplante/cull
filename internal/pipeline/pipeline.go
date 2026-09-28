@@ -455,12 +455,13 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 	}
 	var used llm.Usage
 	var rankErr error
-	ranked, finished := cfg.Rank && cfg.rankWith != nil, false
+	ranked := cfg.Rank && cfg.rankWith != nil
+	var run rankRun
 	if ranked {
 		if budget == nil {
 			budget = &spend{}
 		}
-		used, finished, rankErr = rankSets(ctx, rep, cfg, cfg.rankWith, false, budget)
+		used, run, rankErr = rankSets(ctx, rep, cfg, cfg.rankWith, false, budget)
 		for _, i := range decideAll(rep, cfg.Policy, cfg.Seq) {
 			changed[i] = true
 		}
@@ -483,7 +484,7 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 		return used, err // the ranking's state stays: a re-run reuses what was paid for
 	}
 	if ranked {
-		rankErr = errors.Join(rankErr, cfg.rankWith.commit(finished))
+		rankErr = errors.Join(rankErr, cfg.rankWith.commit(run))
 	}
 	return used, rankErr
 }

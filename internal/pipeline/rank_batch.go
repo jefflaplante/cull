@@ -35,7 +35,7 @@ type batchExec struct {
 // recorded for a re-run. It stops the stage.
 var errBatchPending = errors.New("batch ranking unfinished")
 
-const rankBatchStateVersion = 1
+const rankBatchStateVersion = 2
 
 func rankBatchStatePath(cfg Config) string { return cfg.ReportPath + ".rank-batch.json" }
 
@@ -54,17 +54,20 @@ type rankBatchState struct {
 }
 
 // rankAnswer is one collected answer, kept raw: it is decoded against the frames of
-// the call it is handed to. Its usage reaches the report once:
-//   - handed over to a set with its usage (Handed), then marked Charged once the
-//     report holding that charge is saved (commit);
-//   - an answer never handed over (its set changed) is charged when the ranking
-//     settles.
+// the call it is handed to. Charged means a saved report holds its usage; only
+// commit sets it, and only for answers the run it commits took into that report
+// (rankRun.charged). Until then every run treats it as unpaid for:
+//   - handed over, it carries its usage;
+//   - otherwise settle charges it: its set changed, its set failed before taking
+//     it, or the run that took it never saved its report.
+//
+// A crash between a report save and its commit can count it twice, never zero
+// times.
 type rankAnswer struct {
 	Call    string          `json:"call"` // the custom ID it answered
 	JSON    json.RawMessage `json:"json,omitempty"`
 	Usage   llm.Usage       `json:"usage"`
 	Err     string          `json:"error,omitempty"`
-	Handed  bool            `json:"handed,omitempty"`
 	Charged bool            `json:"charged,omitempty"`
 }
 
@@ -134,9 +137,9 @@ func (e batchExec) Run(ctx context.Context, calls []rankCall, load loader) []ran
 		perr = e.send(ctx, cfg, st, calls, send, load, save, out)
 	}
 
-	changed := false
 	for i, c := range calls {
-		a := st.Answers[framesKey(c.Files)]
+		k := framesKey(c.Files)
+		a := st.Answers[k]
 		if a == nil {
 			if out[i].Err == nil {
 				out[i].Err = perr
@@ -146,22 +149,15 @@ func (e batchExec) Run(ctx context.Context, calls []rankCall, load loader) []ran
 			}
 			continue
 		}
+		out[i].key = k
 		if !a.Charged {
 			out[i].U = a.Usage
-			if !a.Handed {
-				a.Handed, changed = true, true
-			}
 		}
 		if a.Err != "" {
 			out[i].Err = errors.New(a.Err)
 			continue
 		}
 		out[i].R, out[i].Err = eval.DecodeRank(a.JSON, len(c.Files)) // a non-permutation fails its set: no retry in a batch
-	}
-	if changed {
-		if err := save(); err != nil {
-			return failAll(e.pending(err)) // handed over nothing: the re-run hands it over
-		}
 	}
 	return out
 }
@@ -283,10 +279,11 @@ func (e batchExec) open(cfg Config) (*rankBatchState, error) {
 }
 
 // settle, once every set is recorded, collects any recorded batch still processing
-// (it is paid for, so it is never dropped). It returns the usage of the answers no
-// set was handed (their sets changed), which the ranking's cost still includes.
-// Nothing is marked here: if the report isn't saved, the re-run settles again.
-func (e batchExec) settle(ctx context.Context) (llm.Usage, error) {
+// (it is paid for, so it is never dropped). It returns the usage of every answer no
+// saved report holds (not Charged) that this run didn't take in (used), which the
+// ranking's cost still includes. Nothing is marked here: if the report isn't
+// saved, the re-run settles again.
+func (e batchExec) settle(ctx context.Context, used map[string]bool) (llm.Usage, error) {
 	var u llm.Usage
 	if !fileExists(e.statePath) {
 		return u, nil
@@ -300,24 +297,24 @@ func (e batchExec) settle(ctx context.Context) (llm.Usage, error) {
 		return u, e.pending(err)
 	}
 	n := 0
-	for _, a := range st.Answers {
-		if !a.Handed && !a.Charged {
+	for k, a := range st.Answers {
+		if !a.Charged && !used[k] {
 			u.Add(a.Usage)
 			n++
 		}
 	}
 	if n > 0 {
-		fmt.Fprintf(cfg.Log, "%d rank answer(s) paid for in a batch went unused (their sets changed): %d input / %d output tokens, counted in the ranking's cost\n",
+		fmt.Fprintf(cfg.Log, "%d rank answer(s) paid for in a batch but in no saved ranking (their sets changed or failed, or an earlier run's report wasn't saved): %d input / %d output tokens, counted in the ranking's cost\n",
 			n, u.InputTokens, u.OutputTokens)
 	}
 	return u, nil
 }
 
-// commit runs once the report holding the ranking so far is saved. When the
-// ranking finished, the state goes. Otherwise every answer handed over is marked
-// Charged, so a re-run reuses it at no cost.
-func (e batchExec) commit(finished bool) error {
-	if finished {
+// commit runs once the report holding run is saved. When the ranking finished, the
+// state goes. Otherwise the answers run took into that report are marked Charged,
+// so a re-run reuses them at no cost; nothing else is.
+func (e batchExec) commit(run rankRun) error {
+	if run.finished {
 		if err := os.Remove(e.statePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
@@ -331,8 +328,8 @@ func (e batchExec) commit(finished bool) error {
 		return err
 	}
 	changed := false
-	for _, a := range st.Answers {
-		if a.Handed && !a.Charged {
+	for _, k := range run.charged {
+		if a := st.Answers[k]; a != nil && !a.Charged {
 			a.Charged, changed = true, true
 		}
 	}
@@ -350,6 +347,9 @@ func loadRankBatchState(path string) (*rankBatchState, error) {
 	var st rankBatchState
 	if err := json.Unmarshal(b, &st); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if st.Version != rankBatchStateVersion {
+		return nil, fmt.Errorf("%s has format version %d, not %d: delete it to start over", path, st.Version, rankBatchStateVersion)
 	}
 	return &st, nil
 }

@@ -53,3 +53,39 @@ func TestSweepReviewBelowSharpness(t *testing.T) {
 		t.Fatalf("sweep %+v %+v %+v", rows[0].Matrix.Counts, rows[1].Matrix.Counts, rows[2].Matrix.Counts)
 	}
 }
+
+func TestSetsAgreement(t *testing.T) {
+	g := func(rank int, best bool) *report.Group {
+		return &report.Group{ID: 1, Size: 4, Rank: rank, Of: 4, Best: best}
+	}
+	rep := &report.Report{KeepBest: 2, Results: []report.Result{
+		{File: "/s/A.DNG", Group: g(1, true)}, {File: "/s/B.DNG", Group: g(2, true)},
+		{File: "/s/C.DNG", Group: g(3, false)}, {File: "/s/D.DNG", Group: g(4, false)},
+		{File: "/s/E.DNG"}, // not in a set: ignored
+	}}
+	labels := map[string]string{"A.DNG": "keep", "B.DNG": "cull", "C.DNG": "keep", "D.DNG": "review", "E.DNG": "keep"}
+	s := Sets(rep, labels, 2)
+	if s.Kept != 2 || s.KeptRankedOut != 1 || s.Culled != 2 || s.CulledInBest != 1 || s.Sets != 1 {
+		t.Fatalf("%+v", s)
+	}
+	sw := SweepKeepBest(rep, labels, []int{1, 3})
+	if sw[0].KeptRankedOut != 1 || sw[1].KeptRankedOut != 0 || sw[1].CulledInBest != 1 {
+		t.Fatalf("%+v", sw)
+	}
+}
+
+// TestSetsRankOnlyKeepBest0 covers a report decided with --keep-best 0 (rank
+// only): Group.Best is documented as "rank 1 when KeepBest is 0" (see
+// report.Group and pipeline's decideAll, which stores Best with
+// max(1, p.KeepBest)), so Sets must treat keepBest 0 the same as keepBest 1.
+func TestSetsRankOnlyKeepBest0(t *testing.T) {
+	g := func(rank int) *report.Group { return &report.Group{ID: 1, Size: 2, Rank: rank, Of: 2} }
+	rep := &report.Report{KeepBest: 0, Results: []report.Result{
+		{File: "/s/A.DNG", Group: g(1)}, {File: "/s/B.DNG", Group: g(2)},
+	}}
+	labels := map[string]string{"A.DNG": "keep", "B.DNG": "keep"}
+	s := Sets(rep, labels, rep.KeepBest)
+	if s.Kept != 2 || s.KeptRankedOut != 1 {
+		t.Fatalf("%+v", s)
+	}
+}

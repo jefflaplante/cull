@@ -1,7 +1,10 @@
 package report
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
@@ -32,5 +35,48 @@ func TestSchemaV4RoundTrip(t *testing.T) {
 	}
 	if c := got.Cost(); c < 0.0499 || c > 0.0501 {
 		t.Fatalf("cost includes sets: %v", c)
+	}
+}
+
+// Schema v3 recorded group.best as the base name of the frame kept from a burst.
+// Such reports must still load (decide, restore, review, apply-c1 and calibrate
+// read them); the name becomes Best false, and decide regroups.
+func TestLoadsV3GroupsWithStringBest(t *testing.T) {
+	v3 := `{"schema_version": 3, "backend": "anthropic", "model": "m", "dir": "/s", "results": [
+  {"file": "/s/L1.DNG", "size": 10, "dhash": "00ff00ff00ff00ff", "group": {"id": 1, "size": 2, "best": "L2.DNG"}},
+  {"file": "/s/L2.DNG", "size": 11, "group": {"id": 1, "size": 2}}]}`
+	p := filepath.Join(t.TempDir(), "v3.json")
+	if err := os.WriteFile(p, []byte(v3), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(p)
+	if err != nil {
+		t.Fatalf("v3 report must load: %v", err)
+	}
+	if got.SchemaVersion != 3 || len(got.Results) != 2 {
+		t.Fatalf("report: %+v", got)
+	}
+	for _, r := range got.Results {
+		if g := r.Group; g == nil || *g != (Group{ID: 1, Size: 2}) {
+			t.Fatalf("%s: group %+v", r.File, r.Group)
+		}
+	}
+
+	got.Results[1].Group.Best = true
+	if err := got.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(p)
+	if s := string(raw); !strings.Contains(s, `"best": false`) || !strings.Contains(s, `"best": true`) || strings.Contains(s, `"best": "`) {
+		t.Fatalf("saved groups must write best as a bool:\n%s", s)
+	}
+	again, err := Load(p)
+	if err != nil || again.Results[0].Group.Best || !again.Results[1].Group.Best {
+		t.Fatalf("round trip: %v %+v %+v", err, again.Results[0].Group, again.Results[1].Group)
+	}
+
+	var g Group
+	if err := json.Unmarshal([]byte(`{"id": 1, "best": 3}`), &g); err == nil {
+		t.Fatal("best that is neither a bool nor a string must still fail")
 	}
 }

@@ -37,6 +37,28 @@ type Group struct {
 	Weakness string `json:"weakness,omitempty"`
 }
 
+// UnmarshalJSON also reads schema-v3 groups, whose "best" was the base name of the
+// frame kept from a burst: that becomes false, and the next decide regroups. Any
+// other field decodes as usual; Marshal always writes a bool.
+func (g *Group) UnmarshalJSON(b []byte) error {
+	type plain Group // no methods: no recursion
+	aux := struct {
+		*plain
+		Best json.RawMessage `json:"best"` // shadows plain.Best
+	}{plain: (*plain)(g)}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	switch {
+	case len(aux.Best) == 0:
+		return nil
+	case aux.Best[0] == '"':
+		g.Best = false // v3: a file name
+		return nil
+	}
+	return json.Unmarshal(aux.Best, &g.Best)
+}
+
 // Set is one sequence of similar frames. Members and Order hold Result.File paths;
 // Order is the model's ranking of the rankable members, empty until ranked.
 type Set struct {

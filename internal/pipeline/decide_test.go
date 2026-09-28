@@ -314,7 +314,7 @@ func TestUncoveredSetKeepsPaidOrderForLater(t *testing.T) {
 	if s.By != "scores" || len(needsRanking(rep)) != 1 || rep.Results[0].Group.Rank != 1 || rep.Results[2].Group.Strength != "" {
 		t.Fatalf("uncovered: ranked by scores and flagged: %+v %+v", s, rep.Results[0].Group)
 	}
-	if len(s.Order) != 2 || s.Order[0] != "/s/L003.DNG" || len(s.Notes) != 1 || s.Summary != "L3 wins" || rep.Cost() != 0.03 {
+	if len(s.Order) != 2 || s.Order[0] != "/s/L003.DNG" || len(s.Notes) != 1 || s.Summary != "L3 wins" || s.CostUSD != 0.03 {
 		t.Fatalf("the paid order must stay in the report: %+v", s)
 	}
 
@@ -348,8 +348,8 @@ func TestSplitSetKeepsOrderAndCountsCostOnce(t *testing.T) {
 	if o := rep.Sets[1].Order; len(o) != 2 || o[0] != "/s/L003.DNG" || o[1] != "/s/L004.DNG" {
 		t.Fatalf("second part's order: %v", o)
 	}
-	if c := rep.Cost(); c != 0.05 {
-		t.Fatalf("cost counted %v, want 0.05 once", c)
+	if c := rep.Sets[0].CostUSD + rep.Sets[1].CostUSD; c != 0.05 {
+		t.Fatalf("set cost counted %v, want 0.05 once", c)
 	}
 }
 
@@ -465,7 +465,7 @@ func TestLabelsWithDuplicateNames(t *testing.T) {
 	}
 	// cull (the end of a paid run) warns and falls back to the model's verdicts.
 	var log strings.Builder
-	if err := finishRun(rep, Config{ReportPath: rp, Dir: dir, MoveCulled: true, Labels: lab, Log: &log}); err != nil {
+	if _, err := finishRun(context.Background(), rep, Config{ReportPath: rp, Dir: dir, MoveCulled: true, Labels: lab, Log: &log}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(log.String(), "share a file name") || !exists(filepath.Join(dir, "a", CulledDir, "L1.DNG")) {

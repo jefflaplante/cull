@@ -35,13 +35,31 @@ type DecideSummary struct {
 
 // Decide re-runs the policy on every stored evaluation without calling a model,
 // then optionally rewrites sidecars and syncs culled/. Policy is the only place
-// decisions come from, so tuning it after calibration costs nothing.
+// decisions come from, so tuning it after calibration costs nothing. A schema-v3
+// report gets its looks computed from the DNGs and is saved as the current schema.
 func Decide(reportPath string, o DecideOptions, log io.Writer) (DecideSummary, error) {
-	sum := DecideSummary{Changed: map[string]int{}}
 	rep, err := report.Load(reportPath)
+	if err != nil {
+		return DecideSummary{Changed: map[string]int{}}, err
+	}
+	if n := fillLooks(rep); n > 0 {
+		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
+	}
+	sum, err := redecide(rep, o, log, nil)
 	if err != nil {
 		return sum, err
 	}
+	return sum, rep.Save(reportPath)
+}
+
+// redecide re-applies the policy to rep's stored assessments. between, when set,
+// runs after the first decide (ranking) and is followed by a second. Then it
+// restores frames no longer culled, writes sidecars and moves culls from the final
+// decisions, and marks rep as the current schema; the caller saves. When there is
+// nothing to decide or labels can't be matched it returns an error before between
+// and before touching any file.
+func redecide(rep *report.Report, o DecideOptions, log io.Writer, between func()) (DecideSummary, error) {
+	sum := DecideSummary{Changed: map[string]int{}}
 	before := make([]eval.Decision, len(rep.Results))
 	for i := range rep.Results {
 		r := &rep.Results[i]
@@ -54,15 +72,23 @@ func Decide(reportPath string, o DecideOptions, log io.Writer) (DecideSummary, e
 			addFixup(r, f)
 		}
 	}
-	for _, i := range decideAll(rep, o.Policy, o.Seq) {
-		sum.Changed[string(before[i])+"→"+string(rep.Results[i].Decision)]++
-	}
+	decideAll(rep, o.Policy, o.Seq)
 	if sum.Frames == 0 {
 		return sum, errors.New("no evaluations in report (it came from scan, or every frame failed): run judge first")
 	}
 	if dups := labels.Duplicates(rep.Results); len(o.Labels) > 0 && len(dups) > 0 {
 		return sum, fmt.Errorf("frames share a file name, so your labels can't tell them apart (rename them, or pass --no-labels): %s", strings.Join(dups, "; "))
 	}
+	if between != nil {
+		between()
+		decideAll(rep, o.Policy, o.Seq)
+	}
+	for i := range rep.Results {
+		if d := rep.Results[i].Decision; d != before[i] {
+			sum.Changed[string(before[i])+"→"+string(d)]++
+		}
+	}
+	rep.SchemaVersion = report.SchemaVersion
 
 	if o.MoveCulled { // restore first, so sidecars are then written where frames live
 		for i := range rep.Results {
@@ -93,7 +119,7 @@ func Decide(reportPath string, o DecideOptions, log io.Writer) (DecideSummary, e
 	if o.MoveCulled {
 		sum.Moved = moveCulled(rep, o.Labels, log)
 	}
-	return sum, rep.Save(reportPath)
+	return sum, nil
 }
 
 // writeDecidedSidecar writes the frame's sidecar where the frame currently lives,

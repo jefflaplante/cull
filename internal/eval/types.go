@@ -98,7 +98,7 @@ type Policy struct {
 	MinCropArea          float64
 	ReviewBelowSharpness float64 // 0 = off; keep -> review when the sharpness score is lower
 	EyesClosed           Action
-	Duplicates           Action  // non-best frames of a burst
+	Duplicates           Action  // unused: sets use KeepBest/Outranked; goes with --duplicates
 	RawClipped           Action  // raw highlights clipped beyond RawClipThreshold
 	RawClipThreshold     float64 // percent of raw samples at white level; 0 = default 0.5
 	KeepBest             int     // per set, keep this many best-ranked frames; 0 = rank only
@@ -109,15 +109,6 @@ type Policy struct {
 type Facts struct {
 	RawKnown   bool    // raw clipping was measured
 	RawClipPct float64 // percent of raw samples at the white level
-}
-
-// ApplyDuplicate raises a frame that isn't the best of its burst according to
-// the Duplicates action (review by default) and always leaves the reason.
-func (p Policy) ApplyDuplicate(d Decision, reasons []string, best string, size int) (Decision, []string) {
-	if to, act := p.Duplicates.decision(); act && rank(to) > rank(d) {
-		d = to
-	}
-	return d, append(reasons, fmt.Sprintf("duplicate of %s (burst of %d)", best, size))
 }
 
 // ApplyOutranked raises a frame ranked below KeepBest in its set by the Outranked

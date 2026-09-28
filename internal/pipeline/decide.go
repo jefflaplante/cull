@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/group"
@@ -21,10 +20,9 @@ type DecideOptions struct {
 	Policy       eval.Policy
 	WriteXMP     bool
 	XMPDevelop   bool
-	OverwriteXMP bool // also overwrite sidecars the report doesn't record as ours
-	MoveCulled   bool // sync culled/: move new culls, restore frames no longer culled
-	GroupGap     time.Duration
-	GroupHamming int                     // unused: sequences link by look (group.DefaultLook); goes with --burst-hash
+	OverwriteXMP bool                    // also overwrite sidecars the report doesn't record as ours
+	MoveCulled   bool                    // sync culled/: move new culls, restore frames no longer culled
+	Seq          group.Options           // sequences of similar frames; Seq.Gap 0 = no grouping
 	Labels       map[string]labels.Entry // the user's labels by base name; nil = the model's verdicts alone
 }
 
@@ -56,7 +54,7 @@ func Decide(reportPath string, o DecideOptions, log io.Writer) (DecideSummary, e
 			addFixup(r, f)
 		}
 	}
-	for _, i := range decideAll(rep, o.Policy, group.Options{Gap: o.GroupGap, MaxLook: group.DefaultLook}) {
+	for _, i := range decideAll(rep, o.Policy, o.Seq) {
 		sum.Changed[string(before[i])+"→"+string(rep.Results[i].Decision)]++
 	}
 	if sum.Frames == 0 {

@@ -59,11 +59,13 @@ func (g *Group) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(aux.Best, &g.Best)
 }
 
-// Set is one sequence of similar frames. Members and Order hold Result.File paths;
-// Order is the model's ranking of the rankable members, empty until ranked.
+// Set is one sequence of similar frames. Members (capture order) and Order hold
+// Result.File paths; Order is the model's ranking of the members it compared,
+// empty until ranked.
 type Set struct {
 	ID      int        `json:"id"`
 	Members []string   `json:"members"`
+	Of      int        `json:"of"` // rankable members at the last decide
 	Order   []string   `json:"order,omitempty"`
 	Notes   []RankNote `json:"notes,omitempty"`
 	Summary string     `json:"summary,omitempty"`

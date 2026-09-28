@@ -185,19 +185,6 @@ func TestEvaluationSchemaRequiresPeople(t *testing.T) {
 	}
 }
 
-func TestApplyDuplicate(t *testing.T) {
-	for _, c := range []struct {
-		a    Action
-		in   Decision
-		want Decision
-	}{{"", Keep, Review}, {ActionCull, Keep, Cull}, {ActionIgnore, Keep, Keep}, {"", Cull, Cull}} {
-		d, reasons := Policy{Duplicates: c.a}.ApplyDuplicate(c.in, nil, "L1.DNG", 3)
-		if d != c.want || len(reasons) != 1 || !strings.Contains(reasons[0], "duplicate of L1.DNG (burst of 3)") {
-			t.Errorf("%q on %s: got %s %v", c.a, c.in, d, reasons)
-		}
-	}
-}
-
 func TestPolicyUsesRawClipping(t *testing.T) {
 	clipped := func() *Evaluation {
 		return &Evaluation{Sharpness: Sharpness{Status: "sharp", Score: 8}, Exposure: Exposure{Status: "clipped", Clipping: "highlights"}}

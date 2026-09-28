@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jefflaplante/gophotocull/internal/group"
 	"github.com/jefflaplante/gophotocull/internal/imageprep"
 	"github.com/jefflaplante/gophotocull/internal/pipeline"
 )
@@ -97,9 +98,8 @@ func (so *sharedOpts) base(arg string) (pipeline.Config, error) {
 		Prep:              imageprep.Options{MaxEdge: so.maxEdge},
 		LandedTiles:       so.tiles,
 		FaceMinQ:          so.faceMinQ,
-		GroupGap:          so.burstGap,
+		Seq:               group.Options{Gap: so.burstGap, MaxLook: group.DefaultLook},
 		LandedWithSubject: so.landedWithSubject,
-		GroupHamming:      so.burstHash,
 		SaveInputs:        saveInputs,
 		Concurrency:       4,
 		CheckpointN:       25,

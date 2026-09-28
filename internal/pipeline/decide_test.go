@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -116,14 +117,15 @@ func TestDecideNeedsEvaluations(t *testing.T) {
 	}
 }
 
-func TestBurstDuplicatesGoToReviewAndDecideCanCullThem(t *testing.T) {
+func TestSequenceOutrankedGoToReviewAndDecideCanCullThem(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"L1000001", "L1000002", "L1000003"} { // identical frames, no EXIF
 		texturedDNG(t, filepath.Join(dir, n+".DNG"))
 	}
 	c := moveCfg(dir)
 	c.MoveCulled, c.WriteXMP = false, true
-	c.GroupGap = 2 * time.Second
+	c.Seq = group.Options{Gap: 2 * time.Second, MaxLook: group.DefaultLook}
+	c.Policy.KeepBest = 1 // Outranked "" = review
 	rep, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
 	if err != nil {
 		t.Fatal(err)
@@ -133,24 +135,188 @@ func TestBurstDuplicatesGoToReviewAndDecideCanCullThem(t *testing.T) {
 		best.Decision != eval.Keep || best.Look == "" {
 		t.Fatalf("best: group=%+v decision=%s look=%q", best.Group, best.Decision, best.Look)
 	}
+	if len(rep.Sets) != 1 || len(rep.Sets[0].Members) != 3 || rep.KeepBest != 1 {
+		t.Fatalf("sets %+v keepBest %d", rep.Sets, rep.KeepBest)
+	}
 	for rank, n := range []string{"L1000002.DNG", "L1000003.DNG"} {
 		r := result(t, rep, n)
 		if g := r.Group; g == nil || g.ID != 1 || g.Rank != rank+2 || g.Best {
 			t.Fatalf("%s: group=%+v", n, r.Group)
 		}
-		if r.Decision != eval.Review || !strings.Contains(strings.Join(r.Reasons, ";"), "duplicate of L1000001.DNG (burst of 3)") {
+		want := fmt.Sprintf("rank %d of 3 in set 1 by scores, not compared (keeping the best 1)", rank+2)
+		if r.Decision != eval.Review || !strings.Contains(strings.Join(r.Reasons, ";"), want) {
 			t.Fatalf("%s: decision=%s reasons=%v", n, r.Decision, r.Reasons)
 		}
 		if b, _ := os.ReadFile(r.XMP); !strings.Contains(string(b), `xmp:Label="Yellow"`) {
-			t.Fatalf("%s: sidecar not updated for the duplicate decision:\n%s", n, b)
+			t.Fatalf("%s: sidecar not updated for the outranked decision:\n%s", n, b)
 		}
 	}
 
 	sum, err := Decide(c.ReportPath, DecideOptions{
-		Policy: eval.Policy{MinCropArea: 0.6, Duplicates: eval.ActionCull}, GroupGap: 2 * time.Second,
+		Policy: eval.Policy{MinCropArea: 0.6, KeepBest: 1, Outranked: eval.ActionCull}, Seq: c.Seq,
 	}, io.Discard)
 	if err != nil || sum.Changed["review→cull"] != 2 {
 		t.Fatalf("decide: %+v %v", sum, err)
+	}
+}
+
+// setReport: n frames in one visual sequence 10 s apart, all evaluated keep with
+// sharpness scores from sharp[], looks identical.
+func setReport(t *testing.T, sharp ...float64) *report.Report {
+	t.Helper()
+	look := report.EncodeLook(make([]uint8, 192))
+	rep := &report.Report{}
+	for i, s := range sharp {
+		e := &eval.Evaluation{Sharpness: eval.Sharpness{Status: "sharp", Score: s}}
+		rep.Results = append(rep.Results, report.Result{File: fmt.Sprintf("/s/L%03d.DNG", i+1), Look: look,
+			Preview: &report.PreviewInfo{Width: 100, Height: 100, Orientation: 1}, Evaluation: e, Decision: eval.Keep})
+	}
+	return rep
+}
+
+var seq = group.Options{Gap: time.Minute, MaxLook: 0.1}
+
+func TestKeepBestByScoresWithoutRanking(t *testing.T) {
+	rep := setReport(t, 7, 9, 8, 6, 9.5)
+	decideAll(rep, eval.Policy{KeepBest: 3, Outranked: eval.ActionReview}, seq)
+	want := map[string]eval.Decision{"L001": eval.Review, "L002": eval.Keep, "L003": eval.Keep, "L004": eval.Review, "L005": eval.Keep}
+	for _, r := range rep.Results {
+		if d := want[strings.TrimSuffix(filepath.Base(r.File), ".DNG")]; r.Decision != d || r.Group == nil || r.Group.By != "scores" {
+			t.Errorf("%s: %s group=%+v", r.File, r.Decision, r.Group)
+		}
+	}
+	if len(rep.Sets) != 1 || rep.KeepBest != 3 || len(needsRanking(rep)) != 1 {
+		t.Fatalf("sets %+v keepBest %d needs %v", rep.Sets, rep.KeepBest, needsRanking(rep))
+	}
+}
+
+func TestStoredModelOrderWinsAndIsReused(t *testing.T) {
+	rep := setReport(t, 9, 9, 9, 9)
+	p := eval.Policy{KeepBest: 2, Outranked: eval.ActionReview}
+	decideAll(rep, p, seq)
+	rep.Sets[0].Order = []string{"/s/L003.DNG", "/s/L001.DNG", "/s/L004.DNG", "/s/L002.DNG"}
+	rep.Sets[0].By = "model"
+	decideAll(rep, p, seq)
+	got := map[string]int{}
+	for _, r := range rep.Results {
+		got[filepath.Base(r.File)] = r.Group.Rank
+	}
+	if got["L003.DNG"] != 1 || got["L002.DNG"] != 4 || len(needsRanking(rep)) != 0 {
+		t.Fatalf("ranks %v needs %v", got, needsRanking(rep))
+	}
+}
+
+func TestDecideReusesOrderWhenMembersDrop(t *testing.T) {
+	rep := setReport(t, 9, 9, 9, 9)
+	p := eval.Policy{KeepBest: 2, Outranked: eval.ActionReview}
+	decideAll(rep, p, seq)
+	rep.Sets[0].Order = []string{"/s/L003.DNG", "/s/L001.DNG", "/s/L004.DNG", "/s/L002.DNG"}
+	rep.Sets[0].By = "model"
+	rep.Results[0].Evaluation.Sharpness.Status = "missed_focus" // L001 becomes a technical cull
+	decideAll(rep, p, seq)
+	if len(needsRanking(rep)) != 0 {
+		t.Fatal("a dropped member must not throw away the paid order")
+	}
+	for _, r := range rep.Results {
+		if filepath.Base(r.File) == "L004.DNG" && (r.Group.Rank != 2 || r.Decision != eval.Keep) {
+			t.Fatalf("L004 moves up to rank 2 and stays keep: %+v %s", r.Group, r.Decision)
+		}
+	}
+	rep.Results = append(rep.Results, report.Result{File: "/s/L005.DNG", Look: rep.Results[1].Look,
+		Preview: rep.Results[1].Preview, Evaluation: &eval.Evaluation{Sharpness: eval.Sharpness{Status: "sharp", Score: 9}}})
+	decideAll(rep, p, seq)
+	if len(needsRanking(rep)) != 1 {
+		t.Fatal("a new member makes the set unranked")
+	}
+}
+
+func TestOutrankedReasonAndNeverPromotes(t *testing.T) {
+	rep := setReport(t, 9, 8, 7, 6)
+	rep.Results[3].Evaluation.Sharpness.Status = "soft" // policy says review on its own
+	p := eval.Policy{KeepBest: 1, Outranked: eval.ActionReview}
+	decideAll(rep, p, seq)
+	for _, r := range rep.Results[1:3] {
+		if r.Decision != eval.Review || !strings.Contains(strings.Join(r.Reasons, ";"), "in set 1 by scores, not compared (keeping the best 1)") {
+			t.Fatalf("%s: %s %v", r.File, r.Decision, r.Reasons)
+		}
+	}
+	if r := rep.Results[0]; r.Decision != eval.Keep || !r.Group.Best {
+		t.Fatalf("best: %s %+v", r.Decision, r.Group)
+	}
+	decideAll(rep, eval.Policy{KeepBest: 0, Outranked: eval.ActionReview}, seq)
+	for _, r := range rep.Results[:3] {
+		if r.Decision != eval.Keep {
+			t.Fatalf("KeepBest 0 ranks only: %s %s", r.File, r.Decision)
+		}
+	}
+}
+
+func TestLoneSurvivorIsBest(t *testing.T) {
+	rep := setReport(t, 9, 3, 2)
+	rep.Results[1].Evaluation.Sharpness.Status = "missed_focus"
+	rep.Results[2].Evaluation.Sharpness.Status = "motion_blur"
+	decideAll(rep, eval.Policy{KeepBest: 3, Outranked: eval.ActionReview}, seq)
+	if g := rep.Results[0].Group; g == nil || g.Rank != 1 || !g.Best || g.Of != 1 || len(needsRanking(rep)) != 0 {
+		t.Fatalf("lone survivor: %+v", g)
+	}
+	if g := rep.Results[1].Group; g == nil || g.Rank != 0 || g.Best {
+		t.Fatalf("culled member stays in the set, unranked: %+v", g)
+	}
+}
+
+func TestOutrankedNeverTouchesReview(t *testing.T) {
+	rep := setReport(t, 9, 8, 7)
+	rep.Results[2].Evaluation.Sharpness.Status = "soft"
+	decideAll(rep, eval.Policy{KeepBest: 1, Outranked: eval.ActionCull}, seq)
+	if r := rep.Results[1]; r.Decision != eval.Cull {
+		t.Fatalf("outranked keep: %s %v", r.Decision, r.Reasons)
+	}
+	if r := rep.Results[2]; r.Decision != eval.Review || r.Group.Rank != 3 || strings.Contains(strings.Join(r.Reasons, ";"), "rank 3") {
+		t.Fatalf("a review stays review, untouched by ranking: %s %v", r.Decision, r.Reasons)
+	}
+}
+
+// A member the model ranked that a policy change culls, then a later decide
+// restores, is still in the paid order: tuning the policy costs nothing.
+func TestReturningMemberKeepsItsModelRank(t *testing.T) {
+	rep := setReport(t, 9, 9, 9)
+	rep.Results[1].Evaluation.People = eval.People{Present: true, Eyes: "closed"}
+	decideAll(rep, eval.Policy{KeepBest: 1}, seq) // eyes closed: review by default, still rankable
+	rep.Sets[0].Order = []string{"/s/L002.DNG", "/s/L001.DNG", "/s/L003.DNG"}
+	rep.Sets[0].Notes = []report.RankNote{{File: "/s/L002.DNG", Strength: "moment", Weakness: "blink"}}
+	rep.Sets[0].By = "model"
+	decideAll(rep, eval.Policy{KeepBest: 1, EyesClosed: eval.ActionCull}, seq)
+	if g := rep.Results[1].Group; g.Rank != 0 || rep.Results[0].Group.Rank != 1 || rep.Sets[0].By != "model" {
+		t.Fatalf("culled L002 drops out, L001 moves up: %+v %+v", g, rep.Sets[0])
+	}
+	decideAll(rep, eval.Policy{KeepBest: 1}, seq)
+	if g := rep.Results[1].Group; g.Rank != 1 || g.By != "model" || g.Strength != "moment" || len(needsRanking(rep)) != 0 {
+		t.Fatalf("L002 back at rank 1 from the stored order: %+v needs %v", g, needsRanking(rep))
+	}
+}
+
+// When a regrouping splits a ranked set, each part keeps its members' order, and
+// the set's cost is counted once.
+func TestSplitSetKeepsOrderAndCountsCostOnce(t *testing.T) {
+	rep := setReport(t, 9, 9, 9, 9)
+	p := eval.Policy{KeepBest: 1}
+	decideAll(rep, p, seq)
+	rep.Sets[0].Order = []string{"/s/L003.DNG", "/s/L001.DNG", "/s/L004.DNG", "/s/L002.DNG"}
+	rep.Sets[0].By, rep.Sets[0].CostUSD = "model", 0.05
+	bright := make([]uint8, 192) // upper half bright: far from the black look of L001–L002
+	for i := range bright[:96] {
+		bright[i] = 255
+	}
+	rep.Results[2].Look, rep.Results[3].Look = report.EncodeLook(bright), report.EncodeLook(bright)
+	decideAll(rep, p, seq)
+	if len(rep.Sets) != 2 || rep.Sets[0].By != "model" || rep.Sets[1].By != "model" {
+		t.Fatalf("sets %+v", rep.Sets)
+	}
+	if o := rep.Sets[1].Order; len(o) != 2 || o[0] != "/s/L003.DNG" || o[1] != "/s/L004.DNG" {
+		t.Fatalf("second part's order: %v", o)
+	}
+	if c := rep.Cost(); c != 0.05 {
+		t.Fatalf("cost counted %v, want 0.05 once", c)
 	}
 }
 

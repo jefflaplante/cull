@@ -1,0 +1,107 @@
+package cli
+
+import (
+	"fmt"
+	"os/exec"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
+	"github.com/jefflaplante/gophotocull/internal/config"
+	"github.com/jefflaplante/gophotocull/internal/llm"
+)
+
+// backendFlags select and construct a model backend: shared by judge and rank so
+// both take the same --backend, --model, and per-backend credential flags.
+type backendFlags struct {
+	backend       string
+	model         string
+	apiKeyFile    string
+	baseURL       string
+	openaiKeyFile string
+	openaiStream  bool
+	claudeBin     string
+	quotaStop     float64
+}
+
+func (o *backendFlags) register(f *pflag.FlagSet) {
+	f.StringVar(&o.backend, "backend", "anthropic", "model backend: anthropic, claude-code, or openai")
+	f.StringVarP(&o.model, "model", "m", "", "model (default claude-sonnet-5 for anthropic, sonnet for claude-code; required for openai)")
+	f.StringVar(&o.apiKeyFile, "api-key-file", "", "file containing the Anthropic API key")
+	f.StringVar(&o.baseURL, "base-url", "http://127.0.0.1:8000/v1", "OpenAI-compatible endpoint (openai backend)")
+	f.StringVar(&o.openaiKeyFile, "openai-key-file", "", "file containing a key for the openai backend (optional)")
+	f.BoolVar(&o.openaiStream, "openai-stream", true, "stream and hang up once the JSON closes (openai backend)")
+	f.StringVar(&o.claudeBin, "claude-bin", "claude", "Claude Code executable (claude-code backend)")
+	f.Float64Var(&o.quotaStop, "quota-stop", 0.9, "stop when this fraction of the 5-hour subscription window is used (claude-code backend)")
+}
+
+// validate checks the flags common to every backend. Callers with extra
+// backend-dependent flags (e.g. judge's --batch) check those separately.
+func (o *backendFlags) validate() error {
+	if _, ok := backendDefaults[o.backend]; !ok {
+		return fmt.Errorf("unknown --backend %q (want anthropic, claude-code, or openai)", o.backend)
+	}
+	if o.backend == "openai" && o.model == "" {
+		return fmt.Errorf("--backend openai requires --model (see GET <base-url>/models)")
+	}
+	if o.quotaStop <= 0 || o.quotaStop > 1 {
+		return fmt.Errorf("--quota-stop must be in (0, 1]")
+	}
+	return nil
+}
+
+// newBackend builds the selected backend and describes its credential source
+// without ever printing a key.
+func (o *backendFlags) newBackend(cmd *cobra.Command) (llm.Backend, string, error) {
+	if o.model == "" {
+		o.model = backendDefaults[o.backend].model
+	}
+	return o.buildBackend(cmd, o.backend, o.model)
+}
+
+// buildBackend constructs a backend and describes its credential source without
+// ever printing a key.
+func (o *backendFlags) buildBackend(cmd *cobra.Command, name, model string) (llm.Backend, string, error) {
+	switch name {
+	case "claude-code":
+		path, err := exec.LookPath(o.claudeBin)
+		if err != nil {
+			return nil, "", fmt.Errorf("claude binary %q not found: %w", o.claudeBin, err)
+		}
+		return llm.NewClaudeCode(path, model, o.quotaStop), "auth: Claude subscription via " + path, nil
+	case "openai":
+		key, source, warnings, err := config.LoadOpenAIKey(o.openaiKeyFile)
+		if err != nil {
+			return nil, "", err
+		}
+		warn(cmd, warnings)
+		b := llm.NewOpenAI(o.baseURL, key, model)
+		b.Stream = o.openaiStream
+		return b, "endpoint: " + b.BaseURL + ", key: " + source, nil
+	default:
+		key, source, warnings, err := config.LoadAPIKey(o.apiKeyFile)
+		if err != nil {
+			return nil, "", err
+		}
+		warn(cmd, warnings)
+		return llm.NewAnthropic(key, model), "api key: " + source, nil
+	}
+}
+
+type backendDefault struct {
+	model       string
+	concurrency int
+	basis       string // how the token counts relate to money
+}
+
+var backendDefaults = map[string]backendDefault{
+	"anthropic":   {"claude-sonnet-5", 4, "API-billed"},
+	"claude-code": {"sonnet", 2, "subscription, not billed per token"},
+	"openai":      {"", 4, "OpenAI-compatible server"},
+}
+
+func warn(cmd *cobra.Command, warnings []string) {
+	for _, w := range warnings {
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning:", w)
+	}
+}

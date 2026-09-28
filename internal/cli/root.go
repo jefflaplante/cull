@@ -27,8 +27,8 @@ type sharedOpts struct {
 	faceMinQ          float64
 	saveInputs        string
 	landedWithSubject bool
-	burstGap          time.Duration
-	burstHash         int
+	seqGap            time.Duration
+	seqLook           float64
 }
 
 func NewRootCmd() *cobra.Command {
@@ -55,10 +55,10 @@ then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.`,
 	pf.Float64Var(&so.faceMinQ, "face-min-q", 80, "face detection score needed to trust a face as the focus target")
 	pf.StringVar(&so.saveInputs, "save-inputs", "", "write exactly what the model sees (JPEGs + inputs.json) to this directory")
 	pf.BoolVar(&so.landedWithSubject, "landed-with-subject", false, "also send \"where focus landed\" tiles when a subject crop exists (can bias the model toward texture)")
-	pf.DurationVar(&so.burstGap, "burst-gap", 2*time.Second, "frames this close in capture time can form a burst (0 = no burst grouping)")
-	pf.IntVar(&so.burstHash, "burst-hash", 12, "max difference-hash distance (0-64) between neighbouring frames of a burst")
+	pf.DurationVar(&so.seqGap, "seq-gap", 60*time.Second, "frames this close in capture time can link into a sequence (0 = no sequence grouping)")
+	pf.Float64Var(&so.seqLook, "seq-look", group.DefaultLook, "max look distance (0-1) to the previous frame for it to link into the same sequence")
 
-	root.AddCommand(newScanCmd(&so), newCullCmd(&so), newDecideCmd(&so), newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newVersionCmd())
+	root.AddCommand(newScanCmd(&so), newCullCmd(&so), newRankCmd(&so), newDecideCmd(&so), newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newVersionCmd())
 	return root
 }
 
@@ -71,11 +71,11 @@ func (so *sharedOpts) base(arg string) (pipeline.Config, error) {
 	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
 		return pipeline.Config{}, fmt.Errorf("%s is not a directory", arg)
 	}
-	if so.burstGap < 0 {
-		return pipeline.Config{}, fmt.Errorf("--burst-gap must be >= 0")
+	if so.seqGap < 0 {
+		return pipeline.Config{}, fmt.Errorf("--seq-gap must be >= 0")
 	}
-	if so.burstHash < 0 || so.burstHash > 64 {
-		return pipeline.Config{}, fmt.Errorf("--burst-hash must be in [0, 64]")
+	if so.seqLook < 0 || so.seqLook > 1 {
+		return pipeline.Config{}, fmt.Errorf("--seq-look must be in [0, 1]")
 	}
 	saveInputs := ""
 	if so.saveInputs != "" {
@@ -98,7 +98,7 @@ func (so *sharedOpts) base(arg string) (pipeline.Config, error) {
 		Prep:              imageprep.Options{MaxEdge: so.maxEdge},
 		LandedTiles:       so.tiles,
 		FaceMinQ:          so.faceMinQ,
-		Seq:               group.Options{Gap: so.burstGap, MaxLook: group.DefaultLook},
+		Seq:               group.Options{Gap: so.seqGap, MaxLook: so.seqLook},
 		LandedWithSubject: so.landedWithSubject,
 		SaveInputs:        saveInputs,
 		Concurrency:       4,

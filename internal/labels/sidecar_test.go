@@ -75,6 +75,17 @@ func TestWriteSidecarOwnership(t *testing.T) {
 	}
 }
 
+func TestSidecarBestKeyword(t *testing.T) {
+	r := report.Result{Decision: eval.Keep, Group: &report.Group{ID: 1, Size: 4, Rank: 2, Of: 4, Best: true}}
+	if sc := Sidecar(r, Entry{}, 1, false); !reflect.DeepEqual(sc.Keywords, []string{"cull:keep", "cull:best"}) {
+		t.Fatalf("%v", sc.Keywords)
+	}
+	r.Group.Best = false
+	if sc := Sidecar(r, Entry{}, 1, false); len(sc.Keywords) != 1 {
+		t.Fatalf("%v", sc.Keywords)
+	}
+}
+
 func TestDuplicates(t *testing.T) {
 	rs := []report.Result{{File: "/a/L1.DNG"}, {File: "/a/L2.DNG"}, {File: "/b/L1.DNG"}}
 	if d := Duplicates(rs); len(d) != 1 || !strings.Contains(d[0], "/a/L1.DNG") || !strings.Contains(d[0], "/b/L1.DNG") {

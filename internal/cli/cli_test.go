@@ -230,12 +230,16 @@ func TestPolicyFlagValidation(t *testing.T) {
 	dir := t.TempDir()
 	for name, args := range map[string][]string{
 		"bad eyes action":       {"judge", "--eyes-closed", "delete", dir},
-		"bad duplicates":        {"decide", "--duplicates", "burn", dir},
+		"bad outranked":         {"decide", "--outranked", "burn", dir},
 		"bad raw action":        {"judge", "--raw-clipped", "maybe", dir},
 		"batch needs anthropic": {"judge", "--batch", "--backend", "openai", "--model", "m", dir},
 		"batch with escalation": {"judge", "--batch", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", dir},
 		"bad raw threshold":     {"judge", "--raw-clip-threshold", "150", dir},
-		"negative burst gap":    {"scan", "--burst-gap", "-1s", dir},
+		"negative seq gap":      {"scan", "--seq-gap", "-1s", dir},
+		"bad seq look, high":    {"scan", "--seq-look", "2", dir},
+		"bad seq look, low":     {"scan", "--seq-look", "-0.1", dir},
+		"negative keep-best":    {"judge", "--keep-best", "-1", dir},
+		"keep-best too high":    {"decide", "--keep-best", "6", dir},
 		"bad escalate backend":  {"judge", "--escalate-backend", "gpt", "--escalate-model", "x", dir},
 		"escalate needs model":  {"judge", "--escalate-backend", "anthropic", dir},
 		"bad escalate-on":       {"judge", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", "--escalate-on", "blurry", dir},
@@ -611,5 +615,131 @@ func TestToolIsCullAndModelStepIsJudge(t *testing.T) {
 func TestOldCullSubcommandSuggestsJudge(t *testing.T) {
 	if _, err := run(t, "cull", t.TempDir()); err == nil || !strings.Contains(err.Error(), "judge") {
 		t.Fatalf("`cull cull` should point to judge: %v", err)
+	}
+}
+
+// Task 10: --seq-gap/--seq-look replace --burst-gap/--burst-hash, and --outranked
+// (with --keep-best) replaces --duplicates.
+func TestOldSequenceAndDuplicatesFlagsAreGone(t *testing.T) {
+	dir := t.TempDir()
+	for name, args := range map[string][]string{
+		"burst-gap":  {"scan", "--burst-gap", "2s", dir},
+		"burst-hash": {"judge", "--burst-hash", "12", dir},
+		"duplicates": {"decide", "--duplicates", "review", dir},
+	} {
+		if _, err := run(t, args...); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			t.Errorf("%s: want unknown flag, got %v", name, err)
+		}
+	}
+}
+
+func TestJudgeEstimateAddsRankingUpperBound(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	tinyDNG(t, filepath.Join(dir, "L2.DNG"))
+	out, err := run(t, "judge", "--estimate", dir)
+	if err != nil || !strings.Contains(out, "ranking ≤ $") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	out, err = run(t, "judge", "--estimate", "--no-rank", dir)
+	if err != nil || strings.Contains(out, "ranking ≤ $") {
+		t.Fatalf("--no-rank must skip the ranking estimate: err=%v\n%s", err, out)
+	}
+}
+
+func TestRankEstimateCountsSetsAndCalls(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	rep := &report.Report{Sets: []report.Set{{ID: 1, Members: []string{"a", "b"}, Of: 2, By: ""}}}
+	if err := rep.Save(filepath.Join(dir, "cull-report.json")); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "rank", "--estimate", dir)
+	if err != nil || !strings.Contains(out, "1 set, 1 call") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+}
+
+// A fake `claude` that always answers a rank call: frame 1 wins.
+const fakeClaudeRank = `#!/bin/sh
+cat > /dev/null
+echo '{"type":"system","subtype":"init","apiKeySource":"none"}'
+echo '{"type":"result","is_error":false,"structured_output":{"ranking":[{"frame":1,"strength":"sharper eyes","weakness":""},{"frame":2,"strength":"","weakness":"slightly softer"}],"summary":"frame 1 is the sharper take"},"usage":{"input_tokens":20,"output_tokens":10}}'
+`
+
+func TestRankCommandRanksAV3ReportEndToEnd(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	f1, f2 := filepath.Join(dir, "L1.DNG"), filepath.Join(dir, "L2.DNG")
+	tinyDNG(t, f1)
+	tinyDNG(t, f2)
+	sharp := &eval.Evaluation{Sharpness: eval.Sharpness{Score: 8, Status: "sharp"}, Exposure: eval.Exposure{Status: "good"},
+		Composition: eval.Composition{Status: "good"}, People: eval.People{Present: true, Eyes: "open", Expression: "good"}}
+	// schema_version 3, no look: a report from before sequence ranking.
+	rep := &report.Report{SchemaVersion: 3, Backend: "claude-code", Model: "sonnet", Dir: dir, Results: []report.Result{
+		{File: f1, Preview: &report.PreviewInfo{Orientation: 1}, Evaluation: sharp},
+		{File: f2, Preview: &report.PreviewInfo{Orientation: 1}, Evaluation: sharp},
+	}}
+	rp := filepath.Join(dir, "cull-report.json")
+	if err := rep.Save(rp); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeRank), 0o755)
+
+	out, err := run(t, "rank", "--backend", "claude-code", "--claude-bin", bin, dir)
+	if err != nil {
+		t.Fatalf("rank: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "report was judged with") {
+		t.Fatalf("same backend/model as the report: no mismatch warning expected:\n%s", out)
+	}
+	got, err := report.Load(rp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SchemaVersion != report.SchemaVersion {
+		t.Fatalf("schema version %d, want %d", got.SchemaVersion, report.SchemaVersion)
+	}
+	for _, r := range got.Results {
+		if r.Look == "" {
+			t.Fatalf("%s: no look computed", r.File)
+		}
+	}
+	if len(got.Sets) != 1 || got.Sets[0].By != "model" || got.Sets[0].Of != 2 {
+		t.Fatalf("sets: %+v", got.Sets)
+	}
+	if len(got.Sets[0].Order) != 2 {
+		t.Fatalf("order: %+v", got.Sets[0].Order)
+	}
+}
+
+func TestRankWarnsWhenBackendOrModelDiffersFromTheReport(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	f1, f2 := filepath.Join(dir, "L1.DNG"), filepath.Join(dir, "L2.DNG")
+	tinyDNG(t, f1)
+	tinyDNG(t, f2)
+	sharp := &eval.Evaluation{Sharpness: eval.Sharpness{Score: 8, Status: "sharp"}, Exposure: eval.Exposure{Status: "good"},
+		Composition: eval.Composition{Status: "good"}, People: eval.People{Present: true, Eyes: "open", Expression: "good"}}
+	rep := &report.Report{SchemaVersion: 3, Backend: "anthropic", Model: "claude-sonnet-5", Dir: dir, Results: []report.Result{
+		{File: f1, Preview: &report.PreviewInfo{Orientation: 1}, Evaluation: sharp},
+		{File: f2, Preview: &report.PreviewInfo{Orientation: 1}, Evaluation: sharp},
+	}}
+	rp := filepath.Join(dir, "cull-report.json")
+	if err := rep.Save(rp); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeRank), 0o755)
+
+	out, err := run(t, "rank", "--backend", "claude-code", "--claude-bin", bin, dir)
+	if err != nil {
+		t.Fatalf("rank: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "warning: report was judged with anthropic/claude-sonnet-5; ranking with claude-code/sonnet") {
+		t.Fatalf("no mismatch warning:\n%s", out)
 	}
 }

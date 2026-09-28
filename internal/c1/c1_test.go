@@ -55,6 +55,20 @@ func TestScriptColorsAndKeywordsWithoutLabels(t *testing.T) {
 	}
 }
 
+func TestScriptBestKeyword(t *testing.T) {
+	rep := testReport()
+	rep.Results[0].Group = &report.Group{ID: 1, Size: 2, Rank: 1, Of: 2, Best: true}
+	rep.Results[1].Group = &report.Group{ID: 1, Size: 2, Rank: 2, Of: 2, Best: false}
+	s := Script(rep, Options{Keyword: true})
+	b1, b2 := block(s, "L1.DNG"), block(s, "L2.DNG")
+	if !strings.Contains(b1, `"cull:best"`) {
+		t.Errorf("L1 (best of its set): want cull:best\n%s", b1)
+	}
+	if strings.Contains(b2, `"cull:best"`) {
+		t.Errorf("L2 (not best): got cull:best\n%s", b2)
+	}
+}
+
 func TestScriptUsesYourLabelsAndStars(t *testing.T) {
 	lab := map[string]labels.Entry{
 		"L1.DNG": {File: "L1.DNG", Label: "cull"}, // model keep, you cull

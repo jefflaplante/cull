@@ -23,8 +23,8 @@ var colors = map[eval.Decision]string{eval.Keep: "Green", eval.Review: "Yellow",
 // Sidecar maps a frame and the user's entry for it (zero if none) to sidecar
 // metadata: the user's stars as the rating (omitted when unrated; the model never
 // sets stars), the effective verdict as colour and keyword, plus
-// cull:labeled when the verdict is the user's. Develop settings only when
-// asked, and never for a cull.
+// cull:labeled when the verdict is the user's and cull:best when it is the top
+// of its set (Group.Best). Develop settings only when asked, and never for a cull.
 func Sidecar(r report.Result, l Entry, orientation int, develop bool) xmp.Sidecar {
 	d, yours := Effective(r, l)
 	sc := xmp.Sidecar{Rating: l.Stars, Label: colors[d]}
@@ -33,6 +33,9 @@ func Sidecar(r report.Result, l Entry, orientation int, develop bool) xmp.Sideca
 	}
 	if yours {
 		sc.Keywords = append(sc.Keywords, "cull:labeled")
+	}
+	if r.Group != nil && r.Group.Best {
+		sc.Keywords = append(sc.Keywords, "cull:best")
 	}
 	if !develop || r.Evaluation == nil || d == eval.Cull {
 		return sc

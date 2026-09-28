@@ -38,13 +38,15 @@ type DecideSummary struct {
 // then optionally rewrites sidecars and syncs culled/. Policy is the only place
 // decisions come from, so tuning it after calibration costs nothing. A schema-v3
 // report gets its looks computed from the DNGs and is saved as the current schema.
-func Decide(reportPath string, o DecideOptions, log io.Writer) (DecideSummary, error) {
+// ctx only bounds that look computation (Ctrl-C leaves the rest of the frames
+// without a look, which decideAll takes: they join no set); the policy re-apply
+// itself is local and uninterruptible.
+func Decide(ctx context.Context, reportPath string, o DecideOptions, log io.Writer) (DecideSummary, error) {
 	rep, err := report.Load(reportPath)
 	if err != nil {
 		return DecideSummary{Changed: map[string]int{}}, err
 	}
-	// Decide takes no context yet, so this can't be interrupted (Task 10: thread cmd.Context()).
-	if n, _ := fillLooks(context.Background(), rep); n > 0 {
+	if n, _ := fillLooks(ctx, rep); n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
 	}
 	sum, err := redecide(rep, o, log, nil)

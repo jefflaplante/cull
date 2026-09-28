@@ -54,6 +54,21 @@ func Estimate(n int, p Price, batch bool) (usd float64, in, out int) {
 	return p.Cost(Usage{InputTokens: in, OutputTokens: out}, batch), in, out
 }
 
+// Per-call rank token use assumed for estimates: a set's full frames and subject
+// crops (up to 8 per call) fit comfortably under 10k input tokens; 1k output
+// covers the ranking, notes, and summary.
+const (
+	estRankInPerCall  = 10_000
+	estRankOutPerCall = 1_000
+)
+
+// EstimateRank is a rough list-price projection for a number of rank calls
+// (chunk calls plus final calls).
+func EstimateRank(calls int, p Price, batch bool) (usd float64, in, out int) {
+	in, out = calls*estRankInPerCall, calls*estRankOutPerCall
+	return p.Cost(Usage{InputTokens: in, OutputTokens: out}, batch), in, out
+}
+
 // ErrBudget stops dispatch once a run's cost reaches --max-cost; finished
 // results are kept and --resume continues later.
 var ErrBudget = errors.New("cost budget reached")

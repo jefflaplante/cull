@@ -98,7 +98,6 @@ type Policy struct {
 	MinCropArea          float64
 	ReviewBelowSharpness float64 // 0 = off; keep -> review when the sharpness score is lower
 	EyesClosed           Action
-	Duplicates           Action  // unused: sets use KeepBest/Outranked; goes with --duplicates
 	RawClipped           Action  // raw highlights clipped beyond RawClipThreshold
 	RawClipThreshold     float64 // percent of raw samples at white level; 0 = default 0.5
 	KeepBest             int     // per set, keep this many best-ranked frames; 0 = rank only

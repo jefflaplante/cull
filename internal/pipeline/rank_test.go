@@ -435,7 +435,7 @@ func TestRankAndDecideUpgradeV3Reports(t *testing.T) {
 		}
 	}
 	downgrade()
-	if _, err := Decide(c.ReportPath, DecideOptions{Policy: c.Policy, Seq: c.Seq}, io.Discard); err != nil {
+	if _, err := Decide(context.Background(), c.ReportPath, DecideOptions{Policy: c.Policy, Seq: c.Seq}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got, err := report.Load(c.ReportPath)

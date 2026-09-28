@@ -84,7 +84,7 @@ Works on scan reports too (labeling only).`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&out, "out", "", "output directory for the sheet's images (default: gophotocull-review next to the report)")
+	f.StringVar(&out, "out", "", "output directory for index.html, with the images in its assets/ folder (default: gophotocull-review next to the report)")
 	f.IntVarP(&jobs, "concurrency", "j", 4, "parallel image rendering (~200 MB RAM each)")
 	f.BoolVar(&force, "force", false, "re-render images that already exist")
 	f.BoolVar(&static, "static", false, "write an offline index.html instead of serving (labels stay in the browser)")

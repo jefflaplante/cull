@@ -44,7 +44,8 @@ make vet
   Batches driver with re-attachable `<report>.batch.json` state), escalation, cost budget
 - `internal/group` — dHash + burst grouping (time gap + hash), best-of-burst
 - `internal/rawclip` — pure-Go lossless-JPEG (SOF3) decoder; raw highlight clipping
-- `internal/review` — HTML contact sheet (embedded page.html: labels, stars, filters) and
+- `internal/review` — HTML contact sheet (index.html from embedded page.html: labels, stars,
+  filters; images in its assets/ folder) and
   the server `review` runs by default (serve.go: 127.0.0.1, Host/Origin/token checks, appends labels,
   optional sidecars)
 - `internal/labels` — the user's append-only JSONL labels log (last line per file wins),

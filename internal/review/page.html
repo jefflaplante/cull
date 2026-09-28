@@ -121,7 +121,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     kids.flat().forEach(k => k && n.appendChild(k));
     return n;
   };
-  const img = (name, alt) => name ? el("img", { src: encodeURIComponent(name), alt, loading: "lazy" }) : null;
+  const img = (name, alt) => name ? el("img", { src: "assets/" + encodeURIComponent(name), alt, loading: "lazy" }) : null;
   const badge = (d, extra = "", title = "") => el("span", { cls: "badge " + (d || "none") + extra, text: d || "unscored", title });
   const modelBadge = d => badge(d, "", "model's verdict");
   const yourBadge = (d, extra = "") => badge(d, extra, "your label");

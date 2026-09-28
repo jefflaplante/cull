@@ -62,7 +62,7 @@ func (s *Server) Handler(addr string) http.Handler {
 	mux.HandleFunc("GET /index.html", s.page)
 	mux.HandleFunc("GET /api/labels", s.getLabels)
 	mux.HandleFunc("POST /api/labels", s.postLabel)
-	mux.HandleFunc("GET /{name}", s.image)
+	mux.HandleFunc("GET /"+AssetsDir+"/{name}", s.image)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !hosts[r.Host] {
 			http.Error(w, "forbidden host", http.StatusForbidden)
@@ -92,14 +92,14 @@ func (s *Server) page(w http.ResponseWriter, _ *http.Request) {
 	w.Write(b)
 }
 
-// image serves the sheet's own JPEGs and nothing else.
+// image serves the sheet's own JPEGs from its assets folder and nothing else.
 func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if !strings.HasSuffix(name, ".jpg") || name != filepath.Base(name) {
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeFile(w, r, filepath.Join(s.sheet.Dir, name))
+	http.ServeFile(w, r, filepath.Join(s.sheet.Dir, AssetsDir, name))
 }
 
 type state struct {

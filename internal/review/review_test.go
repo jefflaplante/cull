@@ -61,16 +61,16 @@ func TestBuildWritesAnOfflinePageWithImages(t *testing.T) {
 	}
 	index := sheet.Index
 	for _, f := range []string{"L1.thumb.jpg", "L1.subject.jpg", `L2<b>&".thumb.jpg`} {
-		if _, err := os.Stat(filepath.Join(out, f)); err != nil {
+		if _, err := os.Stat(filepath.Join(out, "assets", f)); err != nil {
 			t.Errorf("missing %s", f)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(out, `L2<b>&".subject.jpg`)); err == nil {
+	if _, err := os.Stat(filepath.Join(out, "assets", `L2<b>&".subject.jpg`)); err == nil {
 		t.Error("a frame without a focus box got a subject crop")
 	}
 	b, _ := os.ReadFile(index)
 	page := string(b)
-	for _, want := range []string{`id="data"`, "Export labels", "L1.DNG", "missed_focus", "boom", "gophotocull-labels.jsonl"} {
+	for _, want := range []string{`id="data"`, "Export labels", "L1.DNG", "missed_focus", "boom", "gophotocull-labels.jsonl", `"assets/"`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %q", want)
 		}
@@ -108,5 +108,32 @@ func TestPageSaysWhereTheFilesAre(t *testing.T) {
 	folder, _ := json.Marshal(dir)
 	if page, _ := sheet.Page(false); !strings.Contains(string(page), `"folder":`+string(folder)) {
 		t.Fatalf("page lacks the shoot folder %s", folder)
+	}
+}
+
+func TestBuildMovesLooseImagesIntoAssets(t *testing.T) {
+	dir, out := t.TempDir(), t.TempDir()
+	f := filepath.Join(dir, "L1.DNG")
+	tinyDNG(t, f)
+	// A sheet built before assets/ existed: images loose beside index.html.
+	os.WriteFile(filepath.Join(out, "L1.thumb.jpg"), []byte("old thumb"), 0o644)
+	os.WriteFile(filepath.Join(out, "other.jpg"), []byte("not ours"), 0o644)
+	os.WriteFile(filepath.Join(out, "report.json"), []byte("{}"), 0o644)
+	rep := &report.Report{Dir: dir, Results: []report.Result{
+		{File: f, Preview: &report.PreviewInfo{Width: 1600, Height: 1067, Orientation: 1, Source: "tiff-ifd"}},
+	}}
+	if _, err := Build(rep, filepath.Join(dir, "r.json"), Options{Out: out, Concurrency: 1}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, "assets", "L1.thumb.jpg")); string(b) != "old thumb" {
+		t.Fatalf("loose thumbnail not moved (re-rendered or missing): %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(out, "L1.thumb.jpg")); err == nil {
+		t.Error("loose thumbnail still beside index.html")
+	}
+	for _, keep := range []string{"other.jpg", "report.json"} {
+		if _, err := os.Stat(filepath.Join(out, keep)); err != nil {
+			t.Errorf("%s was touched: %v", keep, err)
+		}
 	}
 }

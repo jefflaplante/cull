@@ -94,8 +94,10 @@ func TestServerAccessControl(t *testing.T) {
 		{"wrong token", "GET", "/api/labels", map[string]string{"X-Gophotocull-Token": strings.Repeat("0", 32)}, 403},
 		{"foreign origin", "POST", "/api/labels", map[string]string{"X-Gophotocull-Token": tok, "Origin": "http://evil.example"}, 403},
 		{"localhost", "GET", "/api/labels", map[string]string{"Host": "localhost:4567", "Origin": "http://localhost:4567", "X-Gophotocull-Token": tok}, 200},
-		{"image", "GET", "/L1.thumb.jpg", nil, 200},
+		{"image", "GET", "/assets/L1.thumb.jpg", nil, 200},
+		{"image outside assets", "GET", "/L1.thumb.jpg", nil, 404},
 		{"escape", "GET", "/..%2Fgophotocull-report.json", nil, 0},
+		{"escape from assets", "GET", "/assets/..%2F..%2Fgophotocull-report.json", nil, 0},
 		{"not an image", "GET", "/index.json", nil, 404},
 	} {
 		rec := call(h, c.method, c.target, "{}", c.hdr)

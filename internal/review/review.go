@@ -31,6 +31,9 @@ const (
 	placeholder = "/*__DATA__*/null"
 )
 
+// AssetsDir holds the sheet's images, beside index.html.
+const AssetsDir = "assets"
+
 // Options controls the sheet.
 type Options struct {
 	Out         string // output directory
@@ -71,7 +74,7 @@ type pageData struct {
 
 // Build renders the sheet's images and its static index.html into o.Out.
 func Build(rep *report.Report, reportPath string, o Options, log io.Writer) (*Sheet, error) {
-	if err := os.MkdirAll(o.Out, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(o.Out, AssetsDir), 0o755); err != nil {
 		return nil, err
 	}
 	cards := make([]card, len(rep.Results))
@@ -164,10 +167,14 @@ func makeCard(rep *report.Report, r report.Result, o Options, log io.Writer) car
 	return c
 }
 
-// image1 writes one image unless it already exists (and !Force), returning its
-// file name relative to the sheet.
+// image1 writes one image into the assets folder unless it already exists (and
+// !Force), returning its file name there. An image left beside index.html by a
+// sheet built before assets/ is moved in rather than rendered again.
 func image1(o Options, name string, render func() ([]byte, error)) (string, error) {
-	p := filepath.Join(o.Out, name)
+	p := filepath.Join(o.Out, AssetsDir, name)
+	if _, err := os.Stat(p); err != nil {
+		os.Rename(filepath.Join(o.Out, name), p) // a sheet from before assets/: keep its image
+	}
 	if !o.Force {
 		if _, err := os.Stat(p); err == nil {
 			return name, nil

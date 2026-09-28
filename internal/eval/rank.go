@@ -17,9 +17,8 @@ type RankFrame struct {
 
 // RankEntry is one frame's place in a ranking, best first.
 type RankEntry struct {
-	Frame    int    `json:"frame"`
-	Strength string `json:"strength"`
-	Weakness string `json:"weakness"`
+	Frame              int `json:"frame"`
+	Strength, Weakness string
 }
 
 // Ranking is the model's answer to a rank call: every input frame exactly

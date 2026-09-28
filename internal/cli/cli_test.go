@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/report"
 )
 
@@ -257,6 +258,34 @@ func TestCullEstimateNeedsNoKeyAndCallsNothing(t *testing.T) {
 	out, err = run(t, "cull", "--estimate", "--backend", "openai", "--model", "m", dir)
 	if err != nil || !strings.Contains(out, "no per-token cost") {
 		t.Fatalf("openai estimate: err=%v\n%s", err, out)
+	}
+}
+
+// --batch results are costed at half price; the summary must say so rather than
+// "list price" (seen on the first live batch run).
+func TestSummaryCostLabelNamesBatchPrice(t *testing.T) {
+	rep := &report.Report{Results: []report.Result{{File: "a.DNG", Decision: "keep", CostUSD: 0.02}}}
+	for _, tc := range []struct {
+		batch bool
+		want  string
+	}{
+		{false, "cost in report: $0.02 at list price\n"},
+		{true, "cost in report: $0.02 at batch price (50%)\n"},
+	} {
+		cmd := NewRootCmd()
+		var buf bytes.Buffer
+		cmd.SetErr(&buf)
+		printSummary(cmd, "r.json", rep, eval.Usage{}, "anthropic", tc.batch)
+		if !strings.Contains(buf.String(), tc.want) {
+			t.Errorf("batch=%v: want %q in\n%s", tc.batch, tc.want, buf.String())
+		}
+	}
+	for _, c := range NewRootCmd().Commands() {
+		if c.Name() == "cull" {
+			if u := c.Flags().Lookup("max-cost").Usage; !strings.Contains(u, "batch price with --batch") {
+				t.Fatalf("--max-cost help must name the batch price: %q", u)
+			}
+		}
 	}
 }
 

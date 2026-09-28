@@ -29,7 +29,7 @@ Use it to confirm the previews are large enough for focus judgement, and with
 			cfg.Concurrency = concurrency
 			cfg.RawClip = rawClip
 			rep, usage, err := runPipeline(cmd, cfg, nil)
-			printSummary(cmd, cfg.ReportPath, rep, usage, "")
+			printSummary(cmd, cfg.ReportPath, rep, usage, "", false)
 			if rep != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), ScanSummary(rep))
 			}

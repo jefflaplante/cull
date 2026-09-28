@@ -173,13 +173,19 @@ make vet
   `path`, `dimensions`; `apply keyword <existing keyword> to {variants}`. Generated
   scripts compile with `osacompile`.
 - Subscription run, 17 frames with all features: 165k in / 35k out tokens, 4.6 min.
+- Live `cull --batch` (claude-sonnet-5, 3 frames, with the user's approval): two rounds
+  as designed. Round 1 = 1 evaluate (face frame) + 2 locates, round 2 = 2 evaluates;
+  ~2 min per round, 4.2 min total. 21.2k in / 2.3k out, $0.033 at batch price
+  (estimate said $0.04). State file removed on completion. Peak RSS 1.18 GB (3 frames
+  prepared concurrently, raw clip on). Verdicts: M1103823 keep 8.5, M1104114 keep 8.0
+  (the pre-feature-batch sync run said 5.5 with a landed tile), M1103817 review 3.5
+  "soft" (the subscription run called it missed_focus → cull; it is soft at 100%).
 
 ## Unverified assumptions — check before building on them
 
 - Capture One runtime details not in its dictionary: color-tag numbering (code assumes
   1 red, 3 yellow), whether image `name` includes the extension (script tries both),
   orientation of `dimensions`/`crop`, `make new keyword`. Run `apply-c1 --probe` first.
-- Message Batches mode has not run against the live API (it costs money).
 - The review sheet's look (only its behaviour was tested, in jsdom).
 
 - pigo Q threshold (~80 separated true/false on 12 frames) needs calibration on more
@@ -206,7 +212,7 @@ make vet
    at 1000-frame scale before this.
 3. ~~`apply-c1`~~ built (dry run default); confirm with `--probe` on a real catalog.
 4. ~~Raw-level clipping~~ built (pure Go).
-5. ~~Message Batches~~ built (`--batch`); needs one small live run.
+5. ~~Message Batches~~ built (`--batch`); verified live 2026-09-27 on 3 frames.
 6. ~~Burst grouping~~ built.
 
 ## Working style

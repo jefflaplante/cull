@@ -177,7 +177,7 @@ Backends (--backend):
 			} else {
 				rep, usage, err = runPipeline(cmd, cfg, b)
 			}
-			printSummary(cmd, cfg.ReportPath, rep, usage, b.Name())
+			printSummary(cmd, cfg.ReportPath, rep, usage, b.Name(), o.batch)
 			if errors.Is(err, llm.ErrBudget) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "stopped at --max-cost; rerun with --resume (and a higher --max-cost) to continue")
 			}
@@ -208,7 +208,7 @@ Backends (--backend):
 	f.BoolVar(&o.batch, "batch", false, "use the Message Batches API (anthropic): half price, results within minutes to hours; Ctrl-C is safe, resume re-attaches")
 	f.DurationVar(&o.batchPoll, "batch-poll", 30*time.Second, "how often --batch checks progress")
 	f.BoolVar(&o.estimate, "estimate", false, "print the cost estimate and exit (no model calls, no key needed)")
-	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price (0 = no limit); resume later")
+	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price, or batch price with --batch (0 = no limit); resume later")
 	f.StringVar(&o.locate, "locate", "model", "when no face is found, ask the model for the focus target: model or off")
 	f.IntVarP(&o.concurrency, "concurrency", "j", 0, "parallel evaluations (0 = backend default: anthropic 4, claude-code 2, openai 4)")
 	f.BoolVar(&o.resume, "resume", false, "skip files already evaluated in the existing report")
@@ -296,7 +296,7 @@ func (o *cullOpts) escalation(cmd *cobra.Command) (*pipeline.Escalation, error) 
 	return e, nil
 }
 
-// printEstimate projects list-price cost from measured per-frame token use.
+// printEstimate projects list- or batch-price cost from measured per-frame token use.
 func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch bool) {
 	w := cmd.ErrOrStderr()
 	if !priced {
@@ -304,11 +304,15 @@ func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price
 		return
 	}
 	usd, in, out := llm.Estimate(n, p, batch)
-	rate := "list price"
+	fmt.Fprintf(w, "estimate: %d frames × ~7k in / ~1k out tokens ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", n, in, out, usd, rate(batch), model)
+}
+
+// rate names the price basis that llm.Price.Cost applied.
+func rate(batch bool) string {
 	if batch {
-		rate = "batch price (50%)"
+		return "batch price (50%)"
 	}
-	fmt.Fprintf(w, "estimate: %d frames × ~7k in / ~1k out tokens ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", n, in, out, usd, rate, model)
+	return "list price"
 }
 
 func warn(cmd *cobra.Command, warnings []string) {
@@ -322,7 +326,7 @@ func runPipeline(cmd *cobra.Command, cfg pipeline.Config, b llm.Backend) (*repor
 	return pipeline.Run(cmd.Context(), cfg, b)
 }
 
-func printSummary(cmd *cobra.Command, path string, rep *report.Report, usage eval.Usage, backend string) {
+func printSummary(cmd *cobra.Command, path string, rep *report.Report, usage eval.Usage, backend string, batch bool) {
 	defer func() {
 		if rep == nil {
 			return
@@ -332,7 +336,7 @@ func printSummary(cmd *cobra.Command, path string, rep *report.Report, usage eva
 			cost += r.CostUSD
 		}
 		if cost > 0 {
-			fmt.Fprintf(cmd.ErrOrStderr(), "cost in report: $%.2f at list price\n", cost)
+			fmt.Fprintf(cmd.ErrOrStderr(), "cost in report: $%.2f at %s\n", cost, rate(batch))
 		}
 	}()
 	if rep == nil {

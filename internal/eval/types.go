@@ -101,6 +101,8 @@ type Policy struct {
 	Duplicates           Action  // non-best frames of a burst
 	RawClipped           Action  // raw highlights clipped beyond RawClipThreshold
 	RawClipThreshold     float64 // percent of raw samples at white level; 0 = default 0.5
+	KeepBest             int     // per set, keep this many best-ranked frames; 0 = rank only
+	Outranked            Action  // frames ranked below KeepBest in their set
 }
 
 // Facts are measurements the policy uses beside the model's assessment.
@@ -116,6 +118,19 @@ func (p Policy) ApplyDuplicate(d Decision, reasons []string, best string, size i
 		d = to
 	}
 	return d, append(reasons, fmt.Sprintf("duplicate of %s (burst of %d)", best, size))
+}
+
+// ApplyOutranked raises a frame ranked below KeepBest in its set by the Outranked
+// action (review by default) and always leaves the reason.
+func (p Policy) ApplyOutranked(d Decision, reasons []string, pos, of, set int, byScores bool) (Decision, []string) {
+	if to, act := p.Outranked.decision(); act && rank(to) > rank(d) {
+		d = to
+	}
+	how := ""
+	if byScores {
+		how = " by scores, not compared"
+	}
+	return d, append(reasons, fmt.Sprintf("rank %d of %d in set %d%s (keeping the best %d)", pos, of, set, how, p.KeepBest))
 }
 
 // Sanitize clamps values and drops invalid crops. Returns human-readable fixups.

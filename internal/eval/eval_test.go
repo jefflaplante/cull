@@ -229,6 +229,23 @@ func TestPolicyUsesRawClipping(t *testing.T) {
 	}
 }
 
+func TestApplyOutranked(t *testing.T) {
+	p := Policy{KeepBest: 3, Outranked: ActionReview}
+	d, why := p.ApplyOutranked(Keep, nil, 5, 7, 3, false)
+	if d != Review || len(why) != 1 || why[0] != "rank 5 of 7 in set 3 (keeping the best 3)" {
+		t.Fatalf("%s %v", d, why)
+	}
+	if _, why := p.ApplyOutranked(Keep, nil, 4, 6, 2, true); why[0] != "rank 4 of 6 in set 2 by scores, not compared (keeping the best 3)" {
+		t.Fatalf("%v", why)
+	}
+	if d, _ := (Policy{KeepBest: 3, Outranked: ActionCull}).ApplyOutranked(Review, nil, 5, 7, 3, false); d != Cull {
+		t.Fatalf("cull action: %s", d)
+	}
+	if d, _ := (Policy{KeepBest: 3, Outranked: ActionIgnore}).ApplyOutranked(Keep, nil, 5, 7, 3, false); d != Keep {
+		t.Fatalf("ignore: %s", d)
+	}
+}
+
 func TestPromptWarnsAboutTextureComparisons(t *testing.T) {
 	if p := SystemPrompt(0.6); !strings.Contains(p, "always look crisper than skin") {
 		t.Fatal("prompt lacks the texture caveat")

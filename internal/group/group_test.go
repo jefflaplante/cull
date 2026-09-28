@@ -2,6 +2,7 @@ package group
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"testing"
 	"time"
@@ -131,5 +132,76 @@ func TestGroupsDoNotChainAcrossASession(t *testing.T) {
 		if len(g) > MaxBurst {
 			t.Fatalf("burst of %d exceeds %d", len(g), MaxBurst)
 		}
+	}
+}
+
+// scene renders a synthetic 320×240 "photo": a background gradient with a subject
+// block. dx/dy shift the whole view, gain scales brightness, zoom scales about
+// the centre.
+func scene(bg, subj [3]float64, sx, sy float64, dx, dy int, gain, zoom float64) []uint8 {
+	const w, h = 320, 240
+	grid := make([]uint8, LookSize*LookSize*3)
+	for cy := 0; cy < LookSize; cy++ {
+		for cx := 0; cx < LookSize; cx++ {
+			var acc [3]float64
+			n := 0
+			for y := cy * h / LookSize; y < (cy+1)*h/LookSize; y += 4 {
+				for x := cx * w / LookSize; x < (cx+1)*w/LookSize; x += 4 {
+					u := (float64(x-w/2)/zoom + float64(w/2) + float64(dx)) / w
+					v := (float64(y-h/2)/zoom + float64(h/2) + float64(dy)) / h
+					c := bg
+					for k := range c {
+						c[k] = bg[k] * (0.6 + 0.4*v)
+					}
+					if math.Abs(u-sx) < 0.12 && math.Abs(v-sy) < 0.2 {
+						c = subj
+					}
+					for k := range acc {
+						acc[k] += math.Min(255, c[k]*gain)
+					}
+					n++
+				}
+			}
+			for k := range acc {
+				grid[(cy*LookSize+cx)*3+k] = uint8(acc[k] / float64(n))
+			}
+		}
+	}
+	return grid
+}
+
+var (
+	park  = [3]float64{70, 140, 60}
+	coat  = [3]float64{200, 60, 40}
+	wall  = [3]float64{180, 170, 150}
+	shirt = [3]float64{40, 60, 160}
+)
+
+func TestLookDistanceToleratesReframingAndExposure(t *testing.T) {
+	base := scene(park, coat, 0.5, 0.5, 0, 0, 1, 1)
+	for name, other := range map[string][]uint8{
+		"shift 10%":     scene(park, coat, 0.5, 0.5, 32, 0, 1, 1),
+		"one stop up":   scene(park, coat, 0.5, 0.5, 0, 0, 1.6, 1),
+		"zoom 5%":       scene(park, coat, 0.5, 0.5, 0, 0, 1, 1.05),
+		"subject moved": scene(park, coat, 0.56, 0.5, 0, 0, 1, 1),
+	} {
+		if d := LookDistance(base, other); d > 0.08 {
+			t.Errorf("%s: distance %.3f, want ≤ 0.08", name, d)
+		}
+	}
+}
+
+func TestLookDistanceSeparatesScenes(t *testing.T) {
+	base := scene(park, coat, 0.5, 0.5, 0, 0, 1, 1)
+	for name, other := range map[string][]uint8{
+		"different scene":               scene(wall, shirt, 0.3, 0.6, 0, 0, 1, 1),
+		"same place, different subject": scene(park, shirt, 0.3, 0.5, 0, 0, 1, 1),
+	} {
+		if d := LookDistance(base, other); d < 0.12 {
+			t.Errorf("%s: distance %.3f, want ≥ 0.12", name, d)
+		}
+	}
+	if d := LookDistance(base, base); d != 0 {
+		t.Errorf("identical: %.3f", d)
 	}
 }

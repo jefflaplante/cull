@@ -3,6 +3,7 @@
 package group
 
 import (
+	"math"
 	"math/bits"
 	"sort"
 	"time"
@@ -154,4 +155,68 @@ func better(a, b Score) bool {
 		return a.Comp > b.Comp
 	}
 	return a.Exp > b.Exp
+}
+
+// LookSize is the look fingerprint's grid: LookSize×LookSize cells of mean RGB.
+const LookSize = 8
+
+// LookDistance compares two look fingerprints, in [0,1]. Each grid is divided by
+// its own mean brightness (about ±1 stop of exposure drops out; see levelled), then
+// for shifts of up to one cell (about 12% reframing) the per-cell colour difference
+// (mean over the 3 channels) is computed over the overlapping cells. A shift's score
+// is the mean of the largest quarter of those cell differences, not the mean over
+// every cell: a local change — a different subject in an otherwise-matching scene,
+// say — is diluted to near zero by dozens of unchanged background cells if averaged
+// over the whole grid, but survives in the worst quarter. Taking the smallest score
+// over the 9 shifts still lets small reframing align through the search.
+func LookDistance(a, b []uint8) float64 {
+	na, nb := levelled(a), levelled(b)
+	best := 1.0
+	var diffs []float64
+	for dy := -1; dy <= 1; dy++ {
+		for dx := -1; dx <= 1; dx++ {
+			diffs = diffs[:0]
+			for y := 0; y < LookSize; y++ {
+				for x := 0; x < LookSize; x++ {
+					x2, y2 := x+dx, y+dy
+					if x2 < 0 || y2 < 0 || x2 >= LookSize || y2 >= LookSize {
+						continue
+					}
+					sum := 0.0
+					for c := 0; c < 3; c++ {
+						sum += math.Abs(na[(y*LookSize+x)*3+c] - nb[(y2*LookSize+x2)*3+c])
+					}
+					diffs = append(diffs, sum/3)
+				}
+			}
+			if len(diffs) == 0 {
+				continue
+			}
+			sort.Float64s(diffs)
+			k := (len(diffs) + 3) / 4 // top quarter, rounded up
+			sum := 0.0
+			for _, d := range diffs[len(diffs)-k:] {
+				sum += d
+			}
+			if score := sum / float64(k); score < best {
+				best = score
+			}
+		}
+	}
+	return math.Min(1, best)
+}
+
+// levelled divides a grid by its mean and scales it so typical differences fall
+// in [0,1].
+func levelled(g []uint8) []float64 {
+	mean := 0.0
+	for _, v := range g {
+		mean += float64(v)
+	}
+	mean = math.Max(1, mean/float64(len(g)))
+	out := make([]float64, len(g))
+	for i, v := range g {
+		out[i] = math.Min(1, float64(v)/mean/4)
+	}
+	return out
 }

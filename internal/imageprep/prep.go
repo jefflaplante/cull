@@ -207,6 +207,34 @@ func Measure(f *Frame) Stats {
 	}
 }
 
+// Grid returns an n×n grid of mean RGB (row-major, 3 bytes per cell) of the frame
+// as displayed: a small colour-and-layout fingerprint for grouping similar frames.
+func (f *Frame) Grid(n int) []uint8 {
+	out := make([]uint8, 0, n*n*3)
+	for cy := 0; cy < n; cy++ {
+		for cx := 0; cx < n; cx++ {
+			r := f.storedRect(image.Rect(cx*f.W/n, cy*f.H/n, (cx+1)*f.W/n, (cy+1)*f.H/n))
+			var sy, sb, sr, cnt int
+			for y := r.Min.Y; y < r.Max.Y; y += 4 {
+				for x := r.Min.X; x < r.Max.X; x += 4 {
+					yi, ci := f.src.YOffset(x, y), f.src.COffset(x, y)
+					sy += int(f.src.Y[yi])
+					sb += int(f.src.Cb[ci])
+					sr += int(f.src.Cr[ci])
+					cnt++
+				}
+			}
+			if cnt == 0 {
+				out = append(out, 0, 0, 0)
+				continue
+			}
+			R, G, B := color.YCbCrToRGB(uint8(sy/cnt), uint8(sb/cnt), uint8(sr/cnt))
+			out = append(out, R, G, B)
+		}
+	}
+	return out
+}
+
 // Downscaled encodes the whole frame, display-oriented, long edge at most maxEdge.
 func (f *Frame) Downscaled(maxEdge, quality int) ([]byte, error) {
 	return encode(f.rotate(downscale(f.src, maxEdge)), quality)

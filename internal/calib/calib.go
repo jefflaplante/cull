@@ -151,8 +151,15 @@ type SetStats struct {
 }
 
 // Sets compares labels against each result's stored Group.Rank for the given
-// keep-best cut. It does not re-rank; SweepKeepBest reuses the same stored ranks.
+// keep-best cut. keepBest 0 (rank-only) is clamped to 1, matching how
+// decideAll stores Group.Best (max(1, p.KeepBest)) and how report.Group
+// documents Best ("rank 1 when KeepBest is 0"): otherwise a rank-1 keep in a
+// rank-only report would be miscounted as ranked out. It does not re-rank;
+// SweepKeepBest reuses the same stored ranks.
 func Sets(rep *report.Report, labels map[string]string, keepBest int) SetStats {
+	if keepBest < 1 {
+		keepBest = 1
+	}
 	var s SetStats
 	sets := map[int]bool{}
 	for _, r := range rep.Results {

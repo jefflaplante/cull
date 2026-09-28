@@ -28,6 +28,11 @@ type batchExec struct {
 	client    BatchClient
 	cfg       Config
 	statePath string
+	// rerun names the command that re-attaches to this executor's batches, for
+	// every message that mentions statePath: RunBatch sets "rerun with --batch
+	// --resume to re-attach" (judge, including its ranking round); RankBatch
+	// sets "rerun cull rank with --batch to re-attach" (cull rank --batch).
+	rerun string
 }
 
 // errBatchPending marks rank calls a batch executor couldn't answer yet (submit
@@ -94,7 +99,8 @@ func (e batchExec) config() Config {
 }
 
 func (e batchExec) pending(err error) error {
-	return fmt.Errorf("%w: %w (recorded in %s: rerun with --batch to re-attach)", errBatchPending, err, e.statePath)
+	return fmt.Errorf("%w: %w (recorded in %s: %s, or delete %s to abandon it (what it already cost is paid; its answers are lost))",
+		errBatchPending, err, e.statePath, e.rerun, e.statePath)
 }
 
 // Run answers a round of calls:
@@ -263,13 +269,15 @@ func (e batchExec) open(cfg Config) (*rankBatchState, error) {
 	case err != nil:
 		return nil, fmt.Errorf("%w: %w", errBatchPending, err)
 	case st.Backend != cfg.Backend || st.Model != cfg.Model:
-		return nil, fmt.Errorf("%w: %s belongs to %s/%s, not %s/%s: rerun with that backend and model to re-attach, or delete it to start over",
-			errBatchPending, e.statePath, st.Backend, st.Model, cfg.Backend, cfg.Model)
+		return nil, fmt.Errorf("%w: %s belongs to %s/%s, not %s/%s: rerun with that backend and model to re-attach, "+
+			"or delete %s to abandon it (what it already cost is paid; its answers are lost)",
+			errBatchPending, e.statePath, st.Backend, st.Model, cfg.Backend, cfg.Model, e.statePath)
 	}
 	for _, b := range st.Batches {
 		if b.Status == "submitting" {
 			return nil, fmt.Errorf("%w: a rank batch submission was interrupted before its ID was recorded, so it may have been created: "+
-				"check the Batches page in the Claude Console, then delete %s to start over (not resubmitting, to avoid paying twice)", errBatchPending, e.statePath)
+				"check the Batches page in the Claude Console (not resubmitting, to avoid paying twice); %s, "+
+				"or delete %s to abandon it (what it already cost is paid; its answers are lost)", errBatchPending, e.rerun, e.statePath)
 		}
 	}
 	if st.Answers == nil {

@@ -155,6 +155,14 @@ func isStop(err error) bool {
 	return errors.Is(err, llm.ErrQuotaStop) || errors.Is(err, llm.ErrAbortRun) || errors.Is(err, errBatchPending)
 }
 
+// rankBatchPendingGuard is the error a sync path (Run, Rank, rankSets) gives
+// when an unfinished batch ranking is recorded at p: ranking without --batch
+// would pay for the same sets again, so it refuses instead.
+func rankBatchPendingGuard(p string) error {
+	return fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch to re-attach to it "+
+		"(ranking without it would pay for the same sets again), or delete %s to abandon it (what it already cost is paid; its answers are lost)", p, p)
+}
+
 // rankPrice prices ranking usage at the executor's rate.
 func rankPrice(cfg Config, u llm.Usage, batch bool) float64 {
 	if cfg.Price == nil {
@@ -239,7 +247,34 @@ func fillLooks(ctx context.Context, rep *report.Report) (int, error) {
 // XMPDevelop, OverwriteXMP, MoveCulled, Labels), and saves the report as the
 // current schema. A ranking stop (budget, quota, Ctrl-C) is returned after the
 // report, with every ranking paid for so far, is saved.
+//
+// It refuses up front, before fillLooks, while an unfinished batch ranking is
+// recorded for this report: ranking on a sync backend would pay for the same
+// sets again. Rerun with --batch to re-attach to it, or delete it to abandon it.
 func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.Report, error) {
+	if p := rankBatchStatePath(cfg); fileExists(p) {
+		return nil, rankBatchPendingGuard(p)
+	}
+	ex := syncExec{b: b, concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
+	return rank(ctx, cfg, ex, force)
+}
+
+// RankBatch is Rank, ranking through the Message Batches API (half price,
+// asynchronous) instead of a synchronous backend. Ctrl-C, a network failure
+// while polling, or a batch left pending keeps its state in
+// rankBatchStatePath(cfg): rerun 'cull rank --batch' to re-attach to it.
+func RankBatch(ctx context.Context, cfg Config, client BatchClient, force bool) (*report.Report, error) {
+	ex := batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg), rerun: "rerun cull rank with --batch to re-attach"}
+	return rank(ctx, cfg, ex, force)
+}
+
+// rank is Rank/RankBatch, calling on ex (sync or batch). Do not build this on
+// the exported RankSets: RankSets commits before any save, which brings back
+// the zero-charge bug (a paid answer must be charged exactly once per saved
+// report). It keeps the ordering fillLooks -> (Ctrl-C: save looks, return) ->
+// redecide (which ranks via rankSets) -> save -> ex.commit(run): commit only
+// after the report holding the run is saved.
+func rank(ctx context.Context, cfg Config, ex rankExec, force bool) (*report.Report, error) {
 	log := cfg.Log
 	if log == nil {
 		log = io.Discard
@@ -260,7 +295,6 @@ func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.R
 	}
 	o := DecideOptions{Policy: cfg.Policy, WriteXMP: cfg.WriteXMP, XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP,
 		MoveCulled: cfg.MoveCulled, Seq: cfg.Seq, Labels: cfg.Labels}
-	ex := syncExec{b: b, concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
 	var rankErr error
 	var run rankRun
 	if _, err := redecide(rep, o, log, func() { _, run, rankErr = rankSets(ctx, rep, cfg, ex, force, &spend{}) }); err != nil {
@@ -304,19 +338,10 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 	if log == nil {
 		log = io.Discard
 	}
-	todo := needsRanking(rep)
-	if force {
-		todo = nil
-		for i, s := range rep.Sets {
-			if s.Of >= 2 {
-				todo = append(todo, i)
-			}
-		}
-	}
+	todo := rankTodo(rep, force)
 	if len(todo) > 0 && !ex.batch() {
 		if p := rankBatchStatePath(cfg); fileExists(p) {
-			return total, run, fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch to re-attach to it "+
-				"(ranking without it would pay for the same sets again), or delete that file to start over", p)
+			return total, run, rankBatchPendingGuard(p)
 		}
 	}
 	wave := max(1, cfg.Concurrency)

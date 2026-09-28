@@ -62,6 +62,14 @@ func rankTodo(rep *report.Report, force bool) []int {
 // cloneForRankCalls copies rep so decideAll can rebuild groups and decisions
 // on the copy, for counting, without touching rep's own Sets, Results'
 // decisions, or groups.
+//
+// It is a shallow element copy (each Result and Set is copied by value into a
+// fresh slice, but anything a Result or Set points to is shared with rep). That
+// is safe only because decideAll reallocates each Result's Group and rebuilds
+// Sets from scratch rather than mutating them in place, and Policy only reads
+// through *Evaluation, never writing it. Anyone changing decideAll or Policy to
+// mutate a Result or Set's pointed-to fields in place must deep-copy here
+// instead, or this clone will let counting corrupt rep.
 func cloneForRankCalls(rep *report.Report) *report.Report {
 	cp := *rep
 	cp.Results = append([]report.Result(nil), rep.Results...)

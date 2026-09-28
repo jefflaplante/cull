@@ -21,7 +21,7 @@ import (
 )
 
 func rankEx(fb *fakeBatch, c Config) batchExec {
-	return batchExec{client: fb, cfg: c, statePath: c.ReportPath + ".rank-batch.json"}
+	return batchExec{client: fb, cfg: c, statePath: c.ReportPath + ".rank-batch.json", rerun: "rerun cull rank with --batch to re-attach"}
 }
 
 func TestRankBatchRoundsAndCost(t *testing.T) {
@@ -644,5 +644,107 @@ func TestRankBatchStopBeforeWaveKeepsUnsavedAnswerUncharged(t *testing.T) {
 	one := p.Cost(llm.Usage{InputTokens: 1000, OutputTokens: 100}, true)
 	if err != nil || len(fb.submitted) != 1 || saved.Sets[0].By != "model" || math.Abs(saved.RankCostUSD-one) > 1e-12 {
 		t.Fatalf("%v: %d batches, saved RankCostUSD %v, want %v", err, len(fb.submitted), saved.RankCostUSD, one)
+	}
+}
+
+// RankBatch does what Rank does, ranking through the Message Batches API: the
+// set is ranked, its cost is at half the sync price for the same usage, and its
+// rank-batch state is gone once the ranking (and the report holding it) is done.
+func TestRankBatchRanksThenSavesThenDropsState(t *testing.T) {
+	c, _ := seqShoot(t, 2)
+	p := llm.Price{In: 2, Out: 10}
+	c.Price = &p
+	fb := &fakeBatch{}
+	rep, err := RankBatch(context.Background(), c, fb, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := rep.Sets[0]
+	if s.By != "model" || len(s.Order) != 2 {
+		t.Fatalf("set %+v", s)
+	}
+	syncCost := p.Cost(s.Usage, false)
+	if rep.RankCostUSD <= 0 || math.Abs(rep.RankCostUSD-syncCost/2) > 1e-12 {
+		t.Fatalf("rank cost %v, want half the sync price %v", rep.RankCostUSD, syncCost)
+	}
+	if exists(rankBatchStatePath(c)) {
+		t.Fatal("rank batch state left behind")
+	}
+	saved, err := report.Load(c.ReportPath)
+	if err != nil || saved.Sets[0].By != "model" {
+		t.Fatalf("saved: %v %+v", err, saved)
+	}
+}
+
+// While RankBatch is stuck polling a batch that never ends, Ctrl-C's error names
+// 'cull rank --batch' (this entry point's own re-run) and how to abandon the
+// recorded ranking; its state survives to re-attach.
+func TestRankBatchPendingKeepsStateWithRankHint(t *testing.T) {
+	c, _ := seqShoot(t, 3)
+	c.BatchPoll = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fb := &fakeBatch{hold: true, onStatus: func(string) { cancel() }}
+	_, err := RankBatch(ctx, c, fb, false)
+	if err == nil || !strings.Contains(err.Error(), "rerun cull rank with --batch") || !strings.Contains(err.Error(), "delete") {
+		t.Fatalf("got %v", err)
+	}
+	if !exists(rankBatchStatePath(c)) {
+		t.Fatal("rank batch state must survive")
+	}
+}
+
+// The same stuck-polling case reached through judge --batch's ranking round
+// (RunBatch): the hint says to rerun with --batch --resume, judge's own re-run.
+func TestJudgeBatchPendingHintSaysResume(t *testing.T) {
+	c, _ := rankShoot(t)
+	c.BatchPoll = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fb := &fakeBatch{holdID: "b2", onStatus: func(id string) {
+		if id == "b2" {
+			cancel()
+		}
+	}}
+	_, _, err := RunBatch(ctx, c, fb)
+	if err == nil || !strings.Contains(err.Error(), "--batch --resume") {
+		t.Fatalf("got %v", err)
+	}
+	if !exists(rankBatchStatePath(c)) {
+		t.Fatal("rank batch state must survive")
+	}
+}
+
+// A Ctrl-C right as a batch chunk is about to be submitted (nothing sent yet)
+// gives the same re-attach hint collect() gives once a batch is submitted.
+func TestSubmitCtrlCKeepsResumeHint(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var recs []*batchRecord
+	err := submitChunk(ctx, Config{}, &fakeBatch{}, &recs, []llm.BatchRequest{{CustomID: "x"}}, "judge", 1, func() error { return nil })
+	if err == nil || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "state saved; rerun with --batch --resume to re-attach") {
+		t.Fatalf("got %v", err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("nothing sent: no record expected, got %+v", recs)
+	}
+}
+
+// With ranking on, a sync judge whose rank state is still pending a batch
+// refuses before judging any frame: it would pay to judge again just to pay
+// again to rank the same sets.
+func TestSyncJudgeRefusesBeforeJudgingWhileRankBatchRecorded(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	c := cfg(dir)
+	c.Rank = true
+	p := rankBatchStatePath(c)
+	if err := os.WriteFile(p, []byte(`{"version":2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := &fakeBackend{status: "sharp"}
+	_, _, err := Run(context.Background(), c, b)
+	if err == nil || !strings.Contains(err.Error(), p) || b.calls != 0 {
+		t.Fatalf("err=%v calls=%d", err, b.calls)
 	}
 }

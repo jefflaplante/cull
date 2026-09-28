@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -18,6 +19,8 @@ type rankOpts struct {
 	estimate    bool
 	maxCost     float64
 	force       bool
+	batch       bool
+	batchPoll   time.Duration
 	policy      policyFlags
 }
 
@@ -28,8 +31,9 @@ func newRankCmd(so *sharedOpts) *cobra.Command {
 		Short: "Rank the sets judge found, without judging again",
 		Long: `rank compares each set of similar frames (formed by judge from --seq-gap and
 --seq-look) side by side with one model call per set (more for large sets, chunked
-and merged into a final call). The --keep-best best of each set keep their decision;
-the rest get --outranked. Run it after 'judge --no-rank'.
+and merged into a final call, whether sent one wave at a time or, with --batch, all
+at once). The --keep-best best of each set keep their decision; the rest get
+--outranked. Run it after 'judge --no-rank'.
 
 rank re-applies the full policy the way 'cull decide' does (--eyes-closed,
 --raw-clipped, --min-crop-area, --keep-best, --outranked, ...), so repeat any of
@@ -39,11 +43,12 @@ the stored order for free, so save --force for when the frames themselves change
 (a re-judge, added frames).
 
 Unless --backend/--model are given, they default to the values the report was
-judged with. It only updates the report; write sidecars or move culls with a
-following 'cull decide --write-xmp --move-culled'.`,
+judged with (--batch always uses anthropic). It only updates the report; write
+sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.`,
 		Example: `  cull rank ~/Pictures/2026-09-26
   cull rank --backend claude-code ~/Pictures/2026-09-26
-  cull rank --force ~/Pictures/2026-09-26`,
+  cull rank --force ~/Pictures/2026-09-26
+  cull rank --batch ~/Pictures/2026-09-26`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if _, err := o.policy.policy(); err != nil {
@@ -93,6 +98,28 @@ following 'cull decide --write-xmp --move-culled'.`,
 				warn(cmd, []string{fmt.Sprintf("report was judged with %s/%s; ranking with %s/%s", rep.Backend, rep.Model, o.backend, o.model)})
 			}
 
+			// --batch needs anthropic. An explicit --backend must already be
+			// anthropic; otherwise force it, overriding whatever the
+			// report-based default above picked. The model still defaults from
+			// the report when the report's backend is anthropic too; otherwise
+			// it's anthropic's own default model, not the other backend's.
+			if o.batch {
+				if cmd.Flags().Changed("backend") {
+					if o.backend != "anthropic" {
+						return fmt.Errorf("--batch uses the Message Batches API: --backend anthropic only")
+					}
+				} else {
+					o.backend = "anthropic"
+					if !cmd.Flags().Changed("model") {
+						if rep.Backend == "anthropic" && rep.Model != "" {
+							o.model = rep.Model
+						} else {
+							o.model = backendDefaults["anthropic"].model
+						}
+					}
+				}
+			}
+
 			price, priced := llm.PriceFor(o.backend, o.model)
 			if o.estimate || priced {
 				sets, calls, filled, cerr := pipeline.RankCalls(cmd.Context(), rep, cfg, o.force)
@@ -105,7 +132,7 @@ following 'cull decide --write-xmp --move-culled'.`,
 				if cerr != nil {
 					return cerr
 				}
-				printRankEstimate(cmd, sets, calls, o.backend, o.model, price, priced)
+				printRankEstimate(cmd, sets, calls, o.backend, o.model, price, priced, o.batch)
 				if o.estimate {
 					return nil
 				}
@@ -122,8 +149,14 @@ following 'cull decide --write-xmp --move-culled'.`,
 			fmt.Fprintf(cmd.ErrOrStderr(), "backend: %s, model: %s, %s\n", b.Name(), o.model, auth)
 			cfg.Log = cmd.ErrOrStderr()
 
-			out, err := pipeline.Rank(cmd.Context(), cfg, b, o.force)
-			printSummary(cmd, cfg.ReportPath, out, eval.Usage{}, b.Name(), false)
+			var out *report.Report
+			if o.batch {
+				cfg.Batch, cfg.BatchPoll = true, o.batchPoll
+				out, err = pipeline.RankBatch(cmd.Context(), cfg, b.(*llm.Anthropic), o.force)
+			} else {
+				out, err = pipeline.Rank(cmd.Context(), cfg, b, o.force)
+			}
+			printSummary(cmd, cfg.ReportPath, out, eval.Usage{}, b.Name(), o.batch)
 			if errors.Is(err, llm.ErrBudget) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "stopped at --max-cost; rerun (and raise --max-cost) to rank the rest")
 			}
@@ -137,24 +170,26 @@ following 'cull decide --write-xmp --move-culled'.`,
 	o.backendFlags.register(f)
 	f.IntVarP(&o.concurrency, "concurrency", "j", 0, "parallel rank calls (0 = backend default: anthropic 4, claude-code 2, openai 4)")
 	f.BoolVar(&o.estimate, "estimate", false, "print the cost estimate and exit (no model calls, no key needed)")
-	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price (0 = no limit)")
+	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price, or batch price with --batch (0 = no limit)")
 	f.BoolVar(&o.force, "force", false, "re-rank every set of two or more rankable frames, even one that already has a model order")
+	f.BoolVar(&o.batch, "batch", false, "use the Message Batches API (anthropic): half price, results within minutes to hours; Ctrl-C is safe, rerun re-attaches")
+	f.DurationVar(&o.batchPoll, "batch-poll", 30*time.Second, "how often --batch checks progress")
 	o.policy.register(f)
 	cmd.MarkFlagFilename("api-key-file")
 	return cmd
 }
 
-// printRankEstimate projects list-price ranking cost from an exact sets/calls
-// count (pipeline.RankCalls), computed without calling any model.
-func printRankEstimate(cmd *cobra.Command, sets, calls int, backend, model string, p llm.Price, priced bool) {
+// printRankEstimate projects list- or batch-price ranking cost from an exact
+// sets/calls count (pipeline.RankCalls), computed without calling any model.
+func printRankEstimate(cmd *cobra.Command, sets, calls int, backend, model string, p llm.Price, priced, batch bool) {
 	w := cmd.ErrOrStderr()
 	fmt.Fprintf(w, "estimate: %d set%s, %d call%s to rank", sets, plural(sets), calls, plural(calls))
 	if !priced {
 		fmt.Fprintf(w, ": no per-token cost (%s)\n", backendDefaults[backend].basis)
 		return
 	}
-	usd, in, out := llm.EstimateRank(calls, p, false)
-	fmt.Fprintf(w, " ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", in, out, usd, rate(false), model)
+	usd, in, out := llm.EstimateRank(calls, p, batch)
+	fmt.Fprintf(w, " ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", in, out, usd, rate(batch), model)
 }
 
 func plural(n int) string {

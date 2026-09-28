@@ -120,6 +120,14 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 	if _, err := os.Stat(batchStatePath(cfg)); err == nil {
 		return nil, total, fmt.Errorf("an unfinished batch run is recorded in %s: finish it with --batch --resume (or delete that file to start over)", batchStatePath(cfg))
 	}
+	// Refuse before judging any frame, not after: with ranking on, a sync run
+	// whose rank state is still pending a batch would pay to judge again just
+	// to pay again to rank the same sets.
+	if cfg.Rank {
+		if p := rankBatchStatePath(cfg); fileExists(p) {
+			return nil, total, rankBatchPendingGuard(p)
+		}
+	}
 	rep, todo, err := startRun(&cfg)
 	if err != nil {
 		return nil, total, err

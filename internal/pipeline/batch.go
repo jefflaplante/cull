@@ -74,9 +74,10 @@ func frameID(path string) string {
 func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Report, llm.Usage, error) {
 	var total llm.Usage
 	statePath := batchStatePath(cfg)
-	if fileExists(rankBatchStatePath(cfg)) && !cfg.Resume {
+	if p := rankBatchStatePath(cfg); fileExists(p) && !cfg.Resume {
 		// Without --resume every frame would be judged (and paid for) again.
-		return nil, total, fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch --resume to re-attach (or delete it to start over)", rankBatchStatePath(cfg))
+		return nil, total, fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch --resume to re-attach, "+
+			"or delete %s to abandon it (what it already cost is paid; its answers are lost)", p, p)
 	}
 	st, err := loadBatchState(statePath)
 	switch {
@@ -202,7 +203,8 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 	}
 	os.Remove(statePath)
 	if cfg.Rank && !cfg.DryRun {
-		cfg.rankWith = batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg)}
+		cfg.rankWith = batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg),
+			rerun: "rerun with --batch --resume to re-attach"}
 	}
 	used, err := finishRun(ctx, rep, cfg, budget)
 	total.Add(used)
@@ -295,7 +297,10 @@ func chunkRequests(cfg Config, reqs []llm.BatchRequest) [][]llm.BatchRequest {
 // nothing was created.
 func submitChunk(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchRecord, chunk []llm.BatchRequest, what string, round int, save func() error) error {
 	if err := ctx.Err(); err != nil {
-		return err // nothing sent for this chunk: no record, nothing to refuse later
+		// Nothing sent for this chunk: no record, nothing to refuse later. Keep
+		// the same re-attach hint collect() gives once a batch is submitted, so
+		// Ctrl-C here and Ctrl-C while polling read the same way.
+		return fmt.Errorf("%w (state saved; rerun with --batch --resume to re-attach)", err)
 	}
 	rec := &batchRecord{Round: round, Status: "submitting"}
 	for _, r := range chunk {

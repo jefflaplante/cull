@@ -33,6 +33,7 @@ type fakeBatch struct {
 	statusErr   error
 	statusErrID string            // with statusErr: only this batch fails its status check ("" = every batch)
 	hold        bool              // batches stay in progress
+	holdID      string            // with this set: only this batch ID stays in progress; others end normally regardless of hold
 	onStatus    func(id string)   // called on every status check
 	resultsErr  error             // BatchResults fails with this
 	rankOrder   func(n int) []int // rank answers, 1-based, best first; nil = reverse capture order
@@ -59,7 +60,11 @@ func (f *fakeBatch) BatchStatus(_ context.Context, id string) (llm.BatchStatus, 
 	if f.statusErr != nil && (f.statusErrID == "" || f.statusErrID == id) {
 		return llm.BatchStatus{}, f.statusErr
 	}
-	return llm.BatchStatus{ID: id, Ended: !f.hold, ResultsURL: id}, nil
+	ended := !f.hold
+	if f.holdID != "" {
+		ended = id != f.holdID
+	}
+	return llm.BatchStatus{ID: id, Ended: ended, ResultsURL: id}, nil
 }
 
 func (f *fakeBatch) BatchResults(_ context.Context, id string, schemaFor func(string) map[string]any, fn func(llm.BatchResult)) error {

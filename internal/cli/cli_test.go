@@ -831,6 +831,33 @@ func TestRankAppliesBackendDefaultConcurrency(t *testing.T) {
 	t.Fatal("no rank command")
 }
 
+// --batch needs anthropic even when the report was judged with another backend
+// and --backend wasn't given: an explicit non-anthropic --backend must still
+// fail, with judge's own text.
+func TestRankBatchRejectsNonAnthropicBackend(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	rankReportFixture(t, dir, "claude-code", "sonnet", 2)
+	_, err := run(t, "rank", "--batch", "--backend", "openai", "--model", "m", dir)
+	if err == nil || !strings.Contains(err.Error(), "--batch uses the Message Batches API: --backend anthropic only") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// --batch --estimate on a report judged with claude-code must still use
+// anthropic (its model default, since the report's backend doesn't match) and
+// price at the batch rate, needing no key and calling no model.
+func TestRankBatchEstimateUsesAnthropicAndBatchPrice(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	dir := t.TempDir()
+	rankReportFixture(t, dir, "claude-code", "sonnet", 2)
+	out, err := run(t, "rank", "--batch", "--estimate", dir)
+	if err != nil || !strings.Contains(out, "batch price (50%)") || !strings.Contains(out, "claude-sonnet-5") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+}
+
 func TestKeepBestTooHighExplainsWhy(t *testing.T) {
 	dir := t.TempDir()
 	_, err := run(t, "judge", "--keep-best", "6", dir)

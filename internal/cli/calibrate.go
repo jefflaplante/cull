@@ -24,7 +24,9 @@ confusion matrix, the false-cull rate (you said keep, it culled), the missed-cul
 rate, and the review rate. Star ratings without a label don't count. It also
 re-decides the stored assessments across --review-below-sharpness values, so
 thresholds can be tuned without new model calls; apply the chosen ones with
-'cull decide'.`,
+'cull decide'. Reports with multi-frame sets get a sets section: how often a
+labeled keep was ranked out of the keep-best cut, how often a labeled cull or
+review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 		Example: "  cull calibrate sonnet.json local.json",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -51,6 +53,7 @@ thresholds can be tuned without new model calls; apply the chosen ones with
 				}
 				calib.Format(w, path, rep, calib.Compare(rep, verdicts))
 				calib.FormatSweep(w, calib.Sweep(rep, verdicts, p, []float64{0, 3, 4, 5, 6, 7, 8}))
+				calib.FormatSets(w, calib.Sets(rep, verdicts, rep.KeepBest), calib.SweepKeepBest(rep, verdicts, []int{1, 2, 3, 4, 5}))
 				fmt.Fprintln(w)
 			}
 			return nil

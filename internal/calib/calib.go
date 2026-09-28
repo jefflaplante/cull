@@ -136,3 +136,88 @@ func FormatSweep(w io.Writer, rows []SweepRow) {
 		fmt.Fprintf(w, "    %4.1f  false-cull %5.1f%%  missed-cull %5.1f%%  review %5.1f%%\n", r.Threshold, 100*fc, 100*mc, 100*rr)
 	}
 }
+
+// SetStats counts how the user's labels line up with each set's stored rank,
+// over multi-frame sets (Group.Size > 1) containing at least one labelled frame.
+// Kept/Culled are label counts; the *RankedOut/*InBest counts are against
+// keepBest (Best = 1 <= Rank <= keepBest), independent of the report's stored
+// Group.Best (which may have been computed with a different keep-best).
+type SetStats struct {
+	Kept          int // labelled "keep" frames in a set
+	KeptRankedOut int // of those, rank outside the keep-best cut (or unranked)
+	Culled        int // labelled "cull" or "review" frames in a set
+	CulledInBest  int // of those, rank inside the keep-best cut
+	Sets          int // distinct multi-frame sets with a labelled member
+}
+
+// Sets compares labels against each result's stored Group.Rank for the given
+// keep-best cut. It does not re-rank; SweepKeepBest reuses the same stored ranks.
+func Sets(rep *report.Report, labels map[string]string, keepBest int) SetStats {
+	var s SetStats
+	sets := map[int]bool{}
+	for _, r := range rep.Results {
+		g := r.Group
+		if g == nil || g.Size < 2 {
+			continue
+		}
+		l, ok := labels[filepath.Base(r.File)]
+		if !ok {
+			continue
+		}
+		inBest := g.Rank >= 1 && g.Rank <= keepBest
+		switch l {
+		case "keep":
+			s.Kept++
+			if !inBest {
+				s.KeptRankedOut++
+			}
+		case "cull", "review":
+			s.Culled++
+			if inBest {
+				s.CulledInBest++
+			}
+		}
+		sets[g.ID] = true
+	}
+	s.Sets = len(sets)
+	return s
+}
+
+// KeepBestRow is the set stats recomputed at one keep-best value.
+type KeepBestRow struct {
+	K int
+	SetStats
+}
+
+// SweepKeepBest recomputes SetStats at each keep-best value from the stored
+// Group.Rank, without re-ranking.
+func SweepKeepBest(rep *report.Report, labels map[string]string, ks []int) []KeepBestRow {
+	rows := make([]KeepBestRow, len(ks))
+	for i, k := range ks {
+		rows[i] = KeepBestRow{K: k, SetStats: Sets(rep, labels, k)}
+	}
+	return rows
+}
+
+// FormatSets writes the sets section after the matrix: how often labelled
+// keeps got ranked out of the keep-best cut, how often labelled culls or
+// reviews made it into that cut, and a keep-best sweep recomputed from the
+// stored ranks. It writes nothing when the report has no multi-frame sets
+// containing labelled frames.
+func FormatSets(w io.Writer, stats SetStats, sweep []KeepBestRow) {
+	if stats.Sets == 0 {
+		return
+	}
+	fmt.Fprintf(w, "  sets: %d multi-frame set(s) with labeled frames\n", stats.Sets)
+	fmt.Fprintf(w, "    labeled keep, ranked out of best:        %d/%d = %.1f%%\n",
+		stats.KeptRankedOut, stats.Kept, 100*ratio(stats.KeptRankedOut, stats.Kept))
+	fmt.Fprintf(w, "    labeled cull/review, ranked into best:   %d/%d = %.1f%%\n",
+		stats.CulledInBest, stats.Culled, 100*ratio(stats.CulledInBest, stats.Culled))
+	if len(sweep) > 0 {
+		fmt.Fprintln(w, "  keep-best sweep (recomputed from stored ranks):")
+		for _, row := range sweep {
+			fmt.Fprintf(w, "    keep-best %d   keep-ranked-out %5.1f%%   cull/review-in-best %5.1f%%\n",
+				row.K, 100*ratio(row.KeptRankedOut, row.Kept), 100*ratio(row.CulledInBest, row.Culled))
+		}
+	}
+}

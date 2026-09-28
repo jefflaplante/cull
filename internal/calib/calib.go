@@ -3,47 +3,15 @@
 package calib
 
 import (
-	"encoding/csv"
-	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
-	"strings"
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/report"
 )
 
 var classes = []string{"keep", "review", "cull"}
-
-// ReadLabels parses "file,label" rows (header optional, labels keep/review/cull,
-// any case). Files are matched by base name; a later row wins.
-func ReadLabels(r io.Reader) (map[string]string, error) {
-	cr := csv.NewReader(r)
-	cr.FieldsPerRecord = -1
-	cr.TrimLeadingSpace = true
-	labels := map[string]string{}
-	for line := 1; ; line++ {
-		rec, err := cr.Read()
-		if errors.Is(err, io.EOF) {
-			return labels, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		if len(rec) < 2 || strings.TrimSpace(rec[0]) == "" {
-			continue
-		}
-		file, label := strings.TrimSpace(rec[0]), strings.ToLower(strings.TrimSpace(rec[1]))
-		if line == 1 && strings.EqualFold(file, "file") {
-			continue
-		}
-		if label != "keep" && label != "review" && label != "cull" {
-			return nil, fmt.Errorf("labels line %d: %q is not keep, review, or cull", line, rec[1])
-		}
-		labels[filepath.Base(file)] = label
-	}
-}
 
 // Matrix counts label → decision over labeled, decided frames.
 type Matrix struct {

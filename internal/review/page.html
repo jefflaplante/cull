@@ -21,10 +21,13 @@ header { position: sticky; top: 0; z-index: 2; background: var(--panel); border-
 header h1 { font-size: 16px; margin: 0; }
 .meta { color: var(--muted); font-size: 12px; }
 .filters, .tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.group-name { color: var(--muted); font-size: 12px; align-self: center; }
 button, .file { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 button[aria-pressed="true"] { border-color: var(--accent); background: var(--focus); }
 button:focus-visible { outline: 2px solid var(--accent); }
 .file input { display: none; }
+.save { font-size: 12px; color: var(--muted); }
+.save.warn, .status.warn { color: var(--cull); }
 main { padding: 16px; }
 #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; }
@@ -32,6 +35,7 @@ main { padding: 16px; }
 .card img { width: 100%; aspect-ratio: 3 / 2; object-fit: contain; background: #0000000d; display: block; }
 .card .row { display: flex; justify-content: space-between; gap: 6px; padding: 6px 8px; align-items: center; }
 .name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stars { color: var(--review); letter-spacing: 1px; white-space: nowrap; }
 .badge { font-size: 11px; font-weight: 600; text-transform: uppercase; border-radius: 4px; padding: 1px 6px; color: #fff; white-space: nowrap; }
 .keep { background: var(--keep); } .review { background: var(--review); } .cull { background: var(--cull); } .none { background: var(--muted); }
 .label { position: absolute; top: 6px; right: 6px; }
@@ -43,6 +47,7 @@ main { padding: 16px; }
 .pane img { max-width: 100%; display: block; margin: 0 auto; }
 .subject img { image-rendering: auto; }
 .cap { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+.status { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 12px 0 0; }
 dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
 ul { margin: 4px 0 0; padding-left: 18px; }
@@ -55,12 +60,14 @@ ul { margin: 4px 0 0; padding-left: 18px; }
 <header>
   <h1 id="title">gophotocull review</h1>
   <span class="meta" id="meta"></span>
-  <div class="filters" id="filters" role="group" aria-label="Filter"></div>
-  <div class="tools">
-    <button id="export">Export labels.csv</button>
-    <label class="file">Import labels.csv<input type="file" id="import" accept=".csv,text/csv"></label>
+  <div class="filters" id="verdicts" role="group" aria-label="Verdict"></div>
+  <div class="filters" id="progress" role="group" aria-label="Progress"></div>
+  <div class="tools" id="tools">
+    <button id="export">Export labels</button>
+    <label class="file">Import labels<input type="file" id="import" accept=".jsonl,application/jsonl,application/x-ndjson,text/plain"></label>
   </div>
-  <span class="help">← → move · K keep · R review · C cull · U clear · Enter open · Esc grid</span>
+  <span class="save" id="save"></span>
+  <span class="help">← → move · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid</span>
 </header>
 <main>
   <div id="grid"></div>
@@ -71,23 +78,39 @@ ul { margin: 4px 0 0; padding-left: 18px; }
 (() => {
   const data = JSON.parse(document.getElementById("data").textContent);
   const cards = data.cards;
-  const key = "gophotocull-labels:" + data.report;
-  let labels = {};
-  try { labels = JSON.parse(localStorage.getItem(key) || "{}"); } catch (e) { labels = {}; }
-  const save = () => { try { localStorage.setItem(key, JSON.stringify(labels)); } catch (e) {} };
+  const serve = !!data.serve;
+  const token = new URLSearchParams(location.hash.slice(1)).get("token") || "";
+  const key = "gophotocull-labels:" + data.report;   // this browser's copy
+  const qkey = "gophotocull-pending:" + data.report; // serve mode: changes not yet on disk
+  const load = (k, def) => { try { return JSON.parse(localStorage.getItem(k) || "null") || def; } catch (e) { return def; } };
+  const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 
-  let filter = "all", sel = 0, detailOpen = false;
-  const filters = [["all", "All"], ["keep", "Keep"], ["review", "Review"], ["cull", "Cull"],
-    ["unlabeled", "Unlabeled"], ["disagree", "Disagreements"]];
-  const visible = () => cards.map((c, i) => i).filter(i => {
-    const c = cards[i], l = labels[c.file];
-    switch (filter) {
-      case "all": return true;
-      case "unlabeled": return !l && !c.error;
-      case "disagree": return !!l && !!c.decision && l !== c.decision;
-      default: return c.decision === filter;
+  // labels: file → {label, stars}. Older sheets stored the bare label string.
+  let labels = {};
+  for (const [f, v] of Object.entries(load(key, {}))) labels[f] = typeof v === "string" ? { label: v, stars: 0 } : v;
+  let pending = serve ? load(qkey, []) : [];
+  const status = {};  // file → note shown on that frame
+  let note = "";      // header note (server state, import errors)
+  let serverDown = false; // the last load failed; cleared by the next successful save
+
+  const get = f => labels[f] || { label: "", stars: 0 };
+  const effective = c => get(c.file).label || c.decision || "";
+
+  let verdict = "all", progress = "all", sel = 0, detailOpen = false, pinned = -1;
+  const verdicts = [["all", "All"], ["keep", "Keep"], ["review", "Review"], ["cull", "Cull"]];
+  const progresses = [["all", "All"], ["unlabeled", "Unlabeled"], ["unrated", "Unrated"], ["disagree", "Disagreements"]];
+  const matches = i => {
+    const c = cards[i], l = get(c.file);
+    if (verdict !== "all" && effective(c) !== verdict) return false;
+    switch (progress) {
+      case "unlabeled": return !l.label && !c.error;
+      case "unrated": return !l.stars && !c.error;
+      case "disagree": return !!l.label && !!c.decision && l.label !== c.decision;
+      default: return true;
     }
-  });
+  };
+  // A frame changed while shown stays visible until the next navigation.
+  const visible = () => cards.map((c, i) => i).filter(i => i === pinned || matches(i));
 
   const el = (tag, attrs = {}, ...kids) => {
     const n = document.createElement(tag);
@@ -99,23 +122,34 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   };
   const img = (name, alt) => name ? el("img", { src: encodeURIComponent(name), alt, loading: "lazy" }) : null;
   const badge = (d, extra = "") => el("span", { cls: "badge " + (d || "none") + extra, text: d || "unscored" });
+  const starText = n => n ? el("span", { cls: "stars", text: "★".repeat(n), title: n + " star" + (n > 1 ? "s" : "") }) : null;
 
   document.getElementById("title").textContent = data.title + " · review";
   document.title = data.title + " · gophotocull review";
+  if (serve) document.getElementById("tools").hidden = true;
+
+  function group(id, name, items, current, set) {
+    document.getElementById(id).replaceChildren(el("span", { cls: "group-name", text: name }), ...items.map(([v, label]) => {
+      const b = el("button", { text: label, "aria-pressed": String(current === v) });
+      b.onclick = () => { set(v); pinned = -1; sel = 0; render(); };
+      return b;
+    }));
+  }
 
   function renderHeader() {
     const n = { keep: 0, review: 0, cull: 0 };
     cards.forEach(c => { if (n[c.decision] !== undefined) n[c.decision]++; });
-    const labeled = cards.filter(c => labels[c.file]).length;
+    const labeled = cards.filter(c => get(c.file).label).length, rated = cards.filter(c => get(c.file).stars).length;
     const model = [data.backend, data.model].filter(Boolean).join(" ") + (data.escalation ? " → " + data.escalation : "");
     document.getElementById("meta").textContent =
-      `${cards.length} frames · keep ${n.keep} · review ${n.review} · cull ${n.cull} · labeled ${labeled}` + (model ? ` · ${model}` : "");
-    const f = document.getElementById("filters");
-    f.replaceChildren(...filters.map(([id, name]) => {
-      const b = el("button", { text: name, "aria-pressed": String(filter === id) });
-      b.onclick = () => { filter = id; sel = 0; render(); };
-      return b;
-    }));
+      `${cards.length} frames · model keep ${n.keep} · review ${n.review} · cull ${n.cull} · labeled ${labeled} · rated ${rated}` + (model ? ` · ${model}` : "");
+    group("verdicts", "verdict", verdicts, verdict, v => { verdict = v; });
+    group("progress", "show", progresses, progress, v => { progress = v; });
+    const s = document.getElementById("save");
+    let text = note;
+    if (!text && serve) text = pending.length ? `${pending.length} unsaved change${pending.length > 1 ? "s" : ""}` : "all changes saved";
+    s.textContent = text;
+    s.className = "save" + (note || pending.length ? " warn" : "");
   }
 
   function renderGrid() {
@@ -123,11 +157,11 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     const vis = visible();
     if (!vis.length) { grid.replaceChildren(el("p", { cls: "empty", text: "No frames match this filter." })); return; }
     grid.replaceChildren(...vis.map((i, k) => {
-      const c = cards[i];
+      const c = cards[i], l = get(c.file);
       const card = el("div", { cls: "card" + (k === sel ? " sel" : ""), tabindex: "0" },
         img(c.thumb, c.file) || el("div", { cls: "empty", text: c.error || "no preview" }),
-        el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), badge(c.decision)));
-      if (labels[c.file]) card.appendChild(badge(labels[c.file], " label"));
+        el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), starText(l.stars), badge(c.decision)));
+      if (l.label) card.appendChild(badge(l.label, " label"));
       card.onclick = () => { sel = k; detailOpen = true; render(); };
       return card;
     }));
@@ -145,9 +179,9 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   function renderDetail() {
     const box = document.getElementById("detail");
     const vis = visible();
-    if (!vis.length) { box.replaceChildren(); return; }
+    if (!vis.length) { box.replaceChildren(el("p", { cls: "empty", text: "No frames match this filter." })); return; }
     sel = Math.min(sel, vis.length - 1);
-    const c = cards[vis[sel]], e = c.eval, f = c.focus;
+    const c = cards[vis[sel]], e = c.eval, f = c.focus, l = get(c.file);
     const info = el("dl");
     row(info, "decision", c.decision || "unscored");
     row(info, "reasons", c.reasons);
@@ -170,36 +204,59 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     row(info, "cost", c.cost ? "$" + c.cost.toFixed(3) : "");
     row(info, "file", c.path);
 
-    const actions = el("div", { cls: "actions" }, ...[["keep", "Keep (K)"], ["review", "Review (R)"], ["cull", "Cull (C)"], ["", "Clear (U)"]].map(([l, name]) => {
-      const b = el("button", { text: name, "aria-pressed": String((labels[c.file] || "") === l && !!l) });
-      b.onclick = () => setLabel(l);
+    const actions = el("div", { cls: "actions" }, ...[["keep", "Keep (K)"], ["review", "Review (R)"], ["cull", "Cull (C)"], ["", "Clear (U)"]].map(([v, name]) => {
+      const b = el("button", { text: name, "aria-pressed": String(l.label === v && !!v) });
+      b.onclick = () => setLabel(v);
+      return b;
+    }));
+    const starBtns = el("div", { cls: "actions" }, ...[1, 2, 3, 4, 5, 0].map(n => {
+      const b = el("button", { text: n ? "★".repeat(n) + ` (${n})` : "No stars (0)", "aria-pressed": String(!!n && l.stars === n) });
+      b.onclick = () => setStars(n);
       return b;
     }));
     const nav = el("div", { cls: "actions" },
       el("button", { text: "← Prev" }), el("button", { text: "Grid (Esc)" }), el("button", { text: "Next →" }));
-    nav.children[0].onclick = () => move(-1); nav.children[1].onclick = () => { detailOpen = false; render(); }; nav.children[2].onclick = () => move(1);
+    nav.children[0].onclick = () => move(-1);
+    nav.children[1].onclick = () => { detailOpen = false; pinned = -1; render(); };
+    nav.children[2].onclick = () => move(1);
+    const st = status[c.file];
 
     box.replaceChildren(
       el("div", { cls: "pane" }, img(c.thumb, c.file) || el("p", { cls: "empty", text: c.error || "no preview" }),
         el("p", { cls: "cap", text: `${sel + 1} / ${vis.length} · ${c.file}` }), nav),
       el("div", { cls: "pane subject" },
         c.subject ? el("div", {}, img(c.subject, "subject crop"), el("p", { cls: "cap", text: "Subject at native preview resolution (what the model judged)" })) : null,
-        el("div", {}, badge(c.decision), labels[c.file] ? el("span", { text: "  your label: " }) : null, labels[c.file] ? badge(labels[c.file]) : null),
-        actions, info));
+        el("div", {}, badge(c.decision), l.label ? el("span", { text: "  your label: " }) : null, l.label ? badge(l.label) : null,
+          l.stars ? el("span", { text: "  " }) : null, starText(l.stars)),
+        st ? el("p", { cls: "status" + (/^(not saved|rejected)|sidecar not written/.test(st) ? " warn" : ""), text: st }) : null,
+        actions, starBtns, info));
   }
 
-  function setLabel(l) {
+  function update(change, advance) {
     const vis = visible();
     if (!vis.length) return;
-    const c = cards[vis[sel]];
-    if (l) labels[c.file] = l; else delete labels[c.file];
-    save();
-    if (detailOpen && l && filter !== "unlabeled") move(1); else render();
+    const i = vis[Math.min(sel, vis.length - 1)], c = cards[i];
+    const next = Object.assign({}, get(c.file), change);
+    if (!next.label && !next.stars) delete labels[c.file]; else labels[c.file] = next;
+    store(key, labels);
+    pinned = i;
+    if (serve) { pending.push({ file: c.file, label: next.label, stars: next.stars }); store(qkey, pending); flush(); }
+    if (detailOpen && advance) move(1); else render();
   }
+  const setLabel = v => update({ label: v }, !!v);
+  const setStars = n => update({ stars: n }, n > 0 && progress === "unrated");
+
+  // move steps from the shown frame to its neighbour in the re-filtered list.
   function move(d) {
-    const n = visible().length;
-    if (!n) return;
-    sel = Math.max(0, Math.min(n - 1, sel + d));
+    const vis = visible();
+    if (!vis.length) return;
+    const cur = vis[Math.min(sel, vis.length - 1)];
+    pinned = -1;
+    const now = visible();
+    let k = -1;
+    if (d > 0) { k = now.findIndex(i => i > cur); if (k < 0) k = now.length - 1; }
+    else { for (let j = now.length - 1; j >= 0; j--) if (now[j] < cur) { k = j; break; } if (k < 0) k = 0; }
+    sel = Math.max(0, k);
     render();
   }
   function render() {
@@ -209,37 +266,99 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     if (detailOpen) renderDetail(); else renderGrid();
   }
 
+  // flush sends queued changes in order; a refused change (400) is dropped and
+  // shown, a failure leaves the queue for the next change or reload. The first
+  // save after a failed load reloads from disk, which clears the stale note.
+  let flushing = false;
+  async function flush() {
+    if (flushing) return;
+    flushing = true;
+    let recovered = false;
+    try {
+      while (pending.length) {
+        const p = pending[0];
+        let res;
+        try {
+          res = await fetch("/api/labels", { method: "POST", headers: { "Content-Type": "application/json", "X-Gophotocull-Token": token }, body: JSON.stringify(p) });
+        } catch (e) {
+          pending.forEach(q => { status[q.file] = "not saved: server unreachable"; });
+          break;
+        }
+        if (!res.ok) {
+          const msg = (await res.text()).trim();
+          if (res.status === 400) { status[p.file] = "rejected: " + msg; pending.shift(); store(qkey, pending); continue; }
+          status[p.file] = "not saved: " + msg;
+          break;
+        }
+        const out = await res.json();
+        pending.shift(); store(qkey, pending);
+        if (serverDown) { serverDown = false; recovered = true; }
+        if (!pending.some(q => q.file === p.file))
+          status[p.file] = out.sidecar && out.sidecar.startsWith("skipped: ") ? "saved; sidecar not written: " + out.sidecar.slice(9) : "saved";
+      }
+    } finally { flushing = false; render(); }
+    if (recovered) loadServer();
+  }
+
+  // loadServer: the log on disk wins, except frames with changes still queued here.
+  async function loadServer() {
+    try {
+      const res = await fetch("/api/labels", { headers: { "X-Gophotocull-Token": token } });
+      if (!res.ok) throw new Error((await res.text()).trim());
+      const disk = (await res.json()).labels || {};
+      const merged = Object.assign({}, disk);
+      for (const f of new Set(pending.map(p => p.file))) { if (labels[f]) merged[f] = labels[f]; else delete merged[f]; }
+      labels = merged; store(key, labels); note = ""; serverDown = false;
+    } catch (e) { note = "server unreachable (" + e.message + "): showing this browser's copy"; serverDown = true; }
+    render();
+    flush();
+  }
+
   document.addEventListener("keydown", ev => {
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     const k = ev.key.toLowerCase();
     if (k === "arrowright" || k === "arrowdown") { move(1); ev.preventDefault(); }
     else if (k === "arrowleft" || k === "arrowup") { move(-1); ev.preventDefault(); }
     else if (k === "enter") { detailOpen = true; render(); }
-    else if (k === "escape") { detailOpen = false; render(); }
+    else if (k === "escape") { detailOpen = false; pinned = -1; render(); }
     else if (k === "k") setLabel("keep");
     else if (k === "r") setLabel("review");
     else if (k === "c") setLabel("cull");
     else if (k === "u") setLabel("");
+    else if (k.length === 1 && k >= "0" && k <= "5") setStars(Number(k));
   });
 
   document.getElementById("export").onclick = () => {
-    const rows = ["file,label"].concat(cards.filter(c => labels[c.file]).map(c => `"${c.file.replace(/"/g, '""')}",${labels[c.file]}`));
-    const a = el("a", { href: URL.createObjectURL(new Blob([rows.join("\n") + "\n"], { type: "text/csv" })), download: "labels.csv" });
+    const at = new Date().toISOString();
+    const lines = cards.filter(c => labels[c.file]).map(c => JSON.stringify({ file: c.file, label: get(c.file).label, stars: get(c.file).stars, at }) + "\n");
+    const a = el("a", { href: URL.createObjectURL(new Blob(lines, { type: "application/jsonl" })), download: "gophotocull-labels.jsonl" });
     document.body.appendChild(a); a.click(); a.remove();
   };
   document.getElementById("import").onchange = ev => {
     const file = ev.target.files[0];
     if (!file) return;
     file.text().then(text => {
-      for (const line of text.split(/\r?\n/)) {
-        const m = line.match(/^\s*(?:"((?:[^"]|"")*)"|([^,]*)),\s*(keep|review|cull)\s*$/i);
-        if (m) labels[(m[1] !== undefined ? m[1].replace(/""/g, '"') : m[2]).trim()] = m[3].toLowerCase();
+      const lines = text.split("\n"), torn = !text.endsWith("\n");
+      const next = Object.assign({}, labels);
+      for (let n = 0; n < lines.length; n++) {
+        if (!lines[n].trim()) continue;
+        let e = null;
+        try { e = JSON.parse(lines[n]); } catch (err) {}
+        const label = e && (e.label || ""), stars = e && (e.stars || 0);
+        const valid = e && typeof e.file === "string" && e.file && ["", "keep", "review", "cull"].includes(label) && Number.isInteger(stars) && stars >= 0 && stars <= 5;
+        if (!valid) {
+          if (torn && n === lines.length - 1) break; // an interrupted final append
+          note = `import: line ${n + 1} is not a valid label; nothing imported`; render(); return;
+        }
+        if (!label && !stars) delete next[e.file]; else next[e.file] = { label, stars };
       }
-      save(); render();
+      labels = next; store(key, labels); note = ""; render();
     });
+    ev.target.value = "";
   };
 
   render();
+  if (serve) loadServer();
 })();
 </script>
 </body>

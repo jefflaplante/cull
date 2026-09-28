@@ -1,6 +1,7 @@
 // Package review writes a self-contained HTML contact sheet from a report: every
-// frame with its subject crop, the decision and the model's reasoning, and
-// keep/review/cull buttons that export a labels CSV for calibration.
+// frame with its subject crop, the decision and the model's reasoning, with
+// keep/review/cull labels and star ratings. Served by Server, every change is
+// saved to the labels log (and optionally the frame's sidecar).
 package review
 
 import (
@@ -62,13 +63,14 @@ type pageData struct {
 	Backend    string `json:"backend,omitempty"`
 	Model      string `json:"model,omitempty"`
 	Escalation string `json:"escalation,omitempty"`
+	Serve      bool   `json:"serve,omitempty"` // saving through a review server (review --serve)
 	Cards      []card `json:"cards"`
 }
 
-// Build renders the sheet into o.Out and returns the index.html path.
-func Build(rep *report.Report, reportPath string, o Options, log io.Writer) (string, error) {
+// Build renders the sheet's images and its static index.html into o.Out.
+func Build(rep *report.Report, reportPath string, o Options, log io.Writer) (*Sheet, error) {
 	if err := os.MkdirAll(o.Out, 0o755); err != nil {
-		return "", err
+		return nil, err
 	}
 	cards := make([]card, len(rep.Results))
 	jobs := make(chan int)
@@ -88,16 +90,32 @@ func Build(rep *report.Report, reportPath string, o Options, log io.Writer) (str
 	close(jobs)
 	wg.Wait()
 
-	data, err := json.Marshal(pageData{ // Marshal escapes <, >, & so the data can't close its script
+	sheet := &Sheet{Dir: o.Out, Index: filepath.Join(o.Out, "index.html"), data: pageData{
 		Title: filepath.Base(rep.Dir), Report: reportPath, Backend: rep.Backend, Model: rep.Model,
 		Escalation: rep.Escalation, Cards: cards,
-	})
+	}}
+	page, err := sheet.Page(false)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	page := strings.Replace(pageTemplate, placeholder, string(data), 1)
-	index := filepath.Join(o.Out, "index.html")
-	return index, os.WriteFile(index, []byte(page), 0o644)
+	return sheet, os.WriteFile(sheet.Index, page, 0o644)
+}
+
+// Sheet is a built review sheet: its images in Dir, the static page at Index.
+type Sheet struct {
+	Index, Dir string
+	data       pageData
+}
+
+// Page renders the sheet. serve marks it as saving through a review server.
+func (s *Sheet) Page(serve bool) ([]byte, error) {
+	d := s.data
+	d.Serve = serve
+	b, err := json.Marshal(d) // Marshal escapes <, >, & so the data can't close its script
+	if err != nil {
+		return nil, err
+	}
+	return []byte(strings.Replace(pageTemplate, placeholder, string(b), 1)), nil
 }
 
 func makeCard(rep *report.Report, r report.Result, o Options, log io.Writer) card {

@@ -1,5 +1,6 @@
 // Package c1 generates AppleScript that applies a report to the open Capture One
-// document: rating, color tag and keyword per decision, and optionally the
+// document: rating from your stars (--labels), color tag and keyword per verdict
+// (yours where you labeled, else the model's), and optionally the
 // suggested exposure and crop. Capture One doesn't reliably read Adobe develop
 // settings from sidecars, so edits go through its scripting interface.
 //
@@ -21,59 +22,73 @@ import (
 	"time"
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
+	"github.com/jefflaplante/gophotocull/internal/labels"
 	"github.com/jefflaplante/gophotocull/internal/report"
 )
 
 // Options select what the script writes.
 type Options struct {
 	Rating, Label, Keyword bool
-	Exposure               bool // suggested EV for frames the model marked fixable
-	Crop                   bool // suggested crop for frames marked croppable
+	Exposure               bool                    // suggested EV for frames the model marked fixable
+	Crop                   bool                    // suggested crop for frames marked croppable
+	Labels                 map[string]labels.Entry // your verdicts and stars by base name; nil = the model's verdicts, no ratings
 }
-
-var rating = map[eval.Decision]int{eval.Keep: 3, eval.Review: 2, eval.Cull: 1}
 
 // colorTag follows Capture One's usual numbering (0 none, 1 red, 2 orange,
 // 3 yellow, 4 green, 5 blue, 6 pink, 7 purple): not in the dictionary; confirm
-// with Probe. Keep leaves the tag alone, like the XMP sidecars.
-var colorTag = map[eval.Decision]int{eval.Review: 3, eval.Cull: 1}
+// with Probe. Same colours as the XMP sidecars.
+var colorTag = map[eval.Decision]int{eval.Keep: 4, eval.Review: 3, eval.Cull: 1}
 
-// Script returns the AppleScript for every decided frame in the report.
+// Script returns the AppleScript for every frame with a verdict (the user's label
+// in o.Labels, else the model's decision) or with the user's stars.
 func Script(rep *report.Report, o Options) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "-- gophotocull apply-c1, generated %s. Review before running.\n", time.Now().Format(time.RFC3339))
 	b.WriteString(helpers)
 	b.WriteString("tell application \"Capture One\"\n\tset doc to current document\n\tset notFound to {}\n")
 	for _, r := range rep.Results {
-		if r.Error != "" || r.Decision == "" || r.Evaluation == nil {
+		l := o.Labels[filepath.Base(r.File)]
+		d, yours := labels.Effective(r, l)
+		if r.Error != "" || (d == "" && l.Stars == 0) {
 			continue
 		}
 		name := filepath.Base(r.File)
 		stem := strings.TrimSuffix(name, filepath.Ext(name))
-		fmt.Fprintf(&b, "\n\t-- %s: %s\n", name, r.Decision)
+		who := "model"
+		if yours {
+			who = "yours"
+		}
+		fmt.Fprintf(&b, "\n\t-- %s: %s (%s)\n", name, d, who)
 		fmt.Fprintf(&b, "\tset imgs to my matchImages(doc, %s, %s)\n", quote(name), quote(stem))
 		fmt.Fprintf(&b, "\tif (count of imgs) is 0 then set end of notFound to %s\n", quote(name))
 		b.WriteString("\trepeat with img in imgs\n")
-		crop := o.Crop && r.Evaluation.Composition.Status == "croppable" && r.Evaluation.Composition.Crop.Apply
+		e := r.Evaluation
+		crop := o.Crop && e != nil && e.Composition.Status == "croppable" && e.Composition.Crop.Apply
 		if crop {
 			b.WriteString("\t\tset d to dimensions of img\n\t\tset w to item 1 of d\n\t\tset h to item 2 of d\n")
 		}
 		b.WriteString("\t\trepeat with v in (variants of img)\n")
-		if o.Rating {
-			fmt.Fprintf(&b, "\t\t\tset rating of v to %d\n", rating[r.Decision])
+		if o.Rating && l.Stars > 0 { // only your stars: never reset ratings made in Capture One
+			fmt.Fprintf(&b, "\t\t\tset rating of v to %d\n", l.Stars)
 		}
-		if tag, ok := colorTag[r.Decision]; ok && o.Label {
+		if tag, ok := colorTag[d]; ok && o.Label {
 			fmt.Fprintf(&b, "\t\t\tset color tag of v to %d\n", tag)
 		}
-		if o.Keyword {
-			fmt.Fprintf(&b, "\t\t\tset k to my ensureKeyword(doc, %s)\n", quote("gophotocull:"+string(r.Decision)))
-			b.WriteString("\t\t\tif k is not missing value then apply keyword k to {v}\n")
+		if o.Keyword && d != "" {
+			kws := []string{"gophotocull:" + string(d)}
+			if yours {
+				kws = append(kws, "gophotocull:labeled")
+			}
+			for _, kw := range kws {
+				fmt.Fprintf(&b, "\t\t\tset k to my ensureKeyword(doc, %s)\n", quote(kw))
+				b.WriteString("\t\t\tif k is not missing value then apply keyword k to {v}\n")
+			}
 		}
-		if o.Exposure && r.Evaluation.Exposure.Status == "fixable" {
-			fmt.Fprintf(&b, "\t\t\tset exposure of adjustments of v to %s\n", num(r.Evaluation.Exposure.EVAdjust))
+		if o.Exposure && e != nil && e.Exposure.Status == "fixable" {
+			fmt.Fprintf(&b, "\t\t\tset exposure of adjustments of v to %s\n", num(e.Exposure.EVAdjust))
 		}
 		if crop {
-			c := r.Evaluation.Composition.Crop
+			c := e.Composition.Crop
 			fmt.Fprintf(&b, "\t\t\tset crop of v to {%s * w, %s * h, %s * w, %s * h}\n",
 				num((c.Left+c.Right)/2), num((c.Top+c.Bottom)/2), num(c.Right-c.Left), num(c.Bottom-c.Top))
 		}

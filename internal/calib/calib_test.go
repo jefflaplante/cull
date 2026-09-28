@@ -9,23 +9,6 @@ import (
 	"github.com/jefflaplante/gophotocull/internal/report"
 )
 
-func TestReadLabels(t *testing.T) {
-	in := "file,label\n\"A, 1.DNG\",Keep\nB.DNG, cull\nC.DNG,review\nB.DNG,keep\n\n"
-	got, err := ReadLabels(strings.NewReader(in))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got["A, 1.DNG"] != "keep" || got["B.DNG"] != "keep" || got["C.DNG"] != "review" || len(got) != 3 {
-		t.Fatalf("labels %v", got)
-	}
-	if _, err := ReadLabels(strings.NewReader("A.DNG,maybe\n")); err == nil || !strings.Contains(err.Error(), "line 1") {
-		t.Fatalf("bad label: %v", err)
-	}
-	if got, err := ReadLabels(strings.NewReader("A.DNG,cull\n")); err != nil || got["A.DNG"] != "cull" {
-		t.Fatalf("no header: %v %v", got, err)
-	}
-}
-
 func frame(name string, d eval.Decision, score float64) report.Result {
 	return report.Result{File: "/shoot/" + name, Decision: d,
 		Evaluation: &eval.Evaluation{Sharpness: eval.Sharpness{Status: "sharp", Score: score}}}

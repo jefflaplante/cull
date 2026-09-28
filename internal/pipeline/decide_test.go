@@ -11,6 +11,7 @@ import (
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/group"
+	"github.com/jefflaplante/gophotocull/internal/labels"
 	"github.com/jefflaplante/gophotocull/internal/rawclip"
 	"github.com/jefflaplante/gophotocull/internal/report"
 )
@@ -55,14 +56,14 @@ func TestDecideRewritesOnlyOurSidecars(t *testing.T) {
 		t.Fatal(err)
 	}
 	l2 := filepath.Join(dir, "L1000002.xmp")
-	if b, _ := os.ReadFile(l2); !strings.Contains(string(b), `xmp:Rating="3"`) {
-		t.Fatalf("keep sidecar not written:\n%s", b)
+	if b, _ := os.ReadFile(l2); !strings.Contains(string(b), `xmp:Label="Green"`) || strings.Contains(string(b), "xmp:Rating") {
+		t.Fatalf("keep sidecar: green, and no stars from the model:\n%s", b)
 	}
 	opts.Policy.ReviewBelowSharpness = 9 // L2 becomes review
 	if _, err := Decide(c.ReportPath, opts, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(l2); !strings.Contains(string(b), `xmp:Rating="2"`) {
+	if b, _ := os.ReadFile(l2); !strings.Contains(string(b), `xmp:Label="Yellow"`) {
 		t.Fatalf("our sidecar not rewritten for the new decision:\n%s", b)
 	}
 	if b, _ := os.ReadFile(foreign); string(b) != "foreign" {
@@ -136,7 +137,7 @@ func TestBurstDuplicatesGoToReviewAndDecideCanCullThem(t *testing.T) {
 		if r.Decision != eval.Review || !strings.Contains(strings.Join(r.Reasons, ";"), "duplicate of L1000001.DNG (burst of 3)") {
 			t.Fatalf("%s: decision=%s reasons=%v", n, r.Decision, r.Reasons)
 		}
-		if b, _ := os.ReadFile(r.XMP); !strings.Contains(string(b), `xmp:Rating="2"`) {
+		if b, _ := os.ReadFile(r.XMP); !strings.Contains(string(b), `xmp:Label="Yellow"`) {
 			t.Fatalf("%s: sidecar not updated for the duplicate decision:\n%s", n, b)
 		}
 	}
@@ -197,5 +198,74 @@ func TestMovedForeignSidecarStaysForeign(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(foreign); string(got) != "foreign" {
 		t.Fatalf("decide overwrote a restored foreign sidecar: %q", got)
+	}
+}
+
+func TestDecideLabelsDriveSidecarsAndMoves(t *testing.T) {
+	dir, c := culledShoot(t, nil) // model: L1 cull, L2 keep, L3 review
+	pol := eval.Policy{MinCropArea: 0.6}
+	if _, err := Decide(c.ReportPath, DecideOptions{Policy: pol, MoveCulled: true}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, CulledDir, "L1000001.DNG")); err != nil {
+		t.Fatal("the model's cull was not moved")
+	}
+	lab := map[string]labels.Entry{
+		"L1000001.DNG": {File: "L1000001.DNG", Label: "keep"}, // you overrule the model's cull
+		"L1000002.DNG": {File: "L1000002.DNG", Label: "cull"}, // and cull a model keep
+		"L1000003.DNG": {File: "L1000003.DNG", Stars: 5},      // stars only: the model's review stands
+	}
+	if _, err := Decide(c.ReportPath, DecideOptions{Policy: pol, WriteXMP: true, MoveCulled: true, Labels: lab}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "L1000001.DNG")); err != nil {
+		t.Error("frame you labeled keep was not restored")
+	}
+	if _, err := os.Stat(filepath.Join(dir, CulledDir, "L1000002.DNG")); err != nil {
+		t.Error("frame you labeled cull was not moved")
+	}
+	rep, _ := report.Load(c.ReportPath)
+	if r := result(t, rep, "L1000001.DNG"); r.Decision != eval.Cull {
+		t.Errorf("report decision replaced by your label: %s", r.Decision)
+	}
+	read := func(p string) string { b, _ := os.ReadFile(p); return string(b) }
+	if s := read(filepath.Join(dir, "L1000001.xmp")); !strings.Contains(s, `xmp:Label="Green"`) || !strings.Contains(s, "gophotocull:labeled") {
+		t.Errorf("L1 sidecar:\n%s", s)
+	}
+	if s := read(filepath.Join(dir, CulledDir, "L1000002.xmp")); !strings.Contains(s, `xmp:Label="Red"`) {
+		t.Errorf("L2 sidecar did not follow the frame into culled/:\n%s", s)
+	}
+	if s := read(filepath.Join(dir, "L1000003.xmp")); !strings.Contains(s, `xmp:Rating="5"`) || !strings.Contains(s, `xmp:Label="Yellow"`) || strings.Contains(s, "labeled") {
+		t.Errorf("L3 sidecar:\n%s", s)
+	}
+}
+
+func TestLabelsWithDuplicateNames(t *testing.T) {
+	dir := t.TempDir()
+	missed := &eval.Evaluation{Sharpness: eval.Sharpness{Status: "missed_focus", Score: 2}}
+	rep := &report.Report{Dir: dir}
+	for _, sub := range []string{"a", "b"} {
+		os.MkdirAll(filepath.Join(dir, sub), 0o755)
+		f := filepath.Join(dir, sub, "L1.DNG")
+		os.WriteFile(f, []byte("dng"), 0o644)
+		rep.Results = append(rep.Results, report.Result{File: f, Evaluation: missed, Decision: eval.Cull})
+	}
+	rp := filepath.Join(dir, "gophotocull-report.json")
+	rep.Save(rp)
+	lab := map[string]labels.Entry{"L1.DNG": {File: "L1.DNG", Label: "keep"}}
+	// decide refuses: a label couldn't say which frame it means.
+	if _, err := Decide(rp, DecideOptions{Labels: lab, MoveCulled: true}, io.Discard); err == nil || !strings.Contains(err.Error(), "share a file name") {
+		t.Fatalf("decide: %v", err)
+	}
+	if exists(filepath.Join(dir, "a", CulledDir, "L1.DNG")) || exists(filepath.Join(dir, "b", CulledDir, "L1.DNG")) {
+		t.Fatal("decide moved frames before refusing")
+	}
+	// cull (the end of a paid run) warns and falls back to the model's verdicts.
+	var log strings.Builder
+	if err := finishRun(rep, Config{ReportPath: rp, Dir: dir, MoveCulled: true, Labels: lab, Log: &log}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(log.String(), "share a file name") || !exists(filepath.Join(dir, "a", CulledDir, "L1.DNG")) {
+		t.Fatalf("cull fallback: %s", log.String())
 	}
 }

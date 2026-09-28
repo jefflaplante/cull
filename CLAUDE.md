@@ -16,7 +16,8 @@ make test             # all tests use synthetic fixtures; no network, no API key
                       # sandbox this needs sandbox.network.allowLocalBinding: true)
 make vet
 ./bin/gophotocull scan --save-inputs /tmp/in <dir>   # no model calls; previews, faces
-./bin/gophotocull cull <dir> --csv x                  # anthropic: spends API credits
+./bin/gophotocull review --serve --open <dir>        # label/star; saves gophotocull-labels.jsonl
+./bin/gophotocull cull <dir>                          # anthropic: spends API credits
 ./bin/gophotocull cull --backend claude-code <dir>    # subscription quota
 ./bin/gophotocull cull --backend openai --model <m> <dir>  # local OpenAI-compatible server (free)
 ```
@@ -43,10 +44,15 @@ make vet
   Batches driver with re-attachable `<report>.batch.json` state), escalation, cost budget
 - `internal/group` — dHash + burst grouping (time gap + hash), best-of-burst
 - `internal/rawclip` — pure-Go lossless-JPEG (SOF3) decoder; raw highlight clipping
-- `internal/review` — offline HTML contact sheet (embedded page.html) + labeling
-- `internal/calib` — labels CSV, confusion matrix, rates, sharpness-threshold sweep
+- `internal/review` — HTML contact sheet (embedded page.html: labels, stars, filters) and
+  the `--serve` server (serve.go: 127.0.0.1, Host/Origin/token checks, appends labels,
+  optional sidecars)
+- `internal/labels` — the user's append-only JSONL labels log (last line per file wins),
+  `Effective` verdict (label over model), and the one sidecar mapping (`Sidecar`,
+  `WriteSidecar`) used by cull, decide, the server; apply-c1 mirrors it
+- `internal/calib` — confusion matrix, rates, sharpness-threshold sweep
 - `internal/c1` — Capture One AppleScript generator, read-only probe, osascript runner
-- `internal/report` — JSON source of truth (schema v3) + CSV
+- `internal/report` — JSON source of truth (schema v3)
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default
 - `internal/config` — API key resolution
 
@@ -69,6 +75,10 @@ make vet
 - Capture One reads XMP sidecar **metadata** (rating, color label, keywords via
   Image › Sync Metadata). It does **not** reliably apply Adobe `crs:` develop
   settings (exposure, crop) from sidecars. Edits into C1 must go through AppleScript.
+- **Capture One 16.7.2 reads a DNG's `.xmp` sidecar on import** (user-tested 2026-09-27
+  on a clone of M1103817 with a gophotocull-written sidecar): `xmp:Rating` stars and
+  the `xmp:Label` colour showed up. So write sidecars before import; after import,
+  changes go through `apply-c1`.
 - Lightroom Classic ignores sidecars for DNG files (uses embedded XMP).
 - Sidecar naming convention is `L1000123.xmp`, not `L1000123.DNG.xmp`.
 
@@ -173,6 +183,9 @@ make vet
   `path`, `dimensions`; `apply keyword <existing keyword> to {variants}`. Generated
   scripts compile with `osacompile`.
 - Subscription run, 17 frames with all features: 165k in / 35k out tokens, 4.6 min.
+- Review sheet: the user viewed it on the 17 frames (subject crops good, verdicts clear,
+  reasons sometimes terse). `review --serve` used live by the user 2026-09-27: works.
+  Requested next: up/down arrows should move by grid row (they step like left/right).
 - Live `cull --batch` (claude-sonnet-5, 3 frames, with the user's approval): two rounds
   as designed. Round 1 = 1 evaluate (face frame) + 2 locates, round 2 = 2 evaluates;
   ~2 min per round, 4.2 min total. 21.2k in / 2.3k out, $0.033 at batch price
@@ -184,9 +197,8 @@ make vet
 ## Unverified assumptions — check before building on them
 
 - Capture One runtime details not in its dictionary: color-tag numbering (code assumes
-  1 red, 3 yellow), whether image `name` includes the extension (script tries both),
+  1 red, 3 yellow, 4 green), whether image `name` includes the extension (script tries both),
   orientation of `dimensions`/`crop`, `make new keyword`. Run `apply-c1 --probe` first.
-- The review sheet's look (only its behaviour was tested, in jsdom).
 
 - pigo Q threshold (~80 separated true/false on 12 frames) needs calibration on more
   shoots.
@@ -197,7 +209,6 @@ make vet
 - Capture One AppleScript property names for rating, keywords, exposure, crop.
   Dump the real dictionary with `sdef "/Applications/Capture One.app"` and read it
   before writing the applier.
-- Whether C1 reads sidecars for DNGs or only embedded XMP.
 
 ## Roadmap (priority order)
 
@@ -206,8 +217,8 @@ make vet
    `focus-target`; spec/plan in `docs/superpowers/`): pigo face → model locate
    fallback → native subject crop; noise-corrected "where focus landed" tile;
    `anthropic` / `claude-code` / `openai` backends; `--save-inputs`; scan summary.
-2. **Calibrate before trusting.** Tooling done 2026-09-27 (`review` → `labels.csv` →
-   `calibrate`, tune with `decide`). Waiting on the user's labeled sample set.
+2. **Calibrate before trusting.** Tooling done 2026-09-27 (`review --serve` →
+   `gophotocull-labels.jsonl` → `calibrate`, tune with `decide`). Waiting on the user's labeled sample set.
    Tune prompt/policy until false-cull rate is acceptable. Nothing should auto-apply
    at 1000-frame scale before this.
 3. ~~`apply-c1`~~ built (dry run default); confirm with `--probe` on a real catalog.

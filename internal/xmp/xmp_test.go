@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -19,6 +20,12 @@ func TestRenderIsWellFormedXML(t *testing.T) {
 			}
 			t.Fatalf("malformed XML: %v\n%s", err, out)
 		}
+	}
+}
+
+func TestRenderOmitsUnsetRating(t *testing.T) {
+	if s := string(Render(Sidecar{Label: "Green"})); strings.Contains(s, "xmp:Rating") || !strings.Contains(s, `xmp:Label="Green"`) {
+		t.Fatalf("unrated sidecar:\n%s", s)
 	}
 }
 

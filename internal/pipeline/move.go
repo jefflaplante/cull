@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
+	"github.com/jefflaplante/gophotocull/internal/labels"
 	"github.com/jefflaplante/gophotocull/internal/report"
 	"github.com/jefflaplante/gophotocull/internal/xmp"
 )
@@ -17,15 +18,17 @@ import (
 // into. Discover skips it, so resumed and recursive runs never re-process them.
 const CulledDir = "culled"
 
-// moveCulled moves every cull decision not yet moved into CulledDir beside it,
+// moveCulled moves every frame whose effective verdict is cull (the user's label
+// when lab has one, else the model's decision) and that isn't moved yet into
+// CulledDir beside it,
 // with its .xmp sidecar, and records the move in the result. Frames that can't
 // be moved stay where they are with the reason in Fixups. Nothing is deleted
 // and nothing is overwritten; `gophotocull restore` reverses it.
-func moveCulled(rep *report.Report, log io.Writer) int {
+func moveCulled(rep *report.Report, lab map[string]labels.Entry, log io.Writer) int {
 	n := 0
 	for i := range rep.Results {
 		r := &rep.Results[i]
-		if r.Decision != eval.Cull || r.Error != "" || r.MovedTo != "" {
+		if d, _ := labels.Effective(*r, lab[filepath.Base(r.File)]); d != eval.Cull || r.Error != "" || r.MovedTo != "" {
 			continue
 		}
 		dst := filepath.Join(filepath.Dir(r.File), CulledDir, filepath.Base(r.File))

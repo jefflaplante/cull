@@ -6,10 +6,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/group"
+	"github.com/jefflaplante/gophotocull/internal/labels"
 	"github.com/jefflaplante/gophotocull/internal/report"
 	"github.com/jefflaplante/gophotocull/internal/xmp"
 )
@@ -23,6 +25,7 @@ type DecideOptions struct {
 	MoveCulled   bool // sync culled/: move new culls, restore frames no longer culled
 	GroupGap     time.Duration
 	GroupHamming int
+	Labels       map[string]labels.Entry // the user's labels by base name; nil = the model's verdicts alone
 }
 
 // DecideSummary reports what changed.
@@ -59,11 +62,14 @@ func Decide(reportPath string, o DecideOptions, log io.Writer) (DecideSummary, e
 	if sum.Frames == 0 {
 		return sum, errors.New("no evaluations in report (it came from scan, or every frame failed): run cull first")
 	}
+	if dups := labels.Duplicates(rep.Results); len(o.Labels) > 0 && len(dups) > 0 {
+		return sum, fmt.Errorf("frames share a file name, so your labels can't tell them apart (rename them, or pass --no-labels): %s", strings.Join(dups, "; "))
+	}
 
 	if o.MoveCulled { // restore first, so sidecars are then written where frames live
 		for i := range rep.Results {
 			r := &rep.Results[i]
-			if r.MovedTo == "" || r.Decision == eval.Cull {
+			if d, _ := labels.Effective(*r, o.Labels[filepath.Base(r.File)]); r.MovedTo == "" || d == eval.Cull {
 				continue
 			}
 			sidecar, err := relocate(r.MovedTo, r.File)
@@ -87,28 +93,18 @@ func Decide(reportPath string, o DecideOptions, log io.Writer) (DecideSummary, e
 		}
 	}
 	if o.MoveCulled {
-		sum.Moved = moveCulled(rep, log)
+		sum.Moved = moveCulled(rep, o.Labels, log)
 	}
 	return sum, rep.Save(reportPath)
 }
 
-// writeDecidedSidecar writes the frame's sidecar where the frame currently lives.
-// A sidecar the report records as ours is rewritten; any other existing one is
-// left alone unless OverwriteXMP.
+// writeDecidedSidecar writes the frame's sidecar where the frame currently lives,
+// from the effective verdict and the user's stars (o.Labels; nil = the model's
+// verdict alone). A sidecar the report records as ours is rewritten; any other
+// existing one is left alone unless OverwriteXMP.
 func writeDecidedSidecar(r *report.Result, o DecideOptions) {
-	at := r.File
-	if r.MovedTo != "" {
-		at = r.MovedTo
-	}
-	p := xmp.Path(at)
-	orientation := 1
-	if r.Preview != nil {
-		orientation = r.Preview.Orientation
-	}
-	ours := r.XMP == p
-	switch err := xmp.Write(p, buildSidecar(*r, orientation, o.XMPDevelop), ours || o.OverwriteXMP); {
+	switch err := labels.WriteSidecar(r, o.Labels[filepath.Base(r.File)], o.XMPDevelop, o.OverwriteXMP); {
 	case err == nil:
-		r.XMP = p
 	case errors.Is(err, xmp.ErrExists):
 		addFixup(r, "xmp: sidecar exists and is not ours; not overwritten")
 	default:

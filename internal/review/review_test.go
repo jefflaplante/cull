@@ -54,10 +54,11 @@ func TestBuildWritesAnOfflinePageWithImages(t *testing.T) {
 		{File: f2, Preview: pv, FocusTarget: &report.FocusTarget{Source: "none", Reason: "no face"}}, // scan-style
 		{File: filepath.Join(dir, "broken.DNG"), Error: "preview: boom"},
 	}}
-	index, err := Build(rep, filepath.Join(dir, "r.json"), Options{Out: out, Concurrency: 2}, io.Discard)
+	sheet, err := Build(rep, filepath.Join(dir, "r.json"), Options{Out: out, Concurrency: 2}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
+	index := sheet.Index
 	for _, f := range []string{"L1.thumb.jpg", "L1.subject.jpg", `L2<b>&".thumb.jpg`} {
 		if _, err := os.Stat(filepath.Join(out, f)); err != nil {
 			t.Errorf("missing %s", f)
@@ -68,14 +69,29 @@ func TestBuildWritesAnOfflinePageWithImages(t *testing.T) {
 	}
 	b, _ := os.ReadFile(index)
 	page := string(b)
-	for _, want := range []string{`id="data"`, "Export labels", "L1.DNG", "missed_focus", "boom"} {
+	for _, want := range []string{`id="data"`, "Export labels", "L1.DNG", "missed_focus", "boom", "gophotocull-labels.jsonl"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %q", want)
 		}
 	}
-	for _, bad := range []string{"http://", "https://", "L2<b>"} {
+	for _, bad := range []string{"http://", "https://", "L2<b>", "labels.csv"} {
 		if strings.Contains(page, bad) {
 			t.Errorf("page contains %q", bad)
 		}
+	}
+}
+
+func TestPageMarksServeMode(t *testing.T) {
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	rep := &report.Report{Dir: dir, Results: []report.Result{{File: filepath.Join(dir, "L1.DNG")}}}
+	sheet, err := Build(rep, filepath.Join(dir, "r.json"), Options{Out: t.TempDir(), Concurrency: 1}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	static, _ := os.ReadFile(sheet.Index)
+	served, err := sheet.Page(true)
+	if err != nil || !strings.Contains(string(served), `"serve":true`) || strings.Contains(string(static), `"serve"`) {
+		t.Fatalf("serve flag: %v", err)
 	}
 }

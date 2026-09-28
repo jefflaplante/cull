@@ -3,12 +3,10 @@
 package report
 
 import (
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/jefflaplante/gophotocull/internal/dng"
@@ -116,46 +114,6 @@ func (r *Report) Save(path string) error {
 		return err
 	}
 	return os.Rename(tmp, path)
-}
-
-func f1(v float64) string { return strconv.FormatFloat(v, 'f', 1, 64) }
-
-// WriteCSV writes a flat summary for sorting in a spreadsheet.
-func (r *Report) WriteCSV(path string) error {
-	fh, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer fh.Close()
-	w := csv.NewWriter(fh)
-	w.Write([]string{"file", "decision", "sharpness", "sharpness_status", "exposure", "exposure_status", "ev_adjust",
-		"composition", "composition_status", "crop_ltrb", "reasons",
-		"focus_source", "face_q", "subject_sharpness", "landed_sharpness", "error"})
-	for _, res := range r.Results {
-		row := make([]string, 16)
-		row[0], row[1], row[15] = res.File, string(res.Decision), res.Error
-		if ft := res.FocusTarget; ft != nil {
-			row[11], row[12] = ft.Source, f1(ft.FaceQ)
-			row[13] = strconv.FormatFloat(ft.SubjectSharpness, 'f', 3, 64)
-			row[14] = strconv.FormatFloat(ft.LandedSharpness, 'f', 3, 64)
-		}
-		if e := res.Evaluation; e != nil {
-			row[2], row[3] = f1(e.Sharpness.Score), e.Sharpness.Status
-			row[4], row[5] = f1(e.Exposure.Score), e.Exposure.Status
-			row[6] = strconv.FormatFloat(e.Exposure.EVAdjust, 'f', 2, 64)
-			row[7], row[8] = f1(e.Composition.Score), e.Composition.Status
-			if c := e.Composition.Crop; c.Apply {
-				row[9] = fmt.Sprintf("%.3f,%.3f,%.3f,%.3f", c.Left, c.Top, c.Right, c.Bottom)
-			}
-		}
-		if len(res.Reasons) > 0 {
-			b, _ := json.Marshal(res.Reasons)
-			row[10] = string(b)
-		}
-		w.Write(row)
-	}
-	w.Flush()
-	return w.Error()
 }
 
 // Facts are the measurements the policy combines with a frame's assessment.

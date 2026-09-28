@@ -12,6 +12,7 @@ import (
 	"github.com/jefflaplante/gophotocull/internal/focus"
 	"github.com/jefflaplante/gophotocull/internal/group"
 	"github.com/jefflaplante/gophotocull/internal/imageprep"
+	"github.com/jefflaplante/gophotocull/internal/labels"
 	"github.com/jefflaplante/gophotocull/internal/rawclip"
 	"github.com/jefflaplante/gophotocull/internal/report"
 	"github.com/jefflaplante/gophotocull/internal/xmp"
@@ -187,7 +188,7 @@ func finish(cfg Config, res *report.Result, e *eval.Evaluation, orientation int)
 		return
 	}
 	p := xmp.Path(res.File)
-	switch err := xmp.Write(p, buildSidecar(*res, orientation, cfg.XMPDevelop), cfg.OverwriteXMP); {
+	switch err := xmp.Write(p, labels.Sidecar(*res, labels.Entry{}, orientation, cfg.XMPDevelop), cfg.OverwriteXMP); {
 	case err == nil:
 		res.XMP = p
 	case errors.Is(err, xmp.ErrExists):

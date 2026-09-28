@@ -32,6 +32,7 @@ type cullOpts struct {
 	xmpDevelop    bool
 	overwriteXMP  bool
 	moveCulled    bool
+	noLabels      bool
 	rawClip       bool
 	batch         bool
 	batchPoll     time.Duration
@@ -43,7 +44,6 @@ type cullOpts struct {
 	escalateOnList  string
 	policy          policyFlags
 	checkpoint      int
-	csv             string
 }
 
 func newCullCmd(so *sharedOpts) *cobra.Command {
@@ -66,7 +66,7 @@ Backends (--backend):
                Stops cleanly at --quota-stop of the 5-hour window; resume later.
   openai       any OpenAI-compatible server at --base-url (default: a local server on 127.0.0.1:8000).
                --model is required; key optional (--openai-key-file, $OPENAI_API_KEY).`,
-		Example: `  gophotocull cull --csv cull.csv ~/Pictures/2026-09-26
+		Example: `  gophotocull cull ~/Pictures/2026-09-26
   gophotocull cull --backend claude-code -o cc.json ~/Pictures/2026-09-26
   gophotocull cull --backend openai --model <model> ~/Pictures/2026-09-26
   gophotocull cull --resume --write-xmp ~/Pictures/2026-09-26
@@ -165,6 +165,11 @@ Backends (--backend):
 			cfg.XMPDevelop = o.xmpDevelop
 			cfg.OverwriteXMP = o.overwriteXMP
 			cfg.MoveCulled = o.moveCulled
+			if o.moveCulled || o.writeXMP {
+				if cfg.Labels, err = userLabels(cmd.ErrOrStderr(), cfg.ReportPath, "", o.noLabels); err != nil {
+					return err
+				}
+			}
 			cfg.RawClip = o.rawClip
 			cfg.Policy, _ = o.policy.policy() // validated in PreRunE
 			cfg.CheckpointN = o.checkpoint
@@ -183,11 +188,6 @@ Backends (--backend):
 			}
 			if errors.Is(err, llm.ErrQuotaStop) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "stopped early to protect your subscription quota; rerun later with --resume")
-			}
-			if rep != nil && o.csv != "" {
-				if cerr := rep.WriteCSV(o.csv); cerr != nil {
-					fmt.Fprintln(cmd.ErrOrStderr(), "csv:", cerr)
-				}
 			}
 			return err
 		},
@@ -215,12 +215,11 @@ Backends (--backend):
 	f.BoolVar(&o.writeXMP, "write-xmp", false, "write XMP sidecars (rating, label, keyword)")
 	f.BoolVar(&o.xmpDevelop, "xmp-develop", false, "also write Adobe crs exposure/crop (not applied by Capture One)")
 	f.BoolVar(&o.overwriteXMP, "overwrite-xmp", false, "overwrite existing sidecars (default: never clobber)")
+	f.BoolVar(&o.noLabels, "no-labels", false, "ignore your labels (gophotocull-labels.jsonl beside the report): moves and sidecar rewrites follow the model's verdicts")
 	f.BoolVar(&o.moveCulled, "move-culled", false, "move frames decided cull (with their .xmp) into a culled/ folder beside them; undo with 'gophotocull restore'. Use before importing into Capture One")
 	o.policy.register(f)
 	f.IntVar(&o.checkpoint, "checkpoint", 25, "save the report every N results")
-	f.StringVar(&o.csv, "csv", "", "also write a CSV summary to this path")
 	cmd.MarkFlagFilename("api-key-file")
-	cmd.MarkFlagFilename("csv", "csv")
 	return cmd
 }
 

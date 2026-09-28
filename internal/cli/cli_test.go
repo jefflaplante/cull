@@ -1,17 +1,22 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"image"
 	"image/jpeg"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
+	"github.com/jefflaplante/gophotocull/internal/labels"
 	"github.com/jefflaplante/gophotocull/internal/report"
 )
 
@@ -336,14 +341,24 @@ func TestCalibrateCommand(t *testing.T) {
 	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
-	labels := filepath.Join(t.TempDir(), "labels.csv")
-	os.WriteFile(labels, []byte("file,label\nL1000001.DNG,keep\n"), 0o644)
-	out, err := run(t, "calibrate", "--labels", labels, filepath.Join(dir, "gophotocull-report.json"))
+	rp := filepath.Join(dir, "gophotocull-report.json")
+	log := filepath.Join(dir, "gophotocull-labels.jsonl")
+	os.WriteFile(log, []byte(`{"file":"L1000001.DNG","label":"keep","stars":0,"at":"2026-09-27T20:00:00Z"}`+"\n"+
+		`{"file":"X.DNG","label":"","stars":3,"at":"2026-09-27T20:00:01Z"}`+"\n"), 0o644)
+	out, err := run(t, "calibrate", rp) // the log beside the report, by default
 	if err != nil || !strings.Contains(out, "false-cull rate (keep → cull):   1/1") || !strings.Contains(out, "sweep") {
 		t.Fatalf("calibrate: %v\n%s", err, out)
 	}
-	if _, err := run(t, "calibrate", filepath.Join(dir, "gophotocull-report.json")); err == nil {
-		t.Fatal("calibrate without --labels should fail")
+	if strings.Contains(out, "not in the report") {
+		t.Fatalf("a stars-only entry counted as a label:\n%s", out)
+	}
+	moved := filepath.Join(t.TempDir(), "mine.jsonl")
+	os.Rename(log, moved)
+	if out, err := run(t, "calibrate", "--labels", moved, rp); err != nil || !strings.Contains(out, "1/1") {
+		t.Fatalf("explicit --labels: %v\n%s", err, out)
+	}
+	if _, err := run(t, "calibrate", rp); err == nil || !strings.Contains(err.Error(), "gophotocull-labels.jsonl") {
+		t.Fatalf("no log: %v", err)
 	}
 }
 
@@ -369,7 +384,7 @@ func TestApplyC1DryRunProbeAndRun(t *testing.T) {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
 	out, err := run(t, "apply-c1", dir)
-	if err != nil || !strings.Contains(out, `tell application "Capture One"`) || !strings.Contains(out, `"L1000001.DNG"`) || !strings.Contains(out, "set rating of v to 1") {
+	if err != nil || !strings.Contains(out, `tell application "Capture One"`) || !strings.Contains(out, `"L1000001.DNG"`) || !strings.Contains(out, "set color tag of v to 1") || strings.Contains(out, "set rating") {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
 	if out, err := run(t, "apply-c1", "--probe", dir); err != nil || !strings.Contains(out, "image name: ") {
@@ -379,5 +394,208 @@ func TestApplyC1DryRunProbeAndRun(t *testing.T) {
 	os.WriteFile(osa, []byte("#!/bin/sh\ncat >/dev/null\necho applied\n"), 0o755)
 	if out, err := run(t, "apply-c1", "--run", "--osascript", osa, dir); err != nil || !strings.Contains(out, "applied") {
 		t.Fatalf("run: %v\n%s", err, out)
+	}
+}
+
+func TestDecideLabelsMustExist(t *testing.T) {
+	_, err := run(t, "decide", "--labels", filepath.Join(t.TempDir(), "nope.jsonl"), t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "nope.jsonl") {
+		t.Fatalf("missing labels log: %v", err)
+	}
+}
+
+func TestApplyC1LabelsSetYourStars(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("cull: %v\n%s", err, out)
+	}
+	log := filepath.Join(dir, "gophotocull-labels.jsonl")
+	os.WriteFile(log, []byte(`{"file":"L1000001.DNG","label":"","stars":5,"at":"2026-09-27T20:00:00Z"}`+"\n"), 0o644)
+	out, err := run(t, "apply-c1", "--labels", log, dir)
+	if err != nil || !strings.Contains(out, "set rating of v to 5") {
+		t.Fatalf("with labels: %v\n%s", err, out)
+	}
+	if out, err := run(t, "apply-c1", dir); err != nil || !strings.Contains(out, "set rating of v to 5") {
+		t.Fatalf("the log beside the report is used by default: %v\n%s", err, out)
+	}
+	if out, _ := run(t, "apply-c1", "--no-labels", dir); strings.Contains(out, "set rating") {
+		t.Fatalf("rating without your stars:\n%s", out)
+	}
+}
+
+func TestCullHasNoCSVFlag(t *testing.T) {
+	for _, c := range NewRootCmd().Commands() {
+		if c.Name() == "cull" && c.Flags().Lookup("csv") != nil {
+			t.Fatal("cull --csv should be gone: the JSON report is the only run output")
+		}
+	}
+}
+
+func TestReviewServeFlagValidation(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"review", "--write-xmp", dir},
+		{"review", "--port", "8080", dir},
+		{"review", "--open", dir},
+		{"review", "--serve", "--overwrite-xmp", dir},
+	} {
+		if _, err := run(t, args...); err == nil || !strings.Contains(err.Error(), "requires") {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+}
+
+func TestReviewServeEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	if out, err := run(t, "scan", dir); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out)
+	}
+	pr, pw := io.Pipe()
+	cmd := NewRootCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(pw)
+	cmd.SetArgs([]string{"review", "--serve", dir})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- cmd.ExecuteContext(ctx); pw.Close() }()
+	var url string
+	sc := bufio.NewScanner(pr)
+	for sc.Scan() {
+		if u, ok := strings.CutPrefix(sc.Text(), "review server: "); ok {
+			url = u
+			break
+		}
+	}
+	go io.Copy(io.Discard, pr)
+	base, tok, ok := strings.Cut(url, "/#token=")
+	if !ok || !strings.HasPrefix(base, "http://127.0.0.1:") || len(tok) != 32 {
+		t.Fatalf("url %q", url)
+	}
+	req, _ := http.NewRequest("POST", base+"/api/labels", strings.NewReader(`{"file":"L1.DNG","label":"keep","stars":3}`))
+	req.Header.Set("X-Gophotocull-Token", tok)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil || res.StatusCode != 200 {
+		t.Fatalf("post: %v %v", err, res)
+	}
+	res.Body.Close()
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("serve exit: %v", err)
+	}
+	if m, err := labels.Read(filepath.Join(dir, labels.FileName)); err != nil || m["L1.DNG"].Stars != 3 {
+		t.Fatalf("log: %v %v", m, err)
+	}
+}
+
+// startServe runs `review --serve` until the returned stop is called, returning the
+// printed URL and the lines printed before it.
+func startServe(t *testing.T, args ...string) (url string, before []string, stop func() error) {
+	t.Helper()
+	pr, pw := io.Pipe()
+	cmd := NewRootCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(pw)
+	cmd.SetArgs(append([]string{"review", "--serve"}, args...))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- cmd.ExecuteContext(ctx); pw.Close() }()
+	sc := bufio.NewScanner(pr)
+	for sc.Scan() {
+		if u, ok := strings.CutPrefix(sc.Text(), "review server: "); ok {
+			url = u
+			break
+		}
+		before = append(before, sc.Text())
+	}
+	go io.Copy(io.Discard, pr)
+	return url, before, func() error { cancel(); return <-done }
+}
+
+func TestReviewDefaultPortIsStablePerReport(t *testing.T) {
+	a, b := defaultPort("/shoot/a/gophotocull-report.json"), defaultPort("/shoot/a/gophotocull-report.json")
+	c := defaultPort("/shoot/b/gophotocull-report.json")
+	if a != b || a < 49152 || a > 65535 || c < 49152 || c > 65535 {
+		t.Fatalf("ports %d %d %d", a, b, c)
+	}
+}
+
+func TestReviewServeKeepsItsPortAndFallsBackWhenBusy(t *testing.T) {
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	if out, err := run(t, "scan", dir); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out)
+	}
+	want := fmt.Sprintf("http://127.0.0.1:%d/", defaultPort(filepath.Join(dir, "gophotocull-report.json")))
+	url, _, stop := startServe(t, dir)
+	if !strings.HasPrefix(url, want) {
+		t.Errorf("first run: %q, want the report's port %s", url, want)
+	}
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	url2, _, stop := startServe(t, dir) // a restart gets the same origin, so the page's queue carries over
+	if !strings.HasPrefix(url2, want) {
+		t.Errorf("restart: %q, want %s", url2, want)
+	}
+	busy, before, stop2 := startServe(t, dir) // port taken by the running server
+	if strings.HasPrefix(busy, want) || !strings.Contains(strings.Join(before, "\n"), "busy") {
+		t.Errorf("busy port: %q, notes %q", busy, before)
+	}
+	stop2()
+	stop()
+}
+
+// culledOne culls one tiny frame with the fake subscription backend (decision: cull).
+func culledOne(t *testing.T) (dir, bin string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	dir = t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin = filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("cull: %v\n%s", err, out)
+	}
+	return dir, bin
+}
+
+func TestDecideUsesYourLabelsByDefault(t *testing.T) {
+	dir, _ := culledOne(t)
+	os.WriteFile(filepath.Join(dir, labels.FileName), []byte(`{"file":"L1000001.DNG","label":"keep","stars":5,"at":"2026-09-27T20:00:00Z"}`+"\n"), 0o644)
+	out, err := run(t, "decide", "--write-xmp", "--move-culled", dir)
+	if err != nil || !strings.Contains(out, "using your labels") {
+		t.Fatalf("decide: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "L1000001.DNG")); err != nil {
+		t.Fatal("the frame you kept was moved")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "L1000001.xmp")); !strings.Contains(string(b), `xmp:Rating="5"`) || !strings.Contains(string(b), `xmp:Label="Green"`) {
+		t.Fatalf("your stars and verdict missing:\n%s", b)
+	}
+	if out, err := run(t, "decide", "--no-labels", "--write-xmp", "--move-culled", dir); err != nil {
+		t.Fatalf("--no-labels: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "culled", "L1000001.DNG")); err != nil {
+		t.Fatal("--no-labels should follow the model's cull")
+	}
+	if _, err := run(t, "decide", "--no-labels", "--labels", "x.jsonl", dir); err == nil {
+		t.Fatal("--labels with --no-labels accepted")
+	}
+}
+
+func TestCullResumeRespectsYourLabels(t *testing.T) {
+	dir, bin := culledOne(t)
+	os.WriteFile(filepath.Join(dir, labels.FileName), []byte(`{"file":"L1000001.DNG","label":"keep","stars":0,"at":"2026-09-27T20:00:00Z"}`+"\n"), 0o644)
+	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--resume", "--move-culled", dir); err != nil {
+		t.Fatalf("resume: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "L1000001.DNG")); err != nil {
+		t.Fatal("cull --move-culled moved a frame you labeled keep")
 	}
 }

@@ -23,7 +23,7 @@ var ErrExists = errors.New("sidecar already exists")
 
 // Sidecar is what gets written. Nil/zero optional fields are omitted.
 type Sidecar struct {
-	Rating     int      // 0-5
+	Rating     int      // 1-5; 0 omits xmp:Rating
 	Label      string   // e.g. "Red"; empty to omit
 	Keywords   []string // dc:subject
 	ExposureEV *float64 // crs:Exposure2012
@@ -62,7 +62,9 @@ func esc(s string) string {
 // Render produces the XMP packet.
 func Render(s Sidecar) []byte {
 	var attrs []string
-	attrs = append(attrs, fmt.Sprintf(`xmp:Rating="%d"`, s.Rating))
+	if s.Rating > 0 {
+		attrs = append(attrs, fmt.Sprintf(`xmp:Rating="%d"`, s.Rating))
+	}
 	if s.Label != "" {
 		attrs = append(attrs, fmt.Sprintf(`xmp:Label="%s"`, esc(s.Label)))
 	}

@@ -21,10 +21,10 @@ import (
 	"github.com/jefflaplante/gophotocull/internal/focus"
 	"github.com/jefflaplante/gophotocull/internal/group"
 	"github.com/jefflaplante/gophotocull/internal/imageprep"
+	"github.com/jefflaplante/gophotocull/internal/labels"
 	"github.com/jefflaplante/gophotocull/internal/llm"
 	"github.com/jefflaplante/gophotocull/internal/rawclip"
 	"github.com/jefflaplante/gophotocull/internal/report"
-	"github.com/jefflaplante/gophotocull/internal/xmp"
 )
 
 type Config struct {
@@ -36,8 +36,9 @@ type Config struct {
 	Resume         bool
 	WriteXMP       bool
 	OverwriteXMP   bool
-	MoveCulled     bool // move cull decisions (and sidecars) into CulledDir after processing
-	XMPDevelop     bool // also write crs:Exposure2012 / crs:Crop*
+	MoveCulled     bool                    // move cull decisions (and sidecars) into CulledDir after processing
+	Labels         map[string]labels.Entry // your labels by base name: drive moves and sidecar rewrites at the end; nil = the model's
+	XMPDevelop     bool                    // also write crs:Exposure2012 / crs:Crop*
 	MinPreviewEdge int
 	Prep           imageprep.Options
 	Policy         eval.Policy
@@ -315,32 +316,6 @@ func statsText(f *imageprep.Frame, s imageprep.Stats, ex *dng.Exif, rc *rawclip.
 	return t
 }
 
-// buildSidecar maps a decision to metadata. Ratings: keep=3, review=2, cull=1.
-func buildSidecar(r report.Result, orientation int, develop bool) xmp.Sidecar {
-	sc := xmp.Sidecar{Keywords: []string{"gophotocull:" + string(r.Decision)}}
-	switch r.Decision {
-	case eval.Keep:
-		sc.Rating = 3
-	case eval.Review:
-		sc.Rating, sc.Label = 2, "Yellow"
-	case eval.Cull:
-		sc.Rating, sc.Label = 1, "Red"
-	}
-	if !develop || r.Evaluation == nil || r.Decision == eval.Cull {
-		return sc
-	}
-	e := r.Evaluation
-	if e.Exposure.Status == "fixable" {
-		v := e.Exposure.EVAdjust
-		sc.ExposureEV = &v
-	}
-	if c := e.Composition.Crop; c.Apply {
-		b := xmp.FromDisplay(c.Left, c.Top, c.Right, c.Bottom, orientation)
-		sc.Crop = &b
-	}
-	return sc
-}
-
 func summarize(r report.Result) string {
 	name := filepath.Base(r.File)
 	switch {
@@ -455,14 +430,19 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 // rewrites our sidecars where that changed a decision, moves culls when asked,
 // and saves the report.
 func finishRun(rep *report.Report, cfg Config) error {
+	lab := cfg.Labels
+	if dups := labels.Duplicates(rep.Results); len(lab) > 0 && len(dups) > 0 {
+		fmt.Fprintf(cfg.Log, "warning: frames share a file name, so your labels can't tell them apart; sidecars and moves follow the model's verdicts: %s\n", strings.Join(dups, "; "))
+		lab = nil
+	}
 	for _, i := range decideAll(rep, cfg.Policy, group.Options{Gap: cfg.GroupGap, MaxHamming: cfg.GroupHamming}) {
 		if cfg.WriteXMP {
-			writeDecidedSidecar(&rep.Results[i], DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP})
+			writeDecidedSidecar(&rep.Results[i], DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP, Labels: lab})
 		}
 	}
 	if cfg.MoveCulled && !cfg.DryRun {
 		// After a quota stop or Ctrl-C too: those decisions are final.
-		if n := moveCulled(rep, cfg.Log); n > 0 {
+		if n := moveCulled(rep, lab, cfg.Log); n > 0 {
 			fmt.Fprintf(cfg.Log, "moved %d culled frame(s) into %s/ (undo: gophotocull restore %s)\n", n, CulledDir, cfg.Dir)
 		}
 	}

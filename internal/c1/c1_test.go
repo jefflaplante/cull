@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
+	"github.com/jefflaplante/gophotocull/internal/labels"
 	"github.com/jefflaplante/gophotocull/internal/report"
 )
 
@@ -22,23 +23,53 @@ func testReport() *report.Report {
 	}}
 }
 
-func TestScriptSetsRatingLabelKeyword(t *testing.T) {
+// block returns one frame's part of the script.
+func block(s, name string) string {
+	i := strings.Index(s, "\n\t-- "+name+":")
+	if i < 0 {
+		return ""
+	}
+	rest := s[i+1:]
+	if j := strings.Index(rest[1:], "\n\t-- "); j >= 0 {
+		return rest[:j+1]
+	}
+	return rest
+}
+
+func TestScriptColorsAndKeywordsWithoutLabels(t *testing.T) {
 	s := Script(testReport(), Options{Rating: true, Label: true, Keyword: true})
-	for _, want := range []string{
-		`tell application "Capture One"`,
-		`matchImages(doc, "L1.DNG", "L1")`, `set rating of v to 3`,
-		`matchImages(doc, "L2.DNG", "L2")`, `set rating of v to 2`, `set color tag of v to 3`,
-		`matchImages(doc, "L\"3\\.DNG", "L\"3\\")`, `set rating of v to 1`, `set color tag of v to 1`,
-		`"gophotocull:cull"`,
-	} {
+	for name, tag := range map[string]string{"L1.DNG": "4", "L2.DNG": "3", `L"3\.DNG`: "1"} {
+		if b := block(s, name); !strings.Contains(b, "set color tag of v to "+tag) {
+			t.Errorf("%s: want color tag %s:\n%s", name, tag, b)
+		}
+	}
+	for _, want := range []string{`matchImages(doc, "L\"3\\.DNG", "L\"3\\")`, `"gophotocull:cull"`, `"gophotocull:keep"`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("script lacks %s", want)
 		}
 	}
-	for _, bad := range []string{"L4.DNG", "exposure of adjustments", "set crop of v"} {
+	for _, bad := range []string{"set rating", "gophotocull:labeled", "L4.DNG"} {
 		if strings.Contains(s, bad) {
-			t.Errorf("script contains %s", bad)
+			t.Errorf("script contains %s (ratings come only from your stars)", bad)
 		}
+	}
+}
+
+func TestScriptUsesYourLabelsAndStars(t *testing.T) {
+	lab := map[string]labels.Entry{
+		"L1.DNG": {File: "L1.DNG", Label: "cull"}, // model keep, you cull
+		"L2.DNG": {File: "L2.DNG", Stars: 4},      // model review, your stars
+	}
+	s := Script(testReport(), Options{Rating: true, Label: true, Keyword: true, Labels: lab})
+	b1, b2, b3 := block(s, "L1.DNG"), block(s, "L2.DNG"), block(s, `L"3\.DNG`)
+	if !strings.Contains(b1, "set color tag of v to 1") || !strings.Contains(b1, `"gophotocull:labeled"`) || strings.Contains(b1, "set rating") {
+		t.Errorf("L1:\n%s", b1)
+	}
+	if !strings.Contains(b2, "set rating of v to 4") || !strings.Contains(b2, "set color tag of v to 3") || strings.Contains(b2, "labeled") {
+		t.Errorf("L2:\n%s", b2)
+	}
+	if !strings.Contains(b3, "set color tag of v to 1") || strings.Contains(b3, "set rating") {
+		t.Errorf("L3:\n%s", b3)
 	}
 }
 

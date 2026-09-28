@@ -11,11 +11,16 @@ import (
 // order: frames ranked below p.KeepBest that the policy keeps get the Outranked
 // action. Ranking only demotes keeps; it never touches review or cull.
 //
-// A set's order is the model's stored one when that still covers every rankable
-// member (members that dropped out are skipped); otherwise it is by the frames'
-// own scores. It rebuilds rep.Sets for the current grouping, carrying the model's
-// order, notes, summary and cost over, and records p.KeepBest. It returns the
-// indices whose decision changed.
+// A set's order is the model's stored one (By "model") when that still covers
+// every rankable member; members that dropped out are skipped. Otherwise, as when
+// a newly rankable frame was never compared, it is by the frames' own scores (By
+// "scores") and the set needs ranking. It rebuilds rep.Sets for the current
+// grouping and records p.KeepBest. A stored set matched through its members
+// passes its order, notes, summary and cost to the new set whether or not the
+// order still covers it, so a policy change that is undone restores the model's
+// ranking. A stored order whose set no longer exists after a regrouping (another
+// gap or look, a split set merged again) is dropped. It returns the indices whose
+// decision changed.
 func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 	var frames []group.Frame
 	var idx []int // frames[k] is rep.Results[idx[k]]
@@ -74,18 +79,15 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 		}
 		s.Of = len(ranked)
 
-		var order []int // ranked, best first
-		if si, ok := modelOrder(stored, storedIn, s.Members, ranked, frames); !ok {
-			order = group.ScoreOrder(frames, ranked)
-		} else {
+		// A matched stored set's paid order is carried even when it no longer covers
+		// the rankable members, so a later decide that restores coverage uses it.
+		matched := false
+		if si, ok := storedFor(storedIn, ranked, s.Members, frames); ok {
+			matched = true
 			old := stored[si]
-			s.By = "model"
 			for _, f := range old.Order {
-				if k, in := member[f]; in {
+				if _, in := member[f]; in {
 					s.Order = append(s.Order, f) // kept whole: a dropped member may come back
-					if rankable(rep.Results[idx[k]], decisions[idx[k]]) {
-						order = append(order, k)
-					}
 				}
 			}
 			for _, nt := range old.Notes {
@@ -97,6 +99,22 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 				carried[si] = true
 				s.Summary, s.Usage, s.CostUSD = old.Summary, old.Usage, old.CostUSD
 			}
+		}
+		var order []int // rankable frames, best first
+		unseen := make(map[int]bool, len(ranked))
+		for _, k := range ranked {
+			unseen[k] = true
+		}
+		for _, f := range s.Order {
+			if k := member[f]; unseen[k] {
+				order = append(order, k)
+				delete(unseen, k)
+			}
+		}
+		if matched && len(unseen) == 0 {
+			s.By = "model"
+		} else { // a frame the model never compared: by scores until ranked again
+			order = group.ScoreOrder(frames, ranked)
 		}
 
 		rankOf := make(map[int]int, len(order)) // frame index -> 1-based rank
@@ -112,7 +130,7 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 			r := &rep.Results[i]
 			g := &report.Group{ID: s.ID, Size: len(set), Rank: rankOf[k], Of: s.Of, By: s.By}
 			g.Best = g.Rank >= 1 && g.Rank <= best
-			if nt, ok := notes[r.File]; ok && g.Rank > 0 {
+			if nt, ok := notes[r.File]; ok && g.Rank > 0 && s.By == "model" {
 				g.Strength, g.Weakness = nt.Strength, nt.Weakness
 			}
 			r.Group = g
@@ -138,34 +156,20 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 	return changed
 }
 
-// modelOrder finds the stored set whose model order holds the current set's
-// first rankable member (with none rankable, the first member found in one) and
-// reports whether that order still covers every rankable member. A new or newly
-// rankable frame the model never saw means it doesn't.
-func modelOrder(stored []report.Set, storedIn map[string]int, members []string, ranked []int, frames []group.Frame) (int, bool) {
-	if len(ranked) > 0 {
-		members = []string{frames[ranked[0]].Key}
-	}
-	si := -1
-	for _, f := range members {
-		if s, ok := storedIn[f]; ok {
-			si = s
-			break
-		}
-	}
-	if si < 0 {
-		return 0, false
-	}
-	in := make(map[string]bool, len(stored[si].Order))
-	for _, f := range stored[si].Order {
-		in[f] = true
-	}
+// storedFor finds the stored set whose model order holds the current set's first
+// rankable member found in one or, failing that, any member.
+func storedFor(storedIn map[string]int, ranked []int, members []string, frames []group.Frame) (int, bool) {
 	for _, k := range ranked {
-		if !in[frames[k].Key] {
-			return 0, false
+		if si, ok := storedIn[frames[k].Key]; ok {
+			return si, true
 		}
 	}
-	return si, true
+	for _, f := range members {
+		if si, ok := storedIn[f]; ok {
+			return si, true
+		}
+	}
+	return 0, false
 }
 
 // rankable: evaluated, and the policy doesn't cull it. A technical cull is

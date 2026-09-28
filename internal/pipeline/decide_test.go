@@ -277,7 +277,9 @@ func TestOutrankedNeverTouchesReview(t *testing.T) {
 }
 
 // A member the model ranked that a policy change culls, then a later decide
-// restores, is still in the paid order: tuning the policy costs nothing.
+// restores, is still in the paid order. Together with
+// TestUncoveredSetKeepsPaidOrderForLater: while the grouping stays the same, no
+// decide discards a paid order, and undoing a policy change brings its ranks back.
 func TestReturningMemberKeepsItsModelRank(t *testing.T) {
 	rep := setReport(t, 9, 9, 9)
 	rep.Results[1].Evaluation.People = eval.People{Present: true, Eyes: "closed"}
@@ -292,6 +294,37 @@ func TestReturningMemberKeepsItsModelRank(t *testing.T) {
 	decideAll(rep, eval.Policy{KeepBest: 1}, seq)
 	if g := rep.Results[1].Group; g.Rank != 1 || g.By != "model" || g.Strength != "moment" || len(needsRanking(rep)) != 0 {
 		t.Fatalf("L002 back at rank 1 from the stored order: %+v needs %v", g, needsRanking(rep))
+	}
+}
+
+// A frame culled at rank time was never compared. Loosening the policy makes it
+// rankable, so the set falls back to scores and needs ranking, but the paid order
+// stays in the report; tightening again brings the model's ranks back.
+func TestUncoveredSetKeepsPaidOrderForLater(t *testing.T) {
+	rep := setReport(t, 9, 9, 9)
+	rep.Results[0].Evaluation.People = eval.People{Present: true, Eyes: "closed"}
+	strict, loose := eval.Policy{KeepBest: 1, EyesClosed: eval.ActionCull}, eval.Policy{KeepBest: 1}
+	decideAll(rep, strict, seq) // L001 culled: ranked without it
+	rep.Sets[0].Order = []string{"/s/L003.DNG", "/s/L002.DNG"}
+	rep.Sets[0].Notes = []report.RankNote{{File: "/s/L003.DNG", Strength: "moment", Weakness: "tilt"}}
+	rep.Sets[0].By, rep.Sets[0].Summary, rep.Sets[0].CostUSD = "model", "L3 wins", 0.03
+
+	decideAll(rep, loose, seq) // L001 now review, rankable, never compared
+	s := rep.Sets[0]
+	if s.By != "scores" || len(needsRanking(rep)) != 1 || rep.Results[0].Group.Rank != 1 || rep.Results[2].Group.Strength != "" {
+		t.Fatalf("uncovered: ranked by scores and flagged: %+v %+v", s, rep.Results[0].Group)
+	}
+	if len(s.Order) != 2 || s.Order[0] != "/s/L003.DNG" || len(s.Notes) != 1 || s.Summary != "L3 wins" || rep.Cost() != 0.03 {
+		t.Fatalf("the paid order must stay in the report: %+v", s)
+	}
+
+	decideAll(rep, strict, seq)
+	l2, l3 := rep.Results[1], rep.Results[2]
+	if rep.Sets[0].By != "model" || len(needsRanking(rep)) != 0 || l3.Group.Rank != 1 || l3.Group.Strength != "moment" || l2.Group.Rank != 2 {
+		t.Fatalf("covered again: the model's ranks are back: %+v %+v %+v", rep.Sets[0], l3.Group, l2.Group)
+	}
+	if why := strings.Join(l2.Reasons, ";"); l2.Decision != eval.Review || !strings.Contains(why, "rank 2 of 2 in set 1 (keeping the best 1)") {
+		t.Fatalf("L002 outranked by the model: %s %s", l2.Decision, why)
 	}
 }
 

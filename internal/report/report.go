@@ -60,8 +60,9 @@ func (g *Group) UnmarshalJSON(b []byte) error {
 }
 
 // Set is one sequence of similar frames. Members (capture order) and Order hold
-// Result.File paths; Order is the model's ranking of the members it compared,
-// empty until ranked.
+// Result.File paths. Order is the model's ranking of the members it compared,
+// empty if never ranked. The set is ranked only when By is "model": a member the
+// model never compared makes it By "scores" while its Order is kept for later.
 type Set struct {
 	ID      int        `json:"id"`
 	Members []string   `json:"members"`

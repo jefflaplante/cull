@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -42,7 +43,8 @@ func Decide(reportPath string, o DecideOptions, log io.Writer) (DecideSummary, e
 	if err != nil {
 		return DecideSummary{Changed: map[string]int{}}, err
 	}
-	if n := fillLooks(rep); n > 0 {
+	// Decide takes no context yet, so this can't be interrupted (Task 10: thread cmd.Context()).
+	if n, _ := fillLooks(context.Background(), rep); n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
 	}
 	sum, err := redecide(rep, o, log, nil)

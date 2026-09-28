@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"image/jpeg"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,8 +131,8 @@ func TestRankReadsFramesWhereTheyLiveAndFillsLooks(t *testing.T) {
 	for i := range rep.Results {
 		rep.Results[i].Look = ""
 	}
-	if n := fillLooks(rep); n != 2 || rep.Results[0].Look == "" {
-		t.Fatalf("filled %d", n)
+	if n, err := fillLooks(context.Background(), rep); n != 2 || err != nil || rep.Results[0].Look == "" {
+		t.Fatalf("filled %d, %v", n, err)
 	}
 	_ = c
 }
@@ -176,8 +178,101 @@ func TestRankImagesSizesAndMovedFrames(t *testing.T) {
 
 	rep.Results[0] = r
 	rep.Results[0].Look, rep.Results[1].Look = "", ""
-	if n := fillLooks(rep); n != 2 || rep.Results[0].Look == "" {
-		t.Fatalf("filled %d, the moved frame too", n)
+	if n, err := fillLooks(context.Background(), rep); n != 2 || err != nil || rep.Results[0].Look == "" {
+		t.Fatalf("filled %d (%v), the moved frame too", n, err)
+	}
+}
+
+// Ctrl-C (a cancelled context) reaches the rank stage's image work: no frame is
+// decoded once it is cancelled, and cull rank returns the cancellation.
+func TestRankImageWorkHonoursCancel(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	j := &setRank{set: &rep.Sets[0], files: rep.Sets[0].Members}
+	byFile := map[string]int{}
+	for i, r := range rep.Results {
+		byFile[r.File] = i
+	}
+	if err := loadRankImages(ctx, rep, c, []*setRank{j}, byFile); !errors.Is(err, context.Canceled) {
+		t.Fatalf("loadRankImages: %v", err)
+	}
+	for pos, f := range j.frames {
+		if f.Full != nil {
+			t.Fatalf("frame %d decoded after cancel", pos)
+		}
+	}
+
+	for i := range rep.Results { // a v3 report: looks to compute
+		rep.Results[i].Look = ""
+	}
+	if n, err := fillLooks(ctx, rep); n != 0 || !errors.Is(err, context.Canceled) || rep.Results[0].Look != "" {
+		t.Fatalf("fillLooks: %d, %v", n, err)
+	}
+	if err := rep.Save(c.ReportPath); err != nil {
+		t.Fatal(err)
+	}
+	b := &rankBackend{order: reverse}
+	if _, err := Rank(ctx, c, b, false); !errors.Is(err, context.Canceled) || b.calls != 0 {
+		t.Fatalf("rank: %v, %d calls", err, b.calls)
+	}
+	if _, err := report.Load(c.ReportPath); err != nil {
+		t.Fatalf("report after a cancelled rank: %v", err)
+	}
+}
+
+// A resumed judge keeps the stored rankings and what they cost: an unchanged set
+// is not ranked again, and rank_cost_usd carries over.
+func TestResumeKeepsRankingsAndRankCost(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 3; i++ {
+		texturedDNG(t, filepath.Join(dir, fmt.Sprintf("L%07d.DNG", i)))
+	}
+	odd := image.NewGray(image.Rect(0, 0, 1600, 1067)) // upper half white: L4 is in no set
+	for i := range odd.Pix[:len(odd.Pix)/2] {
+		odd.Pix[i] = 255
+	}
+	dngWith(t, filepath.Join(dir, "L0000004.DNG"), odd)
+	c := moveCfg(dir)
+	c.MoveCulled, c.WriteXMP, c.Rank = false, false, true
+	c.Seq = group.Options{Gap: time.Minute, MaxLook: group.DefaultLook}
+	c.Policy.KeepBest, c.Policy.Outranked = 1, eval.ActionReview
+	p := llm.Price{In: 2, Out: 10}
+	c.Price = &p
+	b := &judgeRankBackend{fakeBackend: fakeBackend{status: "sharp"}, rank: rankBackend{order: reverse}}
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := report.Load(c.ReportPath)
+	if err != nil || len(rep.Sets) != 1 || len(rep.Sets[0].Members) != 3 || rep.Sets[0].By != "model" || rep.RankCostUSD == 0 || b.rank.calls != 1 {
+		t.Fatalf("setup: %v %+v, %d rank calls", err, rep.Sets, b.rank.calls)
+	}
+	rankCost := rep.RankCostUSD
+	for i := range rep.Results { // L4 failed (say its preview was unreadable): resume retries it
+		if r := &rep.Results[i]; filepath.Base(r.File) == "L0000004.DNG" {
+			r.Error, r.Evaluation, r.Decision, r.CostUSD, r.Usage = "preview: simulated", nil, "", 0, eval.Usage{}
+		}
+	}
+	if err := rep.Save(c.ReportPath); err != nil {
+		t.Fatal(err)
+	}
+	before := rep.Cost()
+
+	c.Resume = true
+	rep2, _, err := Run(context.Background(), c, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.rank.calls != 1 {
+		t.Fatalf("resume ranked the unchanged set again: %d rank calls", b.rank.calls)
+	}
+	if rep2.RankCostUSD != rankCost || len(rep2.Sets) != 1 || rep2.Sets[0].By != "model" || rep2.KeepBest != 1 {
+		t.Fatalf("resumed report: rank cost %v (want %v), sets %+v, keep best %d", rep2.RankCostUSD, rankCost, rep2.Sets, rep2.KeepBest)
+	}
+	l4 := result(t, rep2, "L0000004.DNG")
+	if l4.Error != "" || l4.CostUSD == 0 || math.Abs(rep2.Cost()-(before+l4.CostUSD)) > 1e-12 {
+		t.Fatalf("cost %v, want %v + L4's %v", rep2.Cost(), before, l4.CostUSD)
 	}
 }
 

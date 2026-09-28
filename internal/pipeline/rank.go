@@ -154,13 +154,18 @@ func decodeWhereItLives(r report.Result) (*imageprep.Frame, error) {
 
 // fillLooks computes the look of every measured frame that has none (a schema-v3
 // report) from its preview, read from where the frame lives now. A frame that
-// can't be read keeps none, so it joins no set. It returns how many it filled.
-func fillLooks(rep *report.Report) int {
+// can't be read keeps none, so it joins no set. It returns how many it filled; once
+// ctx is cancelled it stops between frames with ctx's error, leaving the rest
+// without a look (which decideAll takes: they join no set).
+func fillLooks(ctx context.Context, rep *report.Report) (int, error) {
 	n := 0
 	for i := range rep.Results {
 		r := &rep.Results[i]
 		if r.Look != "" || r.Error != "" || r.Preview == nil {
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return n, err
 		}
 		f, err := decodeWhereItLives(*r)
 		if err != nil {
@@ -169,7 +174,7 @@ func fillLooks(rep *report.Report) int {
 		r.Look = report.EncodeLook(f.Grid(group.LookSize))
 		n++
 	}
-	return n
+	return n, nil
 }
 
 // Rank ranks an existing report's sets without judging again (cull rank). It loads
@@ -188,8 +193,15 @@ func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.R
 	if err != nil {
 		return nil, err
 	}
-	if n := fillLooks(rep); n > 0 {
+	n, err := fillLooks(ctx, rep)
+	if n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
+	}
+	if err != nil { // Ctrl-C: keep the looks computed so far (free but slow); decide and rank nothing
+		if n > 0 {
+			err = errors.Join(err, rep.Save(cfg.ReportPath))
+		}
+		return rep, err
 	}
 	o := DecideOptions{Policy: cfg.Policy, WriteXMP: cfg.WriteXMP, XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP,
 		MoveCulled: cfg.MoveCulled, Seq: cfg.Seq, Labels: cfg.Labels}
@@ -310,7 +322,9 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 		}
 		jobs = append(jobs, j)
 	}
-	loadRankImages(rep, cfg, jobs, byFile)
+	if err := loadRankImages(ctx, rep, cfg, jobs, byFile); err != nil {
+		return llm.Usage{}, err // cancelled before any call: nothing spent, no set touched
+	}
 
 	// Round 1.
 	var calls []rankCall
@@ -481,11 +495,15 @@ func finalPositions(parts, orders [][]int, keepBest int) []int {
 }
 
 // loadRankImages reads every frame the wave's sets send, cfg.Concurrency frames at
-// a time: each decode holds a full-resolution preview.
-func loadRankImages(rep *report.Report, cfg Config, jobs []*setRank, byFile map[string]int) {
+// a time: each decode holds a full-resolution preview. Once ctx is cancelled no
+// further frame is decoded (those in progress finish) and it returns ctx's error.
+func loadRankImages(ctx context.Context, rep *report.Report, cfg Config, jobs []*setRank, byFile map[string]int) error {
 	type item struct {
 		j   *setRank
 		pos int
+	}
+	for _, j := range jobs {
+		j.frames = make([]eval.RankFrame, len(j.files))
 	}
 	var mu sync.Mutex
 	items := make(chan item)
@@ -495,6 +513,9 @@ func loadRankImages(rep *report.Report, cfg Config, jobs []*setRank, byFile map[
 		go func() {
 			defer wg.Done()
 			for it := range items {
+				if ctx.Err() != nil {
+					continue // drain
+				}
 				f := it.j.files[it.pos]
 				rf, err := rankImages(rep.Results[byFile[f]])
 				mu.Lock()
@@ -506,15 +527,19 @@ func loadRankImages(rep *report.Report, cfg Config, jobs []*setRank, byFile map[
 			}
 		}()
 	}
+send:
 	for _, j := range jobs {
-		j.frames = make([]eval.RankFrame, len(j.files))
 		if j.err != nil {
 			continue
 		}
 		for pos := range j.files {
+			if ctx.Err() != nil {
+				break send
+			}
 			items <- item{j, pos}
 		}
 	}
 	close(items)
 	wg.Wait()
+	return ctx.Err()
 }

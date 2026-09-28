@@ -3,13 +3,11 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/jefflaplante/gophotocull/internal/config"
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/llm"
 	"github.com/jefflaplante/gophotocull/internal/pipeline"
@@ -17,27 +15,21 @@ import (
 )
 
 type cullOpts struct {
-	backend       string
-	model         string
-	apiKeyFile    string
-	baseURL       string
-	openaiKeyFile string
-	openaiStream  bool
-	claudeBin     string
-	quotaStop     float64
-	locate        string
-	concurrency   int
-	resume        bool
-	writeXMP      bool
-	xmpDevelop    bool
-	overwriteXMP  bool
-	moveCulled    bool
-	noLabels      bool
-	rawClip       bool
-	batch         bool
-	batchPoll     time.Duration
-	estimate      bool
-	maxCost       float64
+	backendFlags
+	locate       string
+	concurrency  int
+	resume       bool
+	writeXMP     bool
+	xmpDevelop   bool
+	overwriteXMP bool
+	moveCulled   bool
+	noLabels     bool
+	rawClip      bool
+	batch        bool
+	batchPoll    time.Duration
+	estimate     bool
+	maxCost      float64
+	noRank       bool
 
 	escalateBackend string
 	escalateModel   string
@@ -58,6 +50,11 @@ tiles) to the model and applies the policy:
   sharpness  missed_focus | motion_blur -> cull, soft -> review
   exposure   fixable -> suggested EV; clipped in preview -> review
   composition never culls; crops retaining < --min-crop-area are dropped
+
+Frames judged similar (a sequence: --seq-gap, --seq-look) are grouped into a set and,
+once every frame in it is judged, ranked with one model call (more for large sets,
+chunked and merged): the --keep-best best of each set keep their decision, the rest
+get --outranked. --no-rank skips ranking (run it later with 'cull rank').
 
 Backends (--backend):
   anthropic    Messages API; key from --api-key-file, $ANTHROPIC_API_KEY, then
@@ -86,11 +83,8 @@ Backends (--backend):
 			if o.concurrency < 0 {
 				return fmt.Errorf("--concurrency must be >= 0 (0 = backend default)")
 			}
-			if _, ok := backendDefaults[o.backend]; !ok {
-				return fmt.Errorf("unknown --backend %q (want anthropic, claude-code, or openai)", o.backend)
-			}
-			if o.backend == "openai" && o.model == "" {
-				return fmt.Errorf("--backend openai requires --model (see GET <base-url>/models)")
+			if err := o.backendFlags.validate(); err != nil {
+				return err
 			}
 			if o.batch && o.backend != "anthropic" {
 				return fmt.Errorf("--batch uses the Message Batches API: --backend anthropic only")
@@ -114,9 +108,6 @@ Backends (--backend):
 			if o.maxCost < 0 {
 				return fmt.Errorf("--max-cost must be >= 0")
 			}
-			if o.quotaStop <= 0 || o.quotaStop > 1 {
-				return fmt.Errorf("--quota-stop must be in (0, 1]")
-			}
 			if o.locate != "model" && o.locate != "off" {
 				return fmt.Errorf("--locate must be model or off")
 			}
@@ -136,7 +127,7 @@ Backends (--backend):
 				if err != nil {
 					return err
 				}
-				printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch)
+				printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch, !o.noRank)
 				if o.estimate {
 					return nil
 				}
@@ -157,10 +148,7 @@ Backends (--backend):
 			cfg.Backend = b.Name()
 			cfg.Model = o.model
 			cfg.Locate = o.locate == "model"
-			cfg.Concurrency = o.concurrency
-			if cfg.Concurrency == 0 {
-				cfg.Concurrency = backendDefaults[o.backend].concurrency
-			}
+			cfg.Concurrency = o.backendFlags.concurrencyOrDefault(o.concurrency)
 			cfg.Resume = o.resume
 			cfg.WriteXMP = o.writeXMP
 			cfg.XMPDevelop = o.xmpDevelop
@@ -174,6 +162,7 @@ Backends (--backend):
 			cfg.RawClip = o.rawClip
 			cfg.Policy, _ = o.policy.policy() // validated in PreRunE
 			cfg.CheckpointN = o.checkpoint
+			cfg.Rank = !o.noRank
 
 			var rep *report.Report
 			var usage eval.Usage
@@ -194,14 +183,7 @@ Backends (--backend):
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.backend, "backend", "anthropic", "model backend: anthropic, claude-code, or openai")
-	f.StringVarP(&o.model, "model", "m", "", "model (default claude-sonnet-5 for anthropic, sonnet for claude-code; required for openai)")
-	f.StringVar(&o.apiKeyFile, "api-key-file", "", "file containing the Anthropic API key")
-	f.StringVar(&o.baseURL, "base-url", "http://127.0.0.1:8000/v1", "OpenAI-compatible endpoint (openai backend)")
-	f.StringVar(&o.openaiKeyFile, "openai-key-file", "", "file containing a key for the openai backend (optional)")
-	f.BoolVar(&o.openaiStream, "openai-stream", true, "stream and hang up once the JSON closes (openai backend)")
-	f.StringVar(&o.claudeBin, "claude-bin", "claude", "Claude Code executable (claude-code backend)")
-	f.Float64Var(&o.quotaStop, "quota-stop", 0.9, "stop when this fraction of the 5-hour subscription window is used (claude-code backend)")
+	o.backendFlags.register(f)
 	f.StringVar(&o.escalateBackend, "escalate-backend", "", "re-evaluate doubtful frames on a second backend (anthropic, claude-code, openai)")
 	f.StringVar(&o.escalateModel, "escalate-model", "", "model for --escalate-backend (required with it)")
 	f.StringVar(&o.escalateOnList, "escalate-on", "soft,missed_focus,motion_blur,eyes_closed", "first-pass outcomes that escalate")
@@ -218,60 +200,11 @@ Backends (--backend):
 	f.BoolVar(&o.overwriteXMP, "overwrite-xmp", false, "overwrite existing sidecars (default: never clobber)")
 	f.BoolVar(&o.noLabels, "no-labels", false, "ignore your labels (cull-labels.jsonl beside the report): moves and sidecar rewrites follow the model's verdicts")
 	f.BoolVar(&o.moveCulled, "move-culled", false, "move frames decided cull (with their .xmp) into a culled/ folder beside them; undo with 'cull restore'. Use before importing into Capture One")
+	f.BoolVar(&o.noRank, "no-rank", false, "after judging, don't rank the sets that need it (run 'cull rank' separately later)")
 	o.policy.register(f)
 	f.IntVar(&o.checkpoint, "checkpoint", 25, "save the report every N results")
 	cmd.MarkFlagFilename("api-key-file")
 	return cmd
-}
-
-type backendDefault struct {
-	model       string
-	concurrency int
-	basis       string // how the token counts relate to money
-}
-
-var backendDefaults = map[string]backendDefault{
-	"anthropic":   {"claude-sonnet-5", 4, "API-billed"},
-	"claude-code": {"sonnet", 2, "subscription, not billed per token"},
-	"openai":      {"", 4, "OpenAI-compatible server"},
-}
-
-// newBackend builds the selected backend and describes its credential source
-// without ever printing a key.
-func (o *cullOpts) newBackend(cmd *cobra.Command) (llm.Backend, string, error) {
-	if o.model == "" {
-		o.model = backendDefaults[o.backend].model
-	}
-	return o.buildBackend(cmd, o.backend, o.model)
-}
-
-// buildBackend constructs a backend and describes its credential source without
-// ever printing a key.
-func (o *cullOpts) buildBackend(cmd *cobra.Command, name, model string) (llm.Backend, string, error) {
-	switch name {
-	case "claude-code":
-		path, err := exec.LookPath(o.claudeBin)
-		if err != nil {
-			return nil, "", fmt.Errorf("claude binary %q not found: %w", o.claudeBin, err)
-		}
-		return llm.NewClaudeCode(path, model, o.quotaStop), "auth: Claude subscription via " + path, nil
-	case "openai":
-		key, source, warnings, err := config.LoadOpenAIKey(o.openaiKeyFile)
-		if err != nil {
-			return nil, "", err
-		}
-		warn(cmd, warnings)
-		b := llm.NewOpenAI(o.baseURL, key, model)
-		b.Stream = o.openaiStream
-		return b, "endpoint: " + b.BaseURL + ", key: " + source, nil
-	default:
-		key, source, warnings, err := config.LoadAPIKey(o.apiKeyFile)
-		if err != nil {
-			return nil, "", err
-		}
-		warn(cmd, warnings)
-		return llm.NewAnthropic(key, model), "api key: " + source, nil
-	}
 }
 
 // escalateOn are the first-pass outcomes --escalate-on accepts.
@@ -296,8 +229,14 @@ func (o *cullOpts) escalation(cmd *cobra.Command) (*pipeline.Escalation, error) 
 	return e, nil
 }
 
-// printEstimate projects list- or batch-price cost from measured per-frame token use.
-func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch bool) {
+// printEstimate projects list- or batch-price cost from measured per-frame token
+// use, and, when rank is set (judge without --no-rank) and the backend is priced,
+// a rough ranking cost: ⌈n/8⌉ calls, at 10k in / 1k out each. That's the call
+// count if every frame lands in a full 8-frame set — neither a bound nor exact,
+// since actual set sizes aren't known before judging: a pair still costs one
+// call (more per frame than a full set), and a frame that joins no set costs
+// nothing. It's a ballpark, not a gate.
+func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch, rank bool) {
 	w := cmd.ErrOrStderr()
 	if !priced {
 		fmt.Fprintf(w, "estimate: %d frames on %s (%s): no per-token cost (%s)\n", n, backend, model, backendDefaults[backend].basis)
@@ -305,6 +244,11 @@ func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price
 	}
 	usd, in, out := llm.Estimate(n, p, batch)
 	fmt.Fprintf(w, "estimate: %d frames × ~7k in / ~1k out tokens ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", n, in, out, usd, rate(batch), model)
+	if rank && n > 0 {
+		calls := (n + 7) / 8
+		rusd, _, _ := llm.EstimateRank(calls, p, batch)
+		fmt.Fprintf(w, "ranking ≈ %d call(s), $%.2f at %s, if every frame lands in an 8-frame set (pairs cost more per frame; frames in no set cost nothing)\n", calls, rusd, rate(batch))
+	}
 }
 
 // rate names the price basis that llm.Price.Cost applied.
@@ -313,12 +257,6 @@ func rate(batch bool) string {
 		return "batch price (50%)"
 	}
 	return "list price"
-}
-
-func warn(cmd *cobra.Command, warnings []string) {
-	for _, w := range warnings {
-		fmt.Fprintln(cmd.ErrOrStderr(), "warning:", w)
-	}
 }
 
 func runPipeline(cmd *cobra.Command, cfg pipeline.Config, b llm.Backend) (*report.Report, eval.Usage, error) {

@@ -27,3 +27,14 @@ func TestPricing(t *testing.T) {
 		t.Fatalf("estimate: $%v in=%d out=%d", usd, in, out)
 	}
 }
+
+func TestEstimateRank(t *testing.T) {
+	p, _ := PriceFor("anthropic", "claude-sonnet-5")
+	usd, in, out := EstimateRank(3, p, false)
+	if in != 30_000 || out != 3_000 || math.Abs(usd-0.09) > 1e-9 {
+		t.Fatalf("estimate rank: $%v in=%d out=%d", usd, in, out)
+	}
+	if usd2, _, _ := EstimateRank(3, p, true); math.Abs(usd2-usd/2) > 1e-9 {
+		t.Fatalf("batch rank estimate should be half: %v vs %v", usd2, usd)
+	}
+}

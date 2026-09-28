@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,7 +35,7 @@ func culledShoot(t *testing.T, mutate func(*Config)) (dir string, c Config) {
 
 func TestDecideReappliesPolicyWithoutModel(t *testing.T) {
 	_, c := culledShoot(t, nil)
-	sum, err := Decide(c.ReportPath, DecideOptions{Policy: eval.Policy{MinCropArea: 0.6, ReviewBelowSharpness: 9}}, io.Discard)
+	sum, err := Decide(context.Background(), c.ReportPath, DecideOptions{Policy: eval.Policy{MinCropArea: 0.6, ReviewBelowSharpness: 9}}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +54,7 @@ func TestDecideRewritesOnlyOurSidecars(t *testing.T) {
 	os.WriteFile(foreign, []byte("foreign"), 0o644)
 
 	opts := DecideOptions{Policy: eval.Policy{MinCropArea: 0.6}, WriteXMP: true}
-	if _, err := Decide(c.ReportPath, opts, io.Discard); err != nil {
+	if _, err := Decide(context.Background(), c.ReportPath, opts, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	l2 := filepath.Join(dir, "L1000002.xmp")
@@ -61,7 +62,7 @@ func TestDecideRewritesOnlyOurSidecars(t *testing.T) {
 		t.Fatalf("keep sidecar: green, and no stars from the model:\n%s", b)
 	}
 	opts.Policy.ReviewBelowSharpness = 9 // L2 becomes review
-	if _, err := Decide(c.ReportPath, opts, io.Discard); err != nil {
+	if _, err := Decide(context.Background(), c.ReportPath, opts, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(l2); !strings.Contains(string(b), `xmp:Label="Yellow"`) {
@@ -93,7 +94,7 @@ func TestDecideSyncsMovedFrames(t *testing.T) {
 	}
 	rep.Save(c.ReportPath)
 
-	sum, err := Decide(c.ReportPath, DecideOptions{Policy: eval.Policy{MinCropArea: 0.6, EyesClosed: eval.ActionCull}, MoveCulled: true}, io.Discard)
+	sum, err := Decide(context.Background(), c.ReportPath, DecideOptions{Policy: eval.Policy{MinCropArea: 0.6, EyesClosed: eval.ActionCull}, MoveCulled: true}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +113,72 @@ func TestDecideNeedsEvaluations(t *testing.T) {
 	if _, _, err := Run(context.Background(), c, b); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Decide(c.ReportPath, DecideOptions{}, io.Discard); err == nil || !strings.Contains(err.Error(), "no evaluations") {
+	if _, err := Decide(context.Background(), c.ReportPath, DecideOptions{}, io.Discard); err == nil || !strings.Contains(err.Error(), "no evaluations") {
 		t.Fatalf("scan report: %v", err)
+	}
+}
+
+// cancelAfter reports its context as cancelled starting with the (max+1)th call
+// to Err(), so a caller like fillLooks that checks Err() once per item can be
+// stopped after processing exactly max items, deterministically.
+type cancelAfter struct {
+	context.Context
+	n   int32
+	max int32
+}
+
+func (c *cancelAfter) Err() error {
+	if atomic.AddInt32(&c.n, 1) > c.max {
+		return context.Canceled
+	}
+	return nil
+}
+
+// Ctrl-C during decide's look computation (a v3 report) must stop before
+// redecide runs: no sidecar written, nothing moved, and the report saved with
+// only the looks computed before cancellation.
+func TestDecideStopsOnCancelledContextBeforeMovingAnything(t *testing.T) {
+	dir, c := culledShoot(t, nil)
+	rep, err := report.Load(c.ReportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.SchemaVersion = 3
+	for i := range rep.Results {
+		rep.Results[i].Look = "" // simulate a v3 report: no look computed yet
+	}
+	if err := rep.Save(c.ReportPath); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := &cancelAfter{Context: context.Background(), max: 1} // let exactly one look fill, then cancel
+	sum, err := Decide(ctx, c.ReportPath, DecideOptions{Policy: c.Policy, WriteXMP: true, MoveCulled: true}, io.Discard)
+	if err == nil {
+		t.Fatal("want an error from the cancelled context")
+	}
+	if sum.Frames != 0 || len(sum.Changed) != 0 {
+		t.Fatalf("decide must not have run: %+v", sum)
+	}
+	if exists(filepath.Join(dir, "culled")) {
+		t.Fatal("nothing should have moved")
+	}
+	for _, n := range []string{"L1000001", "L1000002", "L1000003"} {
+		if exists(filepath.Join(dir, n+".xmp")) {
+			t.Fatalf("no sidecar should have been written: %s", n)
+		}
+	}
+	saved, err := report.Load(c.ReportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := 0
+	for _, r := range saved.Results {
+		if r.Look != "" {
+			got++
+		}
+	}
+	if got != 1 {
+		t.Fatalf("looks computed so far: got %d, want exactly 1 kept", got)
 	}
 }
 
@@ -152,7 +217,7 @@ func TestSequenceOutrankedGoToReviewAndDecideCanCullThem(t *testing.T) {
 		}
 	}
 
-	sum, err := Decide(c.ReportPath, DecideOptions{
+	sum, err := Decide(context.Background(), c.ReportPath, DecideOptions{
 		Policy: eval.Policy{MinCropArea: 0.6, KeepBest: 1, Outranked: eval.ActionCull}, Seq: c.Seq,
 	}, io.Discard)
 	if err != nil || sum.Changed["review→cull"] != 2 {
@@ -387,7 +452,7 @@ func TestMovedForeignSidecarStaysForeign(t *testing.T) {
 	}
 	moved := filepath.Join(dir, "culled", "L1000001.xmp")
 	opts := DecideOptions{Policy: eval.Policy{MinCropArea: 0.6}, WriteXMP: true}
-	if _, err := Decide(c.ReportPath, opts, io.Discard); err != nil {
+	if _, err := Decide(context.Background(), c.ReportPath, opts, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(moved); string(got) != "foreign" {
@@ -396,7 +461,7 @@ func TestMovedForeignSidecarStaysForeign(t *testing.T) {
 	if _, err := Restore(c.ReportPath, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Decide(c.ReportPath, opts, io.Discard); err != nil {
+	if _, err := Decide(context.Background(), c.ReportPath, opts, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(foreign); string(got) != "foreign" {
@@ -407,7 +472,7 @@ func TestMovedForeignSidecarStaysForeign(t *testing.T) {
 func TestDecideLabelsDriveSidecarsAndMoves(t *testing.T) {
 	dir, c := culledShoot(t, nil) // model: L1 cull, L2 keep, L3 review
 	pol := eval.Policy{MinCropArea: 0.6}
-	if _, err := Decide(c.ReportPath, DecideOptions{Policy: pol, MoveCulled: true}, io.Discard); err != nil {
+	if _, err := Decide(context.Background(), c.ReportPath, DecideOptions{Policy: pol, MoveCulled: true}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, CulledDir, "L1000001.DNG")); err != nil {
@@ -418,7 +483,7 @@ func TestDecideLabelsDriveSidecarsAndMoves(t *testing.T) {
 		"L1000002.DNG": {File: "L1000002.DNG", Label: "cull"}, // and cull a model keep
 		"L1000003.DNG": {File: "L1000003.DNG", Stars: 5},      // stars only: the model's review stands
 	}
-	if _, err := Decide(c.ReportPath, DecideOptions{Policy: pol, WriteXMP: true, MoveCulled: true, Labels: lab}, io.Discard); err != nil {
+	if _, err := Decide(context.Background(), c.ReportPath, DecideOptions{Policy: pol, WriteXMP: true, MoveCulled: true, Labels: lab}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "L1000001.DNG")); err != nil {
@@ -457,7 +522,7 @@ func TestLabelsWithDuplicateNames(t *testing.T) {
 	rep.Save(rp)
 	lab := map[string]labels.Entry{"L1.DNG": {File: "L1.DNG", Label: "keep"}}
 	// decide refuses: a label couldn't say which frame it means.
-	if _, err := Decide(rp, DecideOptions{Labels: lab, MoveCulled: true}, io.Discard); err == nil || !strings.Contains(err.Error(), "share a file name") {
+	if _, err := Decide(context.Background(), rp, DecideOptions{Labels: lab, MoveCulled: true}, io.Discard); err == nil || !strings.Contains(err.Error(), "share a file name") {
 		t.Fatalf("decide: %v", err)
 	}
 	if exists(filepath.Join(dir, "a", CulledDir, "L1.DNG")) || exists(filepath.Join(dir, "b", CulledDir, "L1.DNG")) {

@@ -79,6 +79,9 @@ func Script(rep *report.Report, o Options) string {
 			if yours {
 				kws = append(kws, "cull:labeled")
 			}
+			if r.Group != nil && r.Group.Best {
+				kws = append(kws, "cull:best")
+			}
 			for _, kw := range kws {
 				fmt.Fprintf(&b, "\t\t\tset k to my ensureKeyword(doc, %s)\n", quote(kw))
 				b.WriteString("\t\t\tif k is not missing value then apply keyword k to {v}\n")

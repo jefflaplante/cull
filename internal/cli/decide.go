@@ -47,7 +47,7 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 			if err != nil {
 				return err
 			}
-			sum, err := pipeline.Decide(cfg.ReportPath, pipeline.DecideOptions{
+			sum, err := pipeline.Decide(cmd.Context(), cfg.ReportPath, pipeline.DecideOptions{
 				Policy: p, WriteXMP: writeXMP, XMPDevelop: xmpDevelop, OverwriteXMP: overwrite, MoveCulled: moveC,
 				Seq: cfg.Seq, Labels: lab,
 			}, cmd.ErrOrStderr())

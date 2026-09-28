@@ -260,10 +260,12 @@ ul { margin: 4px 0 0; padding-left: 18px; }
           const b = el("button", { cls: "strip-thumb" + (m.file === c.file ? " current" : ""), title: m.file, type: "button" },
             img(m.thumb, m.file) || el("span", { cls: "empty", text: "no preview" }));
           b.onclick = () => {
+            const wasPinned = pinned;
+            pinned = -1; // a stale pinned frame must not skew visible()'s indices
             const now = visible();
             const idx = now.findIndex(x => cards[x].file === m.file);
-            if (idx < 0) return;
-            sel = idx; pinned = -1; detailOpen = true; render();
+            if (idx < 0) { pinned = wasPinned; return; } // not visible under the current filters: no-op
+            sel = idx; detailOpen = true; render();
           };
           return b;
         }));

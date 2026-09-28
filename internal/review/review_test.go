@@ -138,6 +138,35 @@ func TestPageIncludesSetRankAndSummary(t *testing.T) {
 	}
 }
 
+// TestPageOmitsStaleSummaryForScoresSets checks that a set which fell back to
+// by-scores ranking never shows a summary carried over from an earlier model
+// ranking: strength/weakness are already blanked for such sets (groups.go), and
+// the summary must be too.
+func TestPageOmitsStaleSummaryForScoresSets(t *testing.T) {
+	dir := t.TempDir()
+	rep := &report.Report{Dir: dir, KeepBest: 1, Results: []report.Result{
+		{File: filepath.Join(dir, "L1.DNG"), Group: &report.Group{ID: 1, Size: 2, Rank: 1, Of: 2, By: "scores", Best: true}},
+		{File: filepath.Join(dir, "L2.DNG"), Group: &report.Group{ID: 1, Size: 2, Rank: 2, Of: 2, By: "scores", Best: false}},
+	}, Sets: []report.Set{
+		{ID: 1, Members: []string{"L1.DNG", "L2.DNG"}, Of: 2, By: "scores", Summary: "stale: L1 was the model's pick last time"},
+	}}
+	sheet, err := Build(rep, filepath.Join(dir, "r.json"), Options{Out: t.TempDir(), Concurrency: 1}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(sheet.Index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(b)
+	if strings.Contains(page, "stale: L1 was the model's pick last time") {
+		t.Error("page shows a summary carried over into a set that fell back to by-scores ranking")
+	}
+	if strings.Contains(page, `"set_summary"`) {
+		t.Error("page has a set_summary field for a by-scores set")
+	}
+}
+
 func TestBuildMovesLooseImagesIntoAssets(t *testing.T) {
 	dir, out := t.TempDir(), t.TempDir()
 	f := filepath.Join(dir, "L1.DNG")

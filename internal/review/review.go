@@ -140,10 +140,13 @@ func makeCard(rep *report.Report, r report.Result, o Options, log io.Writer) car
 	}
 	if r.Group != nil {
 		for _, s := range rep.Sets {
-			if s.ID == r.Group.ID {
-				c.SetSummary = s.Summary
-				break
+			if s.ID != r.Group.ID {
+				continue
 			}
+			if s.By == "model" { // a by-scores set can carry a stale summary from an earlier model ranking
+				c.SetSummary = s.Summary
+			}
+			break
 		}
 	}
 	if r.Exif != nil {

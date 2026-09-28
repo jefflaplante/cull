@@ -13,7 +13,7 @@ import (
 func TestSchemaV4RoundTrip(t *testing.T) {
 	look := make([]uint8, 192)
 	look[5] = 200
-	r := &Report{SchemaVersion: SchemaVersion, KeepBest: 3,
+	r := &Report{SchemaVersion: SchemaVersion, KeepBest: 3, RankCostUSD: 0.04, // an earlier ranking of a set since dissolved: $0.01
 		Results: []Result{{File: "/s/L1.DNG", Look: EncodeLook(look), CostUSD: 0.02,
 			Group: &Group{ID: 1, Size: 2, Rank: 1, Of: 2, By: "model", Best: true, Strength: "eyes", Weakness: "tilt"}}},
 		Sets: []Set{{ID: 1, Members: []string{"/s/L1.DNG", "/s/L2.DNG"}, Of: 2, Order: []string{"/s/L1.DNG", "/s/L2.DNG"},
@@ -33,8 +33,10 @@ func TestSchemaV4RoundTrip(t *testing.T) {
 	if !got.Results[0].Group.Best || got.Results[0].Group.By != "model" {
 		t.Fatalf("group: %+v", got.Results[0].Group)
 	}
-	if c := got.Cost(); c < 0.0499 || c > 0.0501 {
-		t.Fatalf("cost includes sets: %v", c)
+	// Ranking spend counts from rank_cost_usd, which nothing drops; the sets' cost_usd
+	// is per-set information and isn't added again.
+	if c := got.Cost(); got.RankCostUSD != 0.04 || c < 0.0599 || c > 0.0601 {
+		t.Fatalf("cost = results + rank_cost_usd: %v (rank %v)", c, got.RankCostUSD)
 	}
 }
 

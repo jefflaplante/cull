@@ -187,7 +187,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 		rep.Results = append(rep.Results, f.Result)
 		fmt.Fprintf(cfg.Log, "%s\n", summarize(f.Result))
 	}
-	if err := finishRun(rep, cfg); err != nil {
+	if _, err := finishRun(ctx, rep, cfg, nil); err != nil { // cfg.rankWith is nil: no sync ranking here
 		return rep, total, err
 	}
 	os.Remove(statePath) // the report now holds everything

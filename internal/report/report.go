@@ -71,8 +71,8 @@ type Set struct {
 	Notes   []RankNote `json:"notes,omitempty"`
 	Summary string     `json:"summary,omitempty"`
 	By      string     `json:"by"`
-	Usage   eval.Usage `json:"usage"`
-	CostUSD float64    `json:"cost_usd,omitempty"` // list price of the set's rank calls
+	Usage   eval.Usage `json:"usage"`              // the set's rank calls, summed over re-rankings
+	CostUSD float64    `json:"cost_usd,omitempty"` // their list price; Report.RankCostUSD holds the total
 }
 
 // RankNote is the model's note on one ranked frame.
@@ -139,8 +139,11 @@ type Report struct {
 	Model         string    `json:"model"`
 	Dir           string    `json:"dir"`
 	KeepBest      int       `json:"keep_best"` // Policy.KeepBest used at the last judge or decide
-	Results       []Result  `json:"results"`
-	Sets          []Set     `json:"sets,omitempty"`
+	// RankCostUSD is the list price of every rank call made for this report. It only
+	// grows: a regrouping or re-rank can drop a Set, but not what was paid for it.
+	RankCostUSD float64  `json:"rank_cost_usd,omitempty"`
+	Results     []Result `json:"results"`
+	Sets        []Set    `json:"sets,omitempty"`
 }
 
 // EncodeLook stores a look fingerprint compactly.
@@ -155,16 +158,14 @@ func (r Result) LookBytes() ([]uint8, bool) {
 	return b, err == nil && len(b) > 0
 }
 
-// Cost is everything the report's model calls cost at list price.
+// Cost is everything the report's model calls cost at list price: the frames'
+// calls plus every rank call (RankCostUSD; the sets' own CostUSD isn't added again).
 func (r *Report) Cost() float64 {
 	c := 0.0
 	for _, x := range r.Results {
 		c += x.CostUSD
 	}
-	for _, s := range r.Sets {
-		c += s.CostUSD
-	}
-	return c
+	return c + r.RankCostUSD
 }
 
 func Load(path string) (*Report, error) {

@@ -60,7 +60,10 @@ type Config struct {
 	BatchPoll         time.Duration // batch mode: time between status checks
 	BatchChunkBytes   int           // batch mode: max request bytes per batch (0 = 180 MB)
 	Seq               group.Options // sequences of similar frames; Seq.Gap 0 = no grouping
+	Rank              bool          // at the end of the run, rank the sets that need it with the run's backend
+	RankTokens        int           // max output tokens per rank call; 0 = defaultRankTokens
 
+	rankWith    llm.Backend                         // set by Run when Rank: what finishRun ranks with; nil = no ranking
 	detect      func(*imageprep.Frame) []focus.Face // test hook; nil = pigo
 	CheckpointN int
 	Log         io.Writer
@@ -182,7 +185,14 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 			}
 		}
 	}
-	if err := finishRun(rep, cfg); err != nil {
+	// A stopped run (quota, abort, budget, Ctrl-C) makes no more calls: its sets stay
+	// by scores until cull rank.
+	if cfg.Rank && !cfg.DryRun && stopErr == nil && ctx.Err() == nil {
+		cfg.rankWith = b
+	}
+	used, err := finishRun(ctx, rep, cfg, &budget)
+	total.Add(used)
+	if err != nil {
 		return rep, total, err
 	}
 	if stopErr != nil {
@@ -404,6 +414,9 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 					cfg.ReportPath, scan, prev.SchemaVersion, prev.Backend, prev.Model, prev.Escalation,
 					report.SchemaVersion, cfg.Backend, cfg.Model, rep.Escalation)
 			}
+			// Paid rankings carry over: decideAll reuses a stored order while it still
+			// covers its set, and ranking spend never leaves the report.
+			rep.Sets, rep.RankCostUSD, rep.KeepBest = prev.Sets, prev.RankCostUSD, prev.KeepBest
 			for _, r := range prev.Results {
 				if r.Error == "" && (r.Evaluation != nil || cfg.DryRun) {
 					rep.Results = append(rep.Results, r)
@@ -426,17 +439,37 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 }
 
 // finishRun decides sequences (they span frames, so only once everything is in),
-// rewrites our sidecars where that changed a decision, moves culls when asked,
-// and saves the report.
-func finishRun(rep *report.Report, cfg Config) error {
+// ranks the sets that need it when cfg.rankWith is set (charging budget, the run's
+// spend so far) and decides again, rewrites our sidecars where that changed a
+// decision, moves culls when asked, and saves the report. It returns the ranking's
+// usage; a ranking stop (budget, quota) is returned after the report is saved.
+func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spend) (llm.Usage, error) {
 	lab := cfg.Labels
 	if dups := labels.Duplicates(rep.Results); len(lab) > 0 && len(dups) > 0 {
 		fmt.Fprintf(cfg.Log, "warning: frames share a file name, so your labels can't tell them apart; sidecars and moves follow the model's verdicts: %s\n", strings.Join(dups, "; "))
 		lab = nil
 	}
+	changed := map[int]bool{}
 	for _, i := range decideAll(rep, cfg.Policy, cfg.Seq) {
-		if cfg.WriteXMP {
-			writeDecidedSidecar(&rep.Results[i], DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP, Labels: lab})
+		changed[i] = true
+	}
+	var used llm.Usage
+	var rankErr error
+	if cfg.Rank && cfg.rankWith != nil {
+		if budget == nil {
+			budget = &spend{}
+		}
+		ex := syncExec{b: cfg.rankWith, concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
+		used, rankErr = rankSets(ctx, rep, cfg, ex, false, budget)
+		for _, i := range decideAll(rep, cfg.Policy, cfg.Seq) {
+			changed[i] = true
+		}
+	}
+	if cfg.WriteXMP {
+		for i := range rep.Results {
+			if changed[i] {
+				writeDecidedSidecar(&rep.Results[i], DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP, Labels: lab})
+			}
 		}
 	}
 	if cfg.MoveCulled && !cfg.DryRun {
@@ -446,5 +479,8 @@ func finishRun(rep *report.Report, cfg Config) error {
 		}
 	}
 	rep.Generated = time.Now()
-	return rep.Save(cfg.ReportPath)
+	if err := rep.Save(cfg.ReportPath); err != nil {
+		return used, err
+	}
+	return used, rankErr
 }

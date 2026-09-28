@@ -34,11 +34,11 @@ func serveFixture(t *testing.T, writeXMP bool) (dir string, h http.Handler, toke
 		{File: f1, Preview: pv, Evaluation: ev, Decision: eval.Cull},
 		{File: f2, Preview: pv, Evaluation: ev, Decision: eval.Keep},
 	}}
-	rp := filepath.Join(dir, "gophotocull-report.json")
+	rp := filepath.Join(dir, "cull-report.json")
 	if err := rep.Save(rp); err != nil {
 		t.Fatal(err)
 	}
-	sheet, err := Build(rep, rp, Options{Out: filepath.Join(dir, "gophotocull-review"), Concurrency: 1}, io.Discard)
+	sheet, err := Build(rep, rp, Options{Out: filepath.Join(dir, "cull-review"), Concurrency: 1}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func call(h http.Handler, method, target, body string, hdr map[string]string) *h
 }
 
 func api(token string) map[string]string {
-	return map[string]string{"X-Gophotocull-Token": token, "Content-Type": "application/json"}
+	return map[string]string{"X-Cull-Token": token, "Content-Type": "application/json"}
 }
 
 func dngHashes(t *testing.T, dir string) map[string][32]byte {
@@ -89,15 +89,15 @@ func TestServerAccessControl(t *testing.T) {
 	}{
 		{"page", "GET", "/", nil, 200},
 		{"foreign host", "GET", "/", map[string]string{"Host": "evil.example:4567"}, 403},
-		{"rebinding host", "GET", "/api/labels", map[string]string{"Host": "attacker.test:4567", "X-Gophotocull-Token": tok}, 403},
+		{"rebinding host", "GET", "/api/labels", map[string]string{"Host": "attacker.test:4567", "X-Cull-Token": tok}, 403},
 		{"no token", "GET", "/api/labels", nil, 403},
-		{"wrong token", "GET", "/api/labels", map[string]string{"X-Gophotocull-Token": strings.Repeat("0", 32)}, 403},
-		{"foreign origin", "POST", "/api/labels", map[string]string{"X-Gophotocull-Token": tok, "Origin": "http://evil.example"}, 403},
-		{"localhost", "GET", "/api/labels", map[string]string{"Host": "localhost:4567", "Origin": "http://localhost:4567", "X-Gophotocull-Token": tok}, 200},
+		{"wrong token", "GET", "/api/labels", map[string]string{"X-Cull-Token": strings.Repeat("0", 32)}, 403},
+		{"foreign origin", "POST", "/api/labels", map[string]string{"X-Cull-Token": tok, "Origin": "http://evil.example"}, 403},
+		{"localhost", "GET", "/api/labels", map[string]string{"Host": "localhost:4567", "Origin": "http://localhost:4567", "X-Cull-Token": tok}, 200},
 		{"image", "GET", "/assets/L1.thumb.jpg", nil, 200},
 		{"image outside assets", "GET", "/L1.thumb.jpg", nil, 404},
-		{"escape", "GET", "/..%2Fgophotocull-report.json", nil, 0},
-		{"escape from assets", "GET", "/assets/..%2F..%2Fgophotocull-report.json", nil, 0},
+		{"escape", "GET", "/..%2Fcull-report.json", nil, 0},
+		{"escape from assets", "GET", "/assets/..%2F..%2Fcull-report.json", nil, 0},
 		{"not an image", "GET", "/index.json", nil, 404},
 	} {
 		rec := call(h, c.method, c.target, "{}", c.hdr)
@@ -118,12 +118,12 @@ func TestServerSavesLabelsAndSidecars(t *testing.T) {
 		t.Fatalf("post: %d %s", rec.Code, rec.Body)
 	}
 	sc, _ := os.ReadFile(filepath.Join(dir, "L1.xmp"))
-	for _, want := range []string{`xmp:Rating="4"`, `xmp:Label="Green"`, "gophotocull:keep", "gophotocull:labeled"} {
+	for _, want := range []string{`xmp:Rating="4"`, `xmp:Label="Green"`, "<rdf:li>cull:keep</rdf:li>", "<rdf:li>cull:labeled</rdf:li>"} {
 		if !strings.Contains(string(sc), want) {
 			t.Errorf("sidecar lacks %s:\n%s", want, sc)
 		}
 	}
-	rep, _ := report.Load(filepath.Join(dir, "gophotocull-report.json"))
+	rep, _ := report.Load(filepath.Join(dir, "cull-report.json"))
 	if r := rep.Results[0]; r.XMP != filepath.Join(dir, "L1.xmp") || r.Decision != eval.Cull {
 		t.Fatalf("report: xmp=%q decision=%s (must record ownership, keep the model's decision)", r.XMP, r.Decision)
 	}
@@ -153,7 +153,7 @@ func TestServerSkipsForeignSidecar(t *testing.T) {
 	os.WriteFile(p, []byte("foreign"), 0o644) // appears after the server started
 	for i := 0; i < 2; i++ {
 		rec := call(h, "POST", "/api/labels", `{"file":"L2.DNG","label":"cull","stars":0}`, api(tok))
-		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "skipped: sidecar exists and isn't gophotocull's") {
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "skipped: sidecar exists and wasn't written by cull") {
 			t.Fatalf("post %d: %d %s", i, rec.Code, rec.Body)
 		}
 	}
@@ -168,7 +168,7 @@ func TestServerSkipsForeignSidecar(t *testing.T) {
 func TestServerRejectsBadInput(t *testing.T) {
 	dir, h, tok := serveFixture(t, true)
 	for _, body := range []string{
-		`{"file":"../gophotocull-report.json","label":"keep","stars":0}`,
+		`{"file":"../cull-report.json","label":"keep","stars":0}`,
 		`{"file":"X.DNG","label":"keep","stars":0}`,
 		`{"file":"L1.DNG","label":"maybe","stars":0}`,
 		`{"file":"L1.DNG","label":"","stars":6}`,

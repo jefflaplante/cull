@@ -43,12 +43,12 @@ func TestScriptColorsAndKeywordsWithoutLabels(t *testing.T) {
 			t.Errorf("%s: want color tag %s:\n%s", name, tag, b)
 		}
 	}
-	for _, want := range []string{`matchImages(doc, "L\"3\\.DNG", "L\"3\\")`, `"gophotocull:cull"`, `"gophotocull:keep"`} {
+	for _, want := range []string{`matchImages(doc, "L\"3\\.DNG", "L\"3\\")`, `"cull:cull"`, `"cull:keep"`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("script lacks %s", want)
 		}
 	}
-	for _, bad := range []string{"set rating", "gophotocull:labeled", "L4.DNG"} {
+	for _, bad := range []string{"set rating", "cull:labeled", "L4.DNG"} {
 		if strings.Contains(s, bad) {
 			t.Errorf("script contains %s (ratings come only from your stars)", bad)
 		}
@@ -62,7 +62,7 @@ func TestScriptUsesYourLabelsAndStars(t *testing.T) {
 	}
 	s := Script(testReport(), Options{Rating: true, Label: true, Keyword: true, Labels: lab})
 	b1, b2, b3 := block(s, "L1.DNG"), block(s, "L2.DNG"), block(s, `L"3\.DNG`)
-	if !strings.Contains(b1, "set color tag of v to 1") || !strings.Contains(b1, `"gophotocull:labeled"`) || strings.Contains(b1, "set rating") {
+	if !strings.Contains(b1, "set color tag of v to 1") || !strings.Contains(b1, `"cull:labeled"`) || strings.Contains(b1, "set rating") {
 		t.Errorf("L1:\n%s", b1)
 	}
 	if !strings.Contains(b2, "set rating of v to 4") || !strings.Contains(b2, "set color tag of v to 3") || strings.Contains(b2, "labeled") {

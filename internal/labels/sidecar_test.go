@@ -20,12 +20,12 @@ func TestSidecarMapping(t *testing.T) {
 		l     Entry
 		want  xmp.Sidecar
 	}{
-		{"model keep", eval.Keep, Entry{}, xmp.Sidecar{Label: "Green", Keywords: []string{"gophotocull:keep"}}},
-		{"model review", eval.Review, Entry{}, xmp.Sidecar{Label: "Yellow", Keywords: []string{"gophotocull:review"}}},
+		{"model keep", eval.Keep, Entry{}, xmp.Sidecar{Label: "Green", Keywords: []string{"cull:keep"}}},
+		{"model review", eval.Review, Entry{}, xmp.Sidecar{Label: "Yellow", Keywords: []string{"cull:review"}}},
 		{"your keep over model cull", eval.Cull, Entry{Label: "keep", Stars: 4},
-			xmp.Sidecar{Rating: 4, Label: "Green", Keywords: []string{"gophotocull:keep", "gophotocull:labeled"}}},
-		{"stars only", eval.Review, Entry{Stars: 2}, xmp.Sidecar{Rating: 2, Label: "Yellow", Keywords: []string{"gophotocull:review"}}},
-		{"scan frame you culled", "", Entry{Label: "cull"}, xmp.Sidecar{Label: "Red", Keywords: []string{"gophotocull:cull", "gophotocull:labeled"}}},
+			xmp.Sidecar{Rating: 4, Label: "Green", Keywords: []string{"cull:keep", "cull:labeled"}}},
+		{"stars only", eval.Review, Entry{Stars: 2}, xmp.Sidecar{Rating: 2, Label: "Yellow", Keywords: []string{"cull:review"}}},
+		{"scan frame you culled", "", Entry{Label: "cull"}, xmp.Sidecar{Label: "Red", Keywords: []string{"cull:cull", "cull:labeled"}}},
 		{"nothing", "", Entry{}, xmp.Sidecar{}},
 	} {
 		got := Sidecar(report.Result{Decision: c.model}, c.l, 1, false)

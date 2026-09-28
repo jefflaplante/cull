@@ -33,18 +33,18 @@ func newReviewCmd(so *sharedOpts) *cobra.Command {
 		Long: `review builds an HTML contact sheet from the report (every frame with the subject
 crop the model judged, the decision and its reasons), serves it on 127.0.0.1 and
 opens it in your browser. Label frames keep/review/cull (K/R/C, U clears) and rate
-them 1-5 stars (0 clears). Every change is saved at once to gophotocull-labels.jsonl
+them 1-5 stars (0 clears). Every change is saved at once to cull-labels.jsonl
 beside the report, and the frame's .xmp sidecar is rewritten (your stars, verdict
-colour and keyword), which Capture One reads on import; sidecars gophotocull didn't
+colour and keyword), which Capture One reads on import; sidecars not written by cull
 write are never touched. Ctrl-C stops the server.
 
 --no-xmp saves only the labels log; --no-open doesn't launch the browser; --static
 writes an offline index.html instead of serving (labels then stay in the browser;
 export them from the page). 'calibrate', 'decide' and 'apply-c1' read the log.
 Works on scan reports too (labeling only).`,
-		Example: `  gophotocull review ~/Pictures/2026-09-26
-  gophotocull review --no-xmp ~/Pictures/2026-09-26     # labels only, no sidecars
-  gophotocull review --static ~/Pictures/2026-09-26     # offline page`,
+		Example: `  cull review ~/Pictures/2026-09-26
+  cull review --no-xmp ~/Pictures/2026-09-26     # labels only, no sidecars
+  cull review --static ~/Pictures/2026-09-26     # offline page`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fl := cmd.Flags()
@@ -64,10 +64,10 @@ Works on scan reports too (labeling only).`,
 			}
 			rep, err := report.Load(cfg.ReportPath)
 			if err != nil {
-				return fmt.Errorf("no report: %w (run scan or cull first, or pass -o)", err)
+				return fmt.Errorf("no report: %w (run scan or judge first, or pass -o)", err)
 			}
 			if out == "" {
-				out = filepath.Join(filepath.Dir(cfg.ReportPath), "gophotocull-review")
+				out = filepath.Join(filepath.Dir(cfg.ReportPath), "cull-review")
 			}
 			sheet, err := review.Build(rep, cfg.ReportPath, review.Options{Out: out, Concurrency: jobs, Force: force}, cmd.ErrOrStderr())
 			if err != nil {
@@ -84,13 +84,13 @@ Works on scan reports too (labeling only).`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&out, "out", "", "output directory for index.html, with the images in its assets/ folder (default: gophotocull-review next to the report)")
+	f.StringVar(&out, "out", "", "output directory for index.html, with the images in its assets/ folder (default: cull-review next to the report)")
 	f.IntVarP(&jobs, "concurrency", "j", 4, "parallel image rendering (~200 MB RAM each)")
 	f.BoolVar(&force, "force", false, "re-render images that already exist")
 	f.BoolVar(&static, "static", false, "write an offline index.html instead of serving (labels stay in the browser)")
 	f.BoolVar(&noOpen, "no-open", false, "don't open the browser; open the printed URL yourself")
 	f.BoolVar(&noXMP, "no-xmp", false, "don't write sidecars; save only the labels log")
-	f.BoolVar(&overwrite, "overwrite-xmp", false, "also overwrite sidecars gophotocull did not write")
+	f.BoolVar(&overwrite, "overwrite-xmp", false, "also overwrite sidecars not written by cull")
 	f.IntVar(&port, "port", 0, "port (default: fixed per report, so a restarted server keeps the page's origin and its queued changes; 0 = any free port)")
 	return cmd
 }
@@ -124,11 +124,11 @@ func serveSheet(cmd *cobra.Command, sheet *review.Sheet, rep *report.Report, o r
 	fmt.Fprintf(w, "review server: %s\nlabels: %s\n", url, o.LabelsPath)
 	switch {
 	case o.WriteXMP && o.OverwriteXMP:
-		fmt.Fprintln(w, "sidecars: written on every change, including over ones gophotocull didn't write (--overwrite-xmp)")
+		fmt.Fprintln(w, "sidecars: written on every change, including over ones not written by cull (--overwrite-xmp)")
 	case o.WriteXMP:
-		fmt.Fprintln(w, "sidecars: written on every change, never over ones gophotocull didn't write (--no-xmp to stop)")
+		fmt.Fprintln(w, "sidecars: written on every change, never over ones not written by cull (--no-xmp to stop)")
 	}
-	fmt.Fprintln(w, "Ctrl-C to stop. Don't run cull on this report while reviewing.")
+	fmt.Fprintln(w, "Ctrl-C to stop. Don't run judge on this report while reviewing.")
 	if openIt {
 		if err := exec.Command("open", url).Start(); err != nil {
 			fmt.Fprintf(w, "could not open a browser (%v): open the URL above\n", err)

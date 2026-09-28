@@ -10,7 +10,7 @@ import (
 
 func TestRenderIsWellFormedXML(t *testing.T) {
 	ev := 0.7
-	out := Render(Sidecar{Rating: 3, Label: "Green & <ok>", Keywords: []string{"gophotocull:keep"}, ExposureEV: &ev,
+	out := Render(Sidecar{Rating: 3, Label: "Green & <ok>", Keywords: []string{"cull:keep"}, ExposureEV: &ev,
 		Crop: &Box{0.1, 0.05, 0.9, 0.95}})
 	d := xml.NewDecoder(bytesReader(out))
 	for {
@@ -20,6 +20,12 @@ func TestRenderIsWellFormedXML(t *testing.T) {
 			}
 			t.Fatalf("malformed XML: %v\n%s", err, out)
 		}
+	}
+}
+
+func TestRenderNamesTheTool(t *testing.T) {
+	if s := string(Render(Sidecar{})); !strings.Contains(s, `x:xmptk="cull"`) {
+		t.Fatalf("toolkit:\n%s", s)
 	}
 }
 

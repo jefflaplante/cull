@@ -73,7 +73,7 @@ func streamJSONMessage(parts []Part) ([]byte, error) {
 func (c *ClaudeCode) run(ctx context.Context, args []string, stdin []byte) (*Response, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
-	dir, err := os.MkdirTemp("", "gophotocull-claude-")
+	dir, err := os.MkdirTemp("", "cull-claude-")
 	if err != nil {
 		return nil, err
 	}

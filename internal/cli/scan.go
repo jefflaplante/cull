@@ -18,7 +18,7 @@ is called and nothing is written next to your images; only the report is produce
 
 Use it to confirm the previews are large enough for focus judgement, and with
 --save-inputs to see exactly what the model would be shown.`,
-		Example: "  gophotocull scan ~/Pictures/2026-09-26",
+		Example: "  cull scan ~/Pictures/2026-09-26",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := so.base(args[0])

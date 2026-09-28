@@ -97,7 +97,7 @@ func Render(s Sidecar) []byte {
 		body = ">" + kw + "</rdf:Description>"
 	}
 	return []byte(fmt.Sprintf(`<?xpacket begin="`+"\ufeff"+`" id="W5M0MpCehiHzreSzNTczkc9d"?>
-<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="gophotocull">
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="cull">
  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
   <rdf:Description rdf:about=""
     xmlns:xmp="http://ns.adobe.com/xap/1.0/"

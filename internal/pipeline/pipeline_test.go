@@ -110,7 +110,7 @@ func TestRunEndToEnd(t *testing.T) {
 			t.Fatalf("bad result %+v", r)
 		}
 		x, _ := os.ReadFile(r.XMP)
-		if !strings.Contains(string(x), `crs:Exposure2012="+0.50"`) || !strings.Contains(string(x), "gophotocull:keep") {
+		if !strings.Contains(string(x), `crs:Exposure2012="+0.50"`) || !strings.Contains(string(x), "<rdf:li>cull:keep</rdf:li>") {
 			t.Fatalf("sidecar missing fields:\n%s", x)
 		}
 	}

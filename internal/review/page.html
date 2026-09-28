@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>gophotocull review</title>
+<title>cull review</title>
 <style>
 :root {
   --bg: #f6f6f4; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #deded8;
@@ -58,7 +58,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
 </head>
 <body>
 <header>
-  <h1 id="title">gophotocull review</h1>
+  <h1 id="title">cull review</h1>
   <span class="meta" id="meta"></span>
   <span class="meta" id="where"></span>
   <div class="filters" id="verdicts" role="group" aria-label="Verdict"></div>
@@ -81,8 +81,8 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   const cards = data.cards;
   const serve = !!data.serve;
   const token = new URLSearchParams(location.hash.slice(1)).get("token") || "";
-  const key = "gophotocull-labels:" + data.report;   // this browser's copy
-  const qkey = "gophotocull-pending:" + data.report; // serve mode: changes not yet on disk
+  const key = "cull-labels:" + data.report;   // this browser's copy
+  const qkey = "cull-pending:" + data.report; // serve mode: changes not yet on disk
   const load = (k, def) => { try { return JSON.parse(localStorage.getItem(k) || "null") || def; } catch (e) { return def; } };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 
@@ -128,7 +128,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   const starText = n => n ? el("span", { cls: "stars", text: "★".repeat(n), title: n + " star" + (n > 1 ? "s" : "") }) : null;
 
   document.getElementById("title").textContent = data.title + " · review";
-  document.title = data.title + " · gophotocull review";
+  document.title = data.title + " · cull review";
   if (serve) document.getElementById("tools").hidden = true;
   document.getElementById("where").textContent =
     (data.folder ? "folder: " + data.folder : "") + (data.labels_log ? " · labels: " + data.labels_log : "");
@@ -299,7 +299,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
         const p = pending[0];
         let res;
         try {
-          res = await fetch("/api/labels", { method: "POST", headers: { "Content-Type": "application/json", "X-Gophotocull-Token": token }, body: JSON.stringify(p) });
+          res = await fetch("/api/labels", { method: "POST", headers: { "Content-Type": "application/json", "X-Cull-Token": token }, body: JSON.stringify(p) });
         } catch (e) {
           pending.forEach(q => { status[q.file] = "not saved: server unreachable"; });
           break;
@@ -323,7 +323,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   // loadServer: the log on disk wins, except frames with changes still queued here.
   async function loadServer() {
     try {
-      const res = await fetch("/api/labels", { headers: { "X-Gophotocull-Token": token } });
+      const res = await fetch("/api/labels", { headers: { "X-Cull-Token": token } });
       if (!res.ok) throw new Error((await res.text()).trim());
       const disk = (await res.json()).labels || {};
       const merged = Object.assign({}, disk);
@@ -353,7 +353,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   document.getElementById("export").onclick = () => {
     const at = new Date().toISOString();
     const lines = cards.filter(c => labels[c.file]).map(c => JSON.stringify({ file: c.file, label: get(c.file).label, stars: get(c.file).stars, at }) + "\n");
-    const a = el("a", { href: URL.createObjectURL(new Blob(lines, { type: "application/jsonl" })), download: "gophotocull-labels.jsonl" });
+    const a = el("a", { href: URL.createObjectURL(new Blob(lines, { type: "application/jsonl" })), download: "cull-labels.jsonl" });
     document.body.appendChild(a); a.click(); a.remove();
   };
   document.getElementById("import").onchange = ev => {

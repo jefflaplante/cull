@@ -23,7 +23,7 @@ const CulledDir = "culled"
 // CulledDir beside it,
 // with its .xmp sidecar, and records the move in the result. Frames that can't
 // be moved stay where they are with the reason in Fixups. Nothing is deleted
-// and nothing is overwritten; `gophotocull restore` reverses it.
+// and nothing is overwritten; `cull restore` reverses it.
 func moveCulled(rep *report.Report, lab map[string]labels.Entry, log io.Writer) int {
 	n := 0
 	for i := range rep.Results {

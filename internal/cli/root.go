@@ -33,19 +33,20 @@ type sharedOpts struct {
 func NewRootCmd() *cobra.Command {
 	var so sharedOpts
 	root := &cobra.Command{
-		Use:   "gophotocull",
+		Use:   "cull",
 		Short: "Cull Leica DNGs with a vision model: sharpness gates, exposure is fixed, composition is cropped",
-		Long: `gophotocull extracts the embedded JPEG preview from each DNG, measures it, and
-asks a vision model to assess sharpness, exposure, and composition. A deterministic
-policy turns those assessments into keep / review / cull decisions.
+		Long: `cull extracts the embedded JPEG preview from each DNG, measures it, and asks a
+vision model to assess sharpness, exposure, and composition. A deterministic policy
+turns those assessments into keep / review / cull decisions.
 
-Start with 'gophotocull scan <dir>' to confirm preview resolution before spending tokens.`,
+Start with 'cull scan <dir>' to confirm preview resolution before spending tokens,
+then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.`,
 		SilenceUsage:  true, // runtime errors shouldn't dump usage
 		SilenceErrors: true, // main prints the error once
 		Version:       version,
 	}
 	pf := root.PersistentFlags()
-	pf.StringVarP(&so.report, "report", "o", "", "report path (default <dir>/gophotocull-report.json)")
+	pf.StringVarP(&so.report, "report", "o", "", "report path (default <dir>/cull-report.json)")
 	pf.BoolVarP(&so.recursive, "recursive", "r", false, "recurse into subdirectories")
 	pf.IntVar(&so.maxEdge, "max-edge", 1568, "long edge of the full-frame image sent to the model")
 	pf.IntVar(&so.tiles, "tiles", 1, "\"where focus landed\" tiles per image (native resolution)")
@@ -86,7 +87,7 @@ func (so *sharedOpts) base(arg string) (pipeline.Config, error) {
 	}
 	report := so.report
 	if report == "" {
-		report = filepath.Join(dir, "gophotocull-report.json")
+		report = filepath.Join(dir, "cull-report.json")
 	}
 	return pipeline.Config{
 		Dir:               dir,

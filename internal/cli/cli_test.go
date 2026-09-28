@@ -34,14 +34,14 @@ func run(t *testing.T, args ...string) (string, error) {
 func TestFlagValidation(t *testing.T) {
 	dir := t.TempDir()
 	cases := map[string][]string{
-		"xmp-develop without write-xmp":   {"cull", "--xmp-develop", dir},
-		"overwrite-xmp without write-xmp": {"cull", "--overwrite-xmp", dir},
-		"bad min-crop-area":               {"cull", "--min-crop-area", "1.5", dir},
-		"missing dir arg":                 {"cull"},
+		"xmp-develop without write-xmp":   {"judge", "--xmp-develop", dir},
+		"overwrite-xmp without write-xmp": {"judge", "--overwrite-xmp", dir},
+		"bad min-crop-area":               {"judge", "--min-crop-area", "1.5", dir},
+		"missing dir arg":                 {"judge"},
 		"not a directory":                 {"scan", dir + "/nope"},
 	}
 	for name, args := range cases {
-		if _, err := run(t, args...); err == nil {
+		if _, err := run(t, args...); err == nil || strings.Contains(err.Error(), "unknown command") {
 			t.Errorf("%s: expected error", name)
 		}
 	}
@@ -62,7 +62,7 @@ func TestScanEmptyDirNeedsNoKey(t *testing.T) {
 func TestCullWithoutKeyFails(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("HOME", t.TempDir())
-	if _, err := run(t, "cull", t.TempDir()); err == nil || !strings.Contains(err.Error(), "no API key") {
+	if _, err := run(t, "judge", t.TempDir()); err == nil || !strings.Contains(err.Error(), "no API key") {
 		t.Fatalf("want no-API-key error, got %v", err)
 	}
 }
@@ -75,11 +75,11 @@ func TestBackendFlagValidation(t *testing.T) {
 		args   []string
 		errHas string
 	}{
-		{"unknown backend", []string{"cull", "--backend", "bogus", dir}, "unknown --backend"},
-		{"openai needs model", []string{"cull", "--backend", "openai", dir}, "requires --model"},
-		{"quota-stop range", []string{"cull", "--quota-stop", "0", dir}, "--quota-stop must be in (0, 1]"},
-		{"locate value", []string{"cull", "--locate", "maybe", dir}, "--locate must be model or off"},
-		{"missing claude binary", []string{"cull", "--backend", "claude-code", "--claude-bin", "/nonexistent/claude", dir}, "not found"},
+		{"unknown backend", []string{"judge", "--backend", "bogus", dir}, "unknown --backend"},
+		{"openai needs model", []string{"judge", "--backend", "openai", dir}, "requires --model"},
+		{"quota-stop range", []string{"judge", "--quota-stop", "0", dir}, "--quota-stop must be in (0, 1]"},
+		{"locate value", []string{"judge", "--locate", "maybe", dir}, "--locate must be model or off"},
+		{"missing claude binary", []string{"judge", "--backend", "claude-code", "--claude-bin", "/nonexistent/claude", dir}, "not found"},
 	}
 	for _, c := range cases {
 		_, err := run(t, c.args...)
@@ -92,7 +92,7 @@ func TestBackendFlagValidation(t *testing.T) {
 func TestOpenAIBackendNeedsNoKey(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "")
-	out, err := run(t, "cull", "--backend", "openai", "--model", "m", t.TempDir())
+	out, err := run(t, "judge", "--backend", "openai", "--model", "m", t.TempDir())
 	if err != nil {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
@@ -152,7 +152,7 @@ func TestRestoreWithoutReportFails(t *testing.T) {
 
 func TestCullHasMoveCulledFlag(t *testing.T) {
 	for _, c := range NewRootCmd().Commands() {
-		if c.Name() == "cull" {
+		if c.Name() == "judge" {
 			if f := c.Flags().Lookup("move-culled"); f == nil || f.DefValue != "false" {
 				t.Fatalf("move-culled flag: %+v", f)
 			}
@@ -202,7 +202,7 @@ func TestCullMoveCulledThenRestoreEndToEnd(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
 
-	out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--write-xmp", "--move-culled", dir)
+	out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--write-xmp", "--move-culled", dir)
 	if err != nil {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
@@ -213,7 +213,7 @@ func TestCullMoveCulledThenRestoreEndToEnd(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "culled", "L1000001.xmp")); err != nil {
 		t.Fatal("sidecar not moved with the frame")
 	}
-	if !strings.Contains(out, "gophotocull restore") {
+	if !strings.Contains(out, "cull restore") {
 		t.Fatalf("no undo hint in output:\n%s", out)
 	}
 
@@ -229,19 +229,19 @@ func TestPolicyFlagValidation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	for name, args := range map[string][]string{
-		"bad eyes action":       {"cull", "--eyes-closed", "delete", dir},
+		"bad eyes action":       {"judge", "--eyes-closed", "delete", dir},
 		"bad duplicates":        {"decide", "--duplicates", "burn", dir},
-		"bad raw action":        {"cull", "--raw-clipped", "maybe", dir},
-		"batch needs anthropic": {"cull", "--batch", "--backend", "openai", "--model", "m", dir},
-		"batch with escalation": {"cull", "--batch", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", dir},
-		"bad raw threshold":     {"cull", "--raw-clip-threshold", "150", dir},
+		"bad raw action":        {"judge", "--raw-clipped", "maybe", dir},
+		"batch needs anthropic": {"judge", "--batch", "--backend", "openai", "--model", "m", dir},
+		"batch with escalation": {"judge", "--batch", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", dir},
+		"bad raw threshold":     {"judge", "--raw-clip-threshold", "150", dir},
 		"negative burst gap":    {"scan", "--burst-gap", "-1s", dir},
-		"bad escalate backend":  {"cull", "--escalate-backend", "gpt", "--escalate-model", "x", dir},
-		"escalate needs model":  {"cull", "--escalate-backend", "anthropic", dir},
-		"bad escalate-on":       {"cull", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", "--escalate-on", "blurry", dir},
-		"negative sharp floor":  {"cull", "--review-below-sharpness", "-1", dir},
+		"bad escalate backend":  {"judge", "--escalate-backend", "gpt", "--escalate-model", "x", dir},
+		"escalate needs model":  {"judge", "--escalate-backend", "anthropic", dir},
+		"bad escalate-on":       {"judge", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", "--escalate-on", "blurry", dir},
+		"negative sharp floor":  {"judge", "--review-below-sharpness", "-1", dir},
 	} {
-		if _, err := run(t, args...); err == nil || strings.Contains(err.Error(), "unknown flag") {
+		if _, err := run(t, args...); err == nil || strings.Contains(err.Error(), "unknown flag") || strings.Contains(err.Error(), "unknown command") {
 			t.Errorf("%s: want a validation error, got %v", name, err)
 		}
 	}
@@ -253,14 +253,14 @@ func TestCullEstimateNeedsNoKeyAndCallsNothing(t *testing.T) {
 	dir := t.TempDir()
 	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
 	tinyDNG(t, filepath.Join(dir, "L2.DNG"))
-	out, err := run(t, "cull", "--estimate", dir)
+	out, err := run(t, "judge", "--estimate", dir)
 	if err != nil || !strings.Contains(out, "estimate: 2 frames") || !strings.Contains(out, "$") {
 		t.Fatalf("err=%v\n%s", err, out)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "gophotocull-report.json")); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, "cull-report.json")); err == nil {
 		t.Fatal("--estimate must not run the pipeline")
 	}
-	out, err = run(t, "cull", "--estimate", "--backend", "openai", "--model", "m", dir)
+	out, err = run(t, "judge", "--estimate", "--backend", "openai", "--model", "m", dir)
 	if err != nil || !strings.Contains(out, "no per-token cost") {
 		t.Fatalf("openai estimate: err=%v\n%s", err, out)
 	}
@@ -286,7 +286,7 @@ func TestSummaryCostLabelNamesBatchPrice(t *testing.T) {
 		}
 	}
 	for _, c := range NewRootCmd().Commands() {
-		if c.Name() == "cull" {
+		if c.Name() == "judge" {
 			if u := c.Flags().Lookup("max-cost").Usage; !strings.Contains(u, "batch price with --batch") {
 				t.Fatalf("--max-cost help must name the batch price: %q", u)
 			}
@@ -304,7 +304,7 @@ func TestDecideCommand(t *testing.T) {
 	tinyDNG(t, frame)
 	bin := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
-	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
 	out, err := run(t, "decide", "--eyes-closed", "cull", dir)
@@ -327,7 +327,7 @@ func TestReviewCommandBuildsSheetNextToReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("review: %v\n%s", err, out)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "gophotocull-review", "index.html")); err != nil || !strings.Contains(out, "index.html") {
+	if _, err := os.Stat(filepath.Join(dir, "cull-review", "index.html")); err != nil || !strings.Contains(out, "index.html") {
 		t.Fatalf("no sheet:\n%s", out)
 	}
 }
@@ -338,11 +338,11 @@ func TestCalibrateCommand(t *testing.T) {
 	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
 	bin := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
-	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
-	rp := filepath.Join(dir, "gophotocull-report.json")
-	log := filepath.Join(dir, "gophotocull-labels.jsonl")
+	rp := filepath.Join(dir, "cull-report.json")
+	log := filepath.Join(dir, "cull-labels.jsonl")
 	os.WriteFile(log, []byte(`{"file":"L1000001.DNG","label":"keep","stars":0,"at":"2026-09-27T20:00:00Z"}`+"\n"+
 		`{"file":"X.DNG","label":"","stars":3,"at":"2026-09-27T20:00:01Z"}`+"\n"), 0o644)
 	out, err := run(t, "calibrate", rp) // the log beside the report, by default
@@ -357,14 +357,14 @@ func TestCalibrateCommand(t *testing.T) {
 	if out, err := run(t, "calibrate", "--labels", moved, rp); err != nil || !strings.Contains(out, "1/1") {
 		t.Fatalf("explicit --labels: %v\n%s", err, out)
 	}
-	if _, err := run(t, "calibrate", rp); err == nil || !strings.Contains(err.Error(), "gophotocull-labels.jsonl") {
+	if _, err := run(t, "calibrate", rp); err == nil || !strings.Contains(err.Error(), "cull-labels.jsonl") {
 		t.Fatalf("no log: %v", err)
 	}
 }
 
 func TestRawClipFlagDefaults(t *testing.T) {
 	for _, c := range NewRootCmd().Commands() {
-		want := map[string]string{"cull": "true", "scan": "false"}[c.Name()]
+		want := map[string]string{"judge": "true", "scan": "false"}[c.Name()]
 		if want == "" {
 			continue
 		}
@@ -380,7 +380,7 @@ func TestApplyC1DryRunProbeAndRun(t *testing.T) {
 	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
 	bin := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
-	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
 	out, err := run(t, "apply-c1", dir)
@@ -410,10 +410,10 @@ func TestApplyC1LabelsSetYourStars(t *testing.T) {
 	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
 	bin := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
-	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
-	log := filepath.Join(dir, "gophotocull-labels.jsonl")
+	log := filepath.Join(dir, "cull-labels.jsonl")
 	os.WriteFile(log, []byte(`{"file":"L1000001.DNG","label":"","stars":5,"at":"2026-09-27T20:00:00Z"}`+"\n"), 0o644)
 	out, err := run(t, "apply-c1", "--labels", log, dir)
 	if err != nil || !strings.Contains(out, "set rating of v to 5") {
@@ -429,7 +429,7 @@ func TestApplyC1LabelsSetYourStars(t *testing.T) {
 
 func TestCullHasNoCSVFlag(t *testing.T) {
 	for _, c := range NewRootCmd().Commands() {
-		if c.Name() == "cull" && c.Flags().Lookup("csv") != nil {
+		if c.Name() == "judge" && c.Flags().Lookup("csv") != nil {
 			t.Fatal("cull --csv should be gone: the JSON report is the only run output")
 		}
 	}
@@ -467,7 +467,7 @@ func TestReviewServesAndWritesSidecarsByDefault(t *testing.T) {
 		t.Fatalf("url %q", url)
 	}
 	req, _ := http.NewRequest("POST", base+"/api/labels", strings.NewReader(`{"file":"L1.DNG","label":"keep","stars":3}`))
-	req.Header.Set("X-Gophotocull-Token", tok)
+	req.Header.Set("X-Cull-Token", tok)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil || res.StatusCode != 200 {
 		t.Fatalf("post: %v %v", err, res)
@@ -509,8 +509,8 @@ func startServe(t *testing.T, args ...string) (url string, before []string, stop
 }
 
 func TestReviewDefaultPortIsStablePerReport(t *testing.T) {
-	a, b := defaultPort("/shoot/a/gophotocull-report.json"), defaultPort("/shoot/a/gophotocull-report.json")
-	c := defaultPort("/shoot/b/gophotocull-report.json")
+	a, b := defaultPort("/shoot/a/cull-report.json"), defaultPort("/shoot/a/cull-report.json")
+	c := defaultPort("/shoot/b/cull-report.json")
 	if a != b || a < 49152 || a > 65535 || c < 49152 || c > 65535 {
 		t.Fatalf("ports %d %d %d", a, b, c)
 	}
@@ -522,7 +522,7 @@ func TestReviewServeKeepsItsPortAndFallsBackWhenBusy(t *testing.T) {
 	if out, err := run(t, "scan", dir); err != nil {
 		t.Fatalf("scan: %v\n%s", err, out)
 	}
-	want := fmt.Sprintf("http://127.0.0.1:%d/", defaultPort(filepath.Join(dir, "gophotocull-report.json")))
+	want := fmt.Sprintf("http://127.0.0.1:%d/", defaultPort(filepath.Join(dir, "cull-report.json")))
 	url, _, stop := startServe(t, dir)
 	if !strings.HasPrefix(url, want) {
 		t.Errorf("first run: %q, want the report's port %s", url, want)
@@ -550,7 +550,7 @@ func culledOne(t *testing.T) (dir, bin string) {
 	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
 	bin = filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
-	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
 	return dir, bin
@@ -583,10 +583,33 @@ func TestDecideUsesYourLabelsByDefault(t *testing.T) {
 func TestCullResumeRespectsYourLabels(t *testing.T) {
 	dir, bin := culledOne(t)
 	os.WriteFile(filepath.Join(dir, labels.FileName), []byte(`{"file":"L1000001.DNG","label":"keep","stars":0,"at":"2026-09-27T20:00:00Z"}`+"\n"), 0o644)
-	if out, err := run(t, "cull", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--resume", "--move-culled", dir); err != nil {
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--resume", "--move-culled", dir); err != nil {
 		t.Fatalf("resume: %v\n%s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "L1000001.DNG")); err != nil {
 		t.Fatal("cull --move-culled moved a frame you labeled keep")
+	}
+}
+
+func TestToolIsCullAndModelStepIsJudge(t *testing.T) {
+	root := NewRootCmd()
+	if root.Name() != "cull" {
+		t.Fatalf("root command %q", root.Name())
+	}
+	names := map[string]bool{}
+	for _, c := range root.Commands() {
+		names[c.Name()] = true
+	}
+	if !names["judge"] || names["cull"] {
+		t.Fatalf("subcommands %v: want judge, and no cull (it would read `cull cull`)", names)
+	}
+	if f := root.PersistentFlags().Lookup("report"); f == nil || !strings.Contains(f.Usage, "cull-report.json") {
+		t.Fatalf("-o help: %+v", f)
+	}
+}
+
+func TestOldCullSubcommandSuggestsJudge(t *testing.T) {
+	if _, err := run(t, "cull", t.TempDir()); err == nil || !strings.Contains(err.Error(), "judge") {
+		t.Fatalf("`cull cull` should point to judge: %v", err)
 	}
 }

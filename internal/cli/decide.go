@@ -22,14 +22,14 @@ func newDecideCmd(so *sharedOpts) *cobra.Command {
 		Short: "Re-apply the keep/review/cull policy to a report without calling a model",
 		Long: `decide re-runs the policy on every assessment stored in the report, so tuning
 thresholds after calibration is free and instant. It prints what changed and saves
-the report. --write-xmp rewrites sidecars the report says gophotocull wrote (and
+the report. --write-xmp rewrites sidecars the report says cull wrote (and
 creates missing ones); other sidecars are never touched unless --overwrite-xmp.
 --move-culled syncs culled/: new culls move there, frames no longer culled come back.
-Your labels from the review sheet (gophotocull-labels.jsonl beside the report, or
+Your labels from the review sheet (cull-labels.jsonl beside the report, or
 --labels) are used where you gave one: your verdicts drive sidecars and moves (the
 report keeps the model's), your stars become sidecar ratings. --no-labels ignores them.`,
-		Example: `  gophotocull decide --review-below-sharpness 6 --eyes-closed cull ~/Pictures/2026-09-26
-  gophotocull decide --write-xmp --move-culled ~/Pictures/2026-09-26`,
+		Example: `  cull decide --review-below-sharpness 6 --eyes-closed cull ~/Pictures/2026-09-26
+  cull decide --write-xmp --move-culled ~/Pictures/2026-09-26`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := so.base(args[0])
@@ -62,9 +62,9 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 	pol.register(f)
 	f.BoolVar(&writeXMP, "write-xmp", false, "rewrite our sidecars (and create missing ones) for the new decisions")
 	f.BoolVar(&xmpDevelop, "xmp-develop", false, "also write Adobe crs exposure/crop (not applied by Capture One)")
-	f.BoolVar(&overwrite, "overwrite-xmp", false, "also overwrite sidecars gophotocull did not write")
+	f.BoolVar(&overwrite, "overwrite-xmp", false, "also overwrite sidecars not written by cull")
 	f.BoolVar(&moveC, "move-culled", false, "sync culled/: move new culls there, restore frames no longer culled")
-	f.StringVar(&labelsPath, "labels", "", "your labels log (default: gophotocull-labels.jsonl beside the report, when it exists)")
+	f.StringVar(&labelsPath, "labels", "", "your labels log (default: cull-labels.jsonl beside the report, when it exists)")
 	f.BoolVar(&noLabels, "no-labels", false, "ignore your labels: sidecars and moves follow the model's verdicts")
 	return cmd
 }

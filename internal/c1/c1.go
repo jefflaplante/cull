@@ -43,7 +43,7 @@ var colorTag = map[eval.Decision]int{eval.Keep: 4, eval.Review: 3, eval.Cull: 1}
 // in o.Labels, else the model's decision) or with the user's stars.
 func Script(rep *report.Report, o Options) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "-- gophotocull apply-c1, generated %s. Review before running.\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&b, "-- cull apply-c1, generated %s. Review before running.\n", time.Now().Format(time.RFC3339))
 	b.WriteString(helpers)
 	b.WriteString("tell application \"Capture One\"\n\tset doc to current document\n\tset notFound to {}\n")
 	for _, r := range rep.Results {
@@ -75,9 +75,9 @@ func Script(rep *report.Report, o Options) string {
 			fmt.Fprintf(&b, "\t\t\tset color tag of v to %d\n", tag)
 		}
 		if o.Keyword && d != "" {
-			kws := []string{"gophotocull:" + string(d)}
+			kws := []string{"cull:" + string(d)}
 			if yours {
-				kws = append(kws, "gophotocull:labeled")
+				kws = append(kws, "cull:labeled")
 			}
 			for _, kw := range kws {
 				fmt.Fprintf(&b, "\t\t\tset k to my ensureKeyword(doc, %s)\n", quote(kw))

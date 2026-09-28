@@ -22,7 +22,7 @@ type ServeOptions struct {
 	ReportPath   string
 	LabelsPath   string
 	WriteXMP     bool // rewrite each changed frame's sidecar
-	OverwriteXMP bool // also sidecars gophotocull did not write
+	OverwriteXMP bool // also sidecars not written by cull
 	Token        string
 }
 
@@ -73,7 +73,7 @@ func (s *Server) Handler(addr string) http.Handler {
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") &&
-			subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Gophotocull-Token")), []byte(s.o.Token)) != 1 {
+			subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Cull-Token")), []byte(s.o.Token)) != 1 {
 			http.Error(w, "bad or missing token: open the URL the server printed", http.StatusForbidden)
 			return
 		}
@@ -172,7 +172,7 @@ func (s *Server) writeSidecar(file string, e labels.Entry) string {
 		before := r.XMP
 		switch err := labels.WriteSidecar(r, e, false, s.o.OverwriteXMP); {
 		case errors.Is(err, xmp.ErrExists):
-			return "skipped: sidecar exists and isn't gophotocull's"
+			return "skipped: sidecar exists and wasn't written by cull"
 		case err != nil:
 			return "skipped: " + err.Error()
 		}

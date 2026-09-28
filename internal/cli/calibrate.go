@@ -16,16 +16,16 @@ func newCalibrateCmd() *cobra.Command {
 		pol        policyFlags
 	)
 	cmd := &cobra.Command{
-		Use:   "calibrate [--labels gophotocull-labels.jsonl] REPORT.json...",
+		Use:   "calibrate [--labels cull-labels.jsonl] REPORT.json...",
 		Short: "Measure how well reports agree with your hand labels",
 		Long: `calibrate compares each report's decisions with your labels from the review
-sheet (gophotocull-labels.jsonl beside the first report, unless --labels): a
+sheet (cull-labels.jsonl beside the first report, unless --labels): a
 confusion matrix, the false-cull rate (you said keep, it culled), the missed-cull
 rate, and the review rate. Star ratings without a label don't count. It also
 re-decides the stored assessments across --review-below-sharpness values, so
 thresholds can be tuned without new model calls; apply the chosen ones with
-'gophotocull decide'.`,
-		Example: "  gophotocull calibrate sonnet.json local.json",
+'cull decide'.`,
+		Example: "  cull calibrate sonnet.json local.json",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := pol.policy()
@@ -41,7 +41,7 @@ thresholds can be tuned without new model calls; apply the chosen ones with
 			}
 			verdicts := labels.Verdicts(all)
 			if len(verdicts) == 0 {
-				return fmt.Errorf("no labels in %s: label frames with 'gophotocull review' first, or pass --labels", labelsPath)
+				return fmt.Errorf("no labels in %s: label frames with 'cull review' first, or pass --labels", labelsPath)
 			}
 			w := cmd.OutOrStdout()
 			for _, path := range args {
@@ -56,7 +56,7 @@ thresholds can be tuned without new model calls; apply the chosen ones with
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&labelsPath, "labels", "", "labels log (default: gophotocull-labels.jsonl beside the first report)")
+	cmd.Flags().StringVar(&labelsPath, "labels", "", "labels log (default: cull-labels.jsonl beside the first report)")
 	pol.register(cmd.Flags())
 	return cmd
 }

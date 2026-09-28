@@ -15,7 +15,7 @@ import (
 )
 
 // FileName is the log's name, in the report's directory.
-const FileName = "gophotocull-labels.jsonl"
+const FileName = "cull-labels.jsonl"
 
 // Entry is one frame's full state at one time. The last entry per file wins.
 type Entry struct {

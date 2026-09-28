@@ -17,7 +17,7 @@ culled/ folder (and its .xmp sidecar) back to its original path, then removes
 culled/ folders left empty. It never overwrites: a frame whose original path is
 taken again stays in culled/ and is listed. To keep some culls, move those
 files back by hand instead.`,
-		Example: "  gophotocull restore ~/Pictures/2026-09-26",
+		Example: "  cull restore ~/Pictures/2026-09-26",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := so.base(args[0])

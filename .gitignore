@@ -1,8 +1,8 @@
 /bin/
 *.report.json
-gophotocull-report.json
-gophotocull-labels.jsonl
-gophotocull-review/
+cull-report.json
+cull-labels.jsonl
+cull-review/
 
 # Real images never go in git
 /photos/

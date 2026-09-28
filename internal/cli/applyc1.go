@@ -24,9 +24,9 @@ func newApplyC1Cmd(so *sharedOpts) *cobra.Command {
 		Use:   "apply-c1 <dir>",
 		Short: "Generate (and optionally run) AppleScript that applies the report in Capture One",
 		Long: `apply-c1 writes an AppleScript for the open Capture One document: a color tag
-(keep green, review yellow, cull red) and a gophotocull:<verdict> keyword per frame,
+(keep green, review yellow, cull red) and a cull:<verdict> keyword per frame,
 and with --exposure / --crop the suggested exposure and crop. Your labels from the
-review sheet (gophotocull-labels.jsonl beside the report, or --labels; --no-labels
+review sheet (cull-labels.jsonl beside the report, or --labels; --no-labels
 ignores them) override the model's verdicts, and your stars set ratings; ratings
 are never set otherwise, so ratings made in Capture One stay. It prints the script by default (a dry run); --run pipes it to
 osascript.
@@ -34,9 +34,9 @@ osascript.
 Run --probe first: a read-only script that lists a few images with their names,
 color tags, dimensions and crops, to confirm how Capture One names and numbers
 things before anything is written.`,
-		Example: `  gophotocull apply-c1 --probe ~/Pictures/2026-09-26 | osascript -
-  gophotocull apply-c1 ~/Pictures/2026-09-26 > apply.applescript   # review it
-  gophotocull apply-c1 --run ~/Pictures/2026-09-26`,
+		Example: `  cull apply-c1 --probe ~/Pictures/2026-09-26 | osascript -
+  cull apply-c1 ~/Pictures/2026-09-26 > apply.applescript   # review it
+  cull apply-c1 --run ~/Pictures/2026-09-26`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var script string
@@ -49,7 +49,7 @@ things before anything is written.`,
 				}
 				rep, err := report.Load(cfg.ReportPath)
 				if err != nil {
-					return fmt.Errorf("no report: %w (run cull first, or pass -o)", err)
+					return fmt.Errorf("no report: %w (run judge first, or pass -o)", err)
 				}
 				if o.Labels, err = userLabels(cmd.ErrOrStderr(), cfg.ReportPath, labelsPath, noLabels); err != nil {
 					return err
@@ -69,11 +69,11 @@ things before anything is written.`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&labelsPath, "labels", "", "your labels log (default: gophotocull-labels.jsonl beside the report, when it exists)")
+	f.StringVar(&labelsPath, "labels", "", "your labels log (default: cull-labels.jsonl beside the report, when it exists)")
 	f.BoolVar(&noLabels, "no-labels", false, "ignore your labels: the model's verdicts, and no ratings")
 	f.BoolVar(&o.Rating, "rating", true, "set star ratings from your labels (only frames you rated)")
 	f.BoolVar(&o.Label, "label", true, "set color tags (keep green, review yellow, cull red)")
-	f.BoolVar(&o.Keyword, "keyword", true, "apply gophotocull:<verdict> keywords (+ gophotocull:labeled for your verdicts)")
+	f.BoolVar(&o.Keyword, "keyword", true, "apply cull:<verdict> keywords (+ cull:labeled for your verdicts)")
 	f.BoolVar(&o.Exposure, "exposure", false, "set the suggested exposure on frames marked fixable")
 	f.BoolVar(&o.Crop, "crop", false, "set the suggested crop on frames marked croppable")
 	f.BoolVar(&probe, "probe", false, "print a read-only script that lists a few images, to check names and numbering first")

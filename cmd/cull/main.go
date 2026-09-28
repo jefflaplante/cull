@@ -1,4 +1,4 @@
-// Command gophotocull scores DNGs from their embedded previews with a vision model.
+// Command cull scores DNGs from their embedded previews with a vision model.
 package main
 
 import (

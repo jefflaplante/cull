@@ -60,7 +60,7 @@ func Decide(reportPath string, o DecideOptions, log io.Writer) (DecideSummary, e
 		sum.Changed[string(before[i])+"→"+string(rep.Results[i].Decision)]++
 	}
 	if sum.Frames == 0 {
-		return sum, errors.New("no evaluations in report (it came from scan, or every frame failed): run cull first")
+		return sum, errors.New("no evaluations in report (it came from scan, or every frame failed): run judge first")
 	}
 	if dups := labels.Duplicates(rep.Results); len(o.Labels) > 0 && len(dups) > 0 {
 		return sum, fmt.Errorf("frames share a file name, so your labels can't tell them apart (rename them, or pass --no-labels): %s", strings.Join(dups, "; "))

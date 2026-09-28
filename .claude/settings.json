@@ -9,16 +9,16 @@
       "Bash(go test *)",
       "Bash(go vet *)",
       "Bash(gofmt *)",
-      "Bash(./bin/gophotocull scan *)",
-      "Bash(./bin/gophotocull version)",
-      "Bash(./bin/gophotocull --help)",
+      "Bash(./bin/cull scan *)",
+      "Bash(./bin/cull version)",
+      "Bash(./bin/cull --help)",
       "Bash(sdef *)",
       "Bash(git status)",
       "Bash(git diff *)",
       "Bash(git log *)"
     ],
     "ask": [
-      "Bash(./bin/gophotocull cull *)",
+      "Bash(./bin/cull judge *)",
       "Bash(osascript *)",
       "Bash(git push *)"
     ],

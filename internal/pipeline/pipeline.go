@@ -443,7 +443,7 @@ func finishRun(rep *report.Report, cfg Config) error {
 	if cfg.MoveCulled && !cfg.DryRun {
 		// After a quota stop or Ctrl-C too: those decisions are final.
 		if n := moveCulled(rep, lab, cfg.Log); n > 0 {
-			fmt.Fprintf(cfg.Log, "moved %d culled frame(s) into %s/ (undo: gophotocull restore %s)\n", n, CulledDir, cfg.Dir)
+			fmt.Fprintf(cfg.Log, "moved %d culled frame(s) into %s/ (undo: cull restore %s)\n", n, CulledDir, cfg.Dir)
 		}
 	}
 	rep.Generated = time.Now()

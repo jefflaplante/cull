@@ -70,7 +70,7 @@ func TestBuildWritesAnOfflinePageWithImages(t *testing.T) {
 	}
 	b, _ := os.ReadFile(index)
 	page := string(b)
-	for _, want := range []string{`id="data"`, "Export labels", "L1.DNG", "missed_focus", "boom", "gophotocull-labels.jsonl", `"assets/"`} {
+	for _, want := range []string{`id="data"`, "Export labels", "L1.DNG", "missed_focus", "boom", "cull-labels.jsonl", `"assets/"`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %q", want)
 		}

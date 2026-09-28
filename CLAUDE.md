@@ -7,25 +7,30 @@ editor is Capture One (macOS).
 
 Scaffolded in a claude.ai chat; this file carries that context forward.
 
+The binary is **`cull`** (renamed 2026-09-28); the model step is `cull judge`. Files and
+tags it writes: `cull-report.json`, `cull-labels.jsonl`, `cull-review/`, keywords
+`cull:<verdict>` / `cull:labeled`. npm, crates.io and PyPI each have an unrelated `cull`
+package that installs a `cull` command (npm's deletes files); none is installed here.
+
 ## Commands
 
 ```sh
-make build            # bin/gophotocull, version stamped from git describe
+make build            # bin/cull, version stamped from git describe
 make test             # all tests use synthetic fixtures; no network, no API key
                       # (eval tests bind loopback via httptest: under the Claude Code
                       # sandbox this needs sandbox.network.allowLocalBinding: true)
 make vet
-./bin/gophotocull scan --save-inputs /tmp/in <dir>   # no model calls; previews, faces
-./bin/gophotocull review <dir>                        # browser: label/star; saves labels log + sidecars
-./bin/gophotocull cull <dir>                          # anthropic: spends API credits
-./bin/gophotocull cull --backend claude-code <dir>    # subscription quota
-./bin/gophotocull cull --backend openai --model <m> <dir>  # local OpenAI-compatible server (free)
+./bin/cull scan --save-inputs /tmp/in <dir>          # no model calls; previews, faces
+./bin/cull review <dir>                              # browser: label/star; saves labels log + sidecars
+./bin/cull judge <dir>                               # anthropic: spends API credits
+./bin/cull judge --backend claude-code <dir>        # subscription quota
+./bin/cull judge --backend openai --model <m> <dir>  # local OpenAI-compatible server (free)
 ```
 
 ## Layout
 
-- `cmd/gophotocull` — main; signal-aware context into cobra
-- `internal/cli` — cobra tree: `scan`, `cull`, `decide`, `review`, `calibrate`, `apply-c1`,
+- `cmd/cull` — main; signal-aware context into cobra (binary `cull`; module and repo stay `gophotocull`)
+- `internal/cli` — cobra tree: `scan`, `judge` (model; code in cull.go), `decide`, `review`, `calibrate`, `apply-c1`,
   `restore`, `version` (+ built-in `completion`)
 - `internal/dng` — pure-Go TIFF IFD/SubIFD walk for the largest reduced-resolution
   JPEG; reads IFDs + preview bytes only. `exiftool` fallback.
@@ -59,13 +64,13 @@ make vet
 
 ## Invariants — do not break
 
-- Never modify or delete DNGs. Only `cull --move-culled` moves them (same-disk
+- Never modify or delete DNGs. Only `judge --move-culled` / `decide --move-culled` move them (same-disk
   rename into `culled/`, never overwriting, recorded as `moved_to`), and `restore`
   undoes it. Never overwrite an existing `.xmp` unless `--overwrite-xmp`.
 - Never print, log, or read the API key contents beyond `internal/config`.
 - Keep/review/cull is decided in Go (`eval.Policy`), not by the model. The model
   only assesses. Keeps decisions deterministic, auditable, and tunable.
-- Don't run `cull` on real photos without asking first: it spends money.
+- Don't run `judge` on real photos without asking first: it spends money.
 - Dependencies: stdlib plus cobra, and pigo `core` (face detection; justified in the
   2026-09-26 spec). Justify anything else.
 - Tests use synthetic fixtures. Never commit real images.
@@ -115,7 +120,7 @@ make vet
   hair, face, necklace) and on bokeh/out-of-focus foliage on 5. Advisory only.
 - Measured peak RSS (`/usr/bin/time -l`, unsandboxed): 1.49 GB at `-j 1`, 2.32 GB with
   3 frames in flight: ~0.8–1 GB per concurrent 60MP frame. ~2.7 s/frame single-threaded.
-- Local `cull --backend openai --model <local-4b-vision-model>`: works end to
+- Local `judge --backend openai --model <local-4b-vision-model>`: works end to
   end, ~2.5 frames/min at `-j 4`. The 4B model is a poor judge: its locate calls
   returned "woman" boxes, swapped top/bottom (rejected as invalid), or "no clear
   subject" on a frame with one; it called `missed_focus` on 3 frames whose eyes are
@@ -124,12 +129,12 @@ make vet
   early hang-up: 45 s vs 95 s non-streaming for the same 2 frames at `-j 1`; at
   temperature 0 the two runs still disagreed on both verdicts (the 4B is unstable
   near decision boundaries).
-- Subscription `cull --backend claude-code` (Sonnet 5): 17 frames in 105 s at `-j 2`,
+- Subscription `judge --backend claude-code` (Sonnet 5): 17 frames in 105 s at `-j 2`,
   150k input / 12k output tokens. Located the eyes on all 7 no-face frames. Culled 2,
   both genuinely soft at 100% (M1103817 missed focus; M1104110 moving subject); kept
   the 3 frames the 4B model false-culled. 17 unlabelled frames: a first signal, not
   calibration. Compare backends and `--tiles 0` vs `1` against hand labels.
-- API `cull --backend anthropic` (claude-sonnet-5), 1 frame (M1104114, no face),
+- API `judge --backend anthropic` (claude-sonnet-5), 1 frame (M1104114, no face),
   run with the user's approval: locate + evaluate both succeeded on the first try
   with `output_config.format` json_schema. 7.4k input / 1.2k output tokens (~$0.03),
   26 s. Locate boxed the eyes of a tilted face pigo missed; verdict matched the
@@ -188,7 +193,7 @@ make vet
   reasons sometimes terse). `review --serve` used live by the user 2026-09-27: works.
   Follow-ups done: ↑/↓ move by grid row, your badge outlined + legend, header shows the
   folder and labels log, and `review <dir>` serves + opens + writes sidecars by default.
-- Live `cull --batch` (claude-sonnet-5, 3 frames, with the user's approval): two rounds
+- Live `judge --batch` (claude-sonnet-5, 3 frames, with the user's approval): two rounds
   as designed. Round 1 = 1 evaluate (face frame) + 2 locates, round 2 = 2 evaluates;
   ~2 min per round, 4.2 min total. 21.2k in / 2.3k out, $0.033 at batch price
   (estimate said $0.04). State file removed on completion. Peak RSS 1.18 GB (3 frames
@@ -220,7 +225,7 @@ make vet
    fallback → native subject crop; noise-corrected "where focus landed" tile;
    `anthropic` / `claude-code` / `openai` backends; `--save-inputs`; scan summary.
 2. **Calibrate before trusting.** Tooling done 2026-09-27 (`review` →
-   `gophotocull-labels.jsonl` → `calibrate`, tune with `decide`). Waiting on the user's labeled sample set.
+   `cull-labels.jsonl` → `calibrate`, tune with `decide`). Waiting on the user's labeled sample set.
    Tune prompt/policy until false-cull rate is acceptable. Nothing should auto-apply
    at 1000-frame scale before this.
 3. ~~`apply-c1`~~ built (dry run default); confirm with `--probe` on a real catalog.

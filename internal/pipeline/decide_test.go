@@ -229,7 +229,7 @@ func TestDecideLabelsDriveSidecarsAndMoves(t *testing.T) {
 		t.Errorf("report decision replaced by your label: %s", r.Decision)
 	}
 	read := func(p string) string { b, _ := os.ReadFile(p); return string(b) }
-	if s := read(filepath.Join(dir, "L1000001.xmp")); !strings.Contains(s, `xmp:Label="Green"`) || !strings.Contains(s, "gophotocull:labeled") {
+	if s := read(filepath.Join(dir, "L1000001.xmp")); !strings.Contains(s, `xmp:Label="Green"`) || !strings.Contains(s, "<rdf:li>cull:labeled</rdf:li>") {
 		t.Errorf("L1 sidecar:\n%s", s)
 	}
 	if s := read(filepath.Join(dir, CulledDir, "L1000002.xmp")); !strings.Contains(s, `xmp:Label="Red"`) {
@@ -250,7 +250,7 @@ func TestLabelsWithDuplicateNames(t *testing.T) {
 		os.WriteFile(f, []byte("dng"), 0o644)
 		rep.Results = append(rep.Results, report.Result{File: f, Evaluation: missed, Decision: eval.Cull})
 	}
-	rp := filepath.Join(dir, "gophotocull-report.json")
+	rp := filepath.Join(dir, "cull-report.json")
 	rep.Save(rp)
 	lab := map[string]labels.Entry{"L1.DNG": {File: "L1.DNG", Label: "keep"}}
 	// decide refuses: a label couldn't say which frame it means.

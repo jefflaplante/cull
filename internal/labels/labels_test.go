@@ -110,7 +110,10 @@ func TestConcurrentAppendsStayWhole(t *testing.T) {
 }
 
 func TestDefaultPathAndVerdicts(t *testing.T) {
-	if got := DefaultPath("/shoot/gophotocull-report.json"); got != "/shoot/"+FileName {
+	if FileName != "cull-labels.jsonl" {
+		t.Fatalf("log name %q", FileName)
+	}
+	if got := DefaultPath("/shoot/cull-report.json"); got != "/shoot/"+FileName {
 		t.Fatal(got)
 	}
 	v := Verdicts(map[string]Entry{"A.DNG": {Label: "cull"}, "B.DNG": {Stars: 3}})

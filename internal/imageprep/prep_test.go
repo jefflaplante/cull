@@ -142,3 +142,40 @@ func TestDownLuma(t *testing.T) {
 		t.Fatalf("no-op downscale: dw=%d dh=%d scale=%v", dw, dh, scale)
 	}
 }
+
+func TestGridFollowsDisplayOrientation(t *testing.T) {
+	// Stored image: left half red, right half blue.
+	img := image.NewRGBA(image.Rect(0, 0, 160, 80))
+	for y := 0; y < 80; y++ {
+		for x := 0; x < 160; x++ {
+			c := color.RGBA{220, 20, 20, 255}
+			if x >= 80 {
+				c = color.RGBA{20, 20, 220, 255}
+			}
+			img.Set(x, y, c)
+		}
+	}
+	var b bytes.Buffer
+	jpeg.Encode(&b, img, &jpeg.Options{Quality: 95})
+	cell := func(g []uint8, n, cx, cy int) (r, bl uint8) { i := (cy*n + cx) * 3; return g[i], g[i+2] }
+
+	f, _ := Decode(b.Bytes(), 1)
+	g := f.Grid(8)
+	if r, bl := cell(g, 8, 0, 0); r < 150 || bl > 80 {
+		t.Fatalf("orientation 1, top-left should be red: r=%d b=%d", r, bl)
+	}
+	if r, bl := cell(g, 8, 7, 0); bl < 150 || r > 80 {
+		t.Fatalf("orientation 1, top-right should be blue: r=%d b=%d", r, bl)
+	}
+	f6, _ := Decode(b.Bytes(), 6) // displayed rotated 90° CW: stored left half becomes the top
+	g6 := f6.Grid(8)
+	if r, _ := cell(g6, 8, 0, 0); r < 150 {
+		t.Fatalf("orientation 6, top should be red: r=%d", r)
+	}
+	if _, bl := cell(g6, 8, 0, 7); bl < 150 {
+		t.Fatalf("orientation 6, bottom should be blue: b=%d", bl)
+	}
+	if len(g) != 8*8*3 {
+		t.Fatalf("len %d", len(g))
+	}
+}

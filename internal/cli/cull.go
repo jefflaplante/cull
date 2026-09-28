@@ -148,10 +148,7 @@ Backends (--backend):
 			cfg.Backend = b.Name()
 			cfg.Model = o.model
 			cfg.Locate = o.locate == "model"
-			cfg.Concurrency = o.concurrency
-			if cfg.Concurrency == 0 {
-				cfg.Concurrency = backendDefaults[o.backend].concurrency
-			}
+			cfg.Concurrency = o.backendFlags.concurrencyOrDefault(o.concurrency)
 			cfg.Resume = o.resume
 			cfg.WriteXMP = o.writeXMP
 			cfg.XMPDevelop = o.xmpDevelop
@@ -234,8 +231,11 @@ func (o *cullOpts) escalation(cmd *cobra.Command) (*pipeline.Escalation, error) 
 
 // printEstimate projects list- or batch-price cost from measured per-frame token
 // use, and, when rank is set (judge without --no-rank) and the backend is priced,
-// an upper bound on ranking cost: every frame assumed to land in its own 8-frame
-// set, one call each (⌈n/8⌉), since actual set sizes aren't known before judging.
+// a rough ranking cost: ⌈n/8⌉ calls, at 10k in / 1k out each. That's the call
+// count if every frame lands in a full 8-frame set — neither a bound nor exact,
+// since actual set sizes aren't known before judging: a pair still costs one
+// call (more per frame than a full set), and a frame that joins no set costs
+// nothing. It's a ballpark, not a gate.
 func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch, rank bool) {
 	w := cmd.ErrOrStderr()
 	if !priced {
@@ -246,8 +246,8 @@ func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price
 	fmt.Fprintf(w, "estimate: %d frames × ~7k in / ~1k out tokens ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", n, in, out, usd, rate(batch), model)
 	if rank && n > 0 {
 		calls := (n + 7) / 8
-		rusd, rin, rout := llm.EstimateRank(calls, p, batch)
-		fmt.Fprintf(w, "ranking ≤ %d call(s) (every frame assumed its own 8-frame set) ≈ %d in / %d out ≈ ranking ≤ $%.2f at %s\n", calls, rin, rout, rusd, rate(batch))
+		rusd, _, _ := llm.EstimateRank(calls, p, batch)
+		fmt.Fprintf(w, "ranking ≈ %d call(s), $%.2f at %s, if every frame lands in an 8-frame set (pairs cost more per frame; frames in no set cost nothing)\n", calls, rusd, rate(batch))
 	}
 }
 

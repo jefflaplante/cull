@@ -88,6 +88,17 @@ func (o *backendFlags) buildBackend(cmd *cobra.Command, name, model string) (llm
 	}
 }
 
+// concurrencyOrDefault returns explicit unless it's 0 (unset), in which case it
+// returns this backend's default concurrency (claude-code 2, otherwise 4):
+// shared by judge and rank so a plain 'cull rank --backend claude-code' doesn't
+// run twice as many 'claude -p' processes as judge would.
+func (o *backendFlags) concurrencyOrDefault(explicit int) int {
+	if explicit != 0 {
+		return explicit
+	}
+	return backendDefaults[o.backend].concurrency
+}
+
 type backendDefault struct {
 	model       string
 	concurrency int

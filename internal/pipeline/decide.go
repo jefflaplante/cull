@@ -37,17 +37,25 @@ type DecideSummary struct {
 // Decide re-runs the policy on every stored evaluation without calling a model,
 // then optionally rewrites sidecars and syncs culled/. Policy is the only place
 // decisions come from, so tuning it after calibration costs nothing. A schema-v3
-// report gets its looks computed from the DNGs and is saved as the current schema.
-// ctx only bounds that look computation (Ctrl-C leaves the rest of the frames
-// without a look, which decideAll takes: they join no set); the policy re-apply
-// itself is local and uninterruptible.
+// report gets its looks computed from the DNGs and is saved as the current
+// schema. ctx bounds only that look computation: mirroring pipeline.Rank, a
+// cancelled ctx (Ctrl-C) saves the looks computed so far (if any) and returns the
+// context's error before redecide runs, so no sidecar is rewritten and no file
+// is moved.
 func Decide(ctx context.Context, reportPath string, o DecideOptions, log io.Writer) (DecideSummary, error) {
 	rep, err := report.Load(reportPath)
 	if err != nil {
 		return DecideSummary{Changed: map[string]int{}}, err
 	}
-	if n, _ := fillLooks(ctx, rep); n > 0 {
+	n, err := fillLooks(ctx, rep)
+	if n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
+	}
+	if err != nil { // Ctrl-C: keep the looks computed so far (free but slow); decide and move nothing
+		if n > 0 {
+			err = errors.Join(err, rep.Save(reportPath))
+		}
+		return DecideSummary{Changed: map[string]int{}}, err
 	}
 	sum, err := redecide(rep, o, log, nil)
 	if err != nil {

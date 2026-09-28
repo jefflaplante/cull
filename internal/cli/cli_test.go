@@ -633,32 +633,89 @@ func TestOldSequenceAndDuplicatesFlagsAreGone(t *testing.T) {
 	}
 }
 
-func TestJudgeEstimateAddsRankingUpperBound(t *testing.T) {
+func TestJudgeEstimateAddsApproximateRankingCost(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	dir := t.TempDir()
 	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
 	tinyDNG(t, filepath.Join(dir, "L2.DNG"))
 	out, err := run(t, "judge", "--estimate", dir)
-	if err != nil || !strings.Contains(out, "ranking ≤ $") {
+	if err != nil || !strings.Contains(out, "ranking ≈") || !strings.Contains(out, "if every frame lands in an 8-frame set") {
 		t.Fatalf("err=%v\n%s", err, out)
 	}
+	if strings.Contains(out, "ranking ≤") {
+		t.Fatalf("⌈n/8⌉ is not a bound: must not say ≤\n%s", out)
+	}
 	out, err = run(t, "judge", "--estimate", "--no-rank", dir)
-	if err != nil || strings.Contains(out, "ranking ≤ $") {
+	if err != nil || strings.Contains(out, "ranking ≈") {
 		t.Fatalf("--no-rank must skip the ranking estimate: err=%v\n%s", err, out)
 	}
+}
+
+// rankReportFixture writes a report with n rankable, identical (same look),
+// tiny-DNG frames to dir/cull-report.json (schema_version 3, no look: as if
+// from before sequence ranking) and returns its path.
+func rankReportFixture(t *testing.T, dir, backend, model string, n int) string {
+	t.Helper()
+	sharp := &eval.Evaluation{Sharpness: eval.Sharpness{Score: 8, Status: "sharp"}, Exposure: eval.Exposure{Status: "good"},
+		Composition: eval.Composition{Status: "good"}, People: eval.People{Present: true, Eyes: "open", Expression: "good"}}
+	rep := &report.Report{SchemaVersion: 3, Backend: backend, Model: model, Dir: dir}
+	for i := 0; i < n; i++ {
+		f := filepath.Join(dir, fmt.Sprintf("L%d.DNG", i+1))
+		tinyDNG(t, f)
+		rep.Results = append(rep.Results, report.Result{File: f, Preview: &report.PreviewInfo{Orientation: 1}, Evaluation: sharp})
+	}
+	rp := filepath.Join(dir, "cull-report.json")
+	if err := rep.Save(rp); err != nil {
+		t.Fatal(err)
+	}
+	return rp
 }
 
 func TestRankEstimateCountsSetsAndCalls(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
-	rep := &report.Report{Sets: []report.Set{{ID: 1, Members: []string{"a", "b"}, Of: 2, By: ""}}}
-	if err := rep.Save(filepath.Join(dir, "cull-report.json")); err != nil {
-		t.Fatal(err)
-	}
+	rp := rankReportFixture(t, dir, "", "", 2)
+
 	out, err := run(t, "rank", "--estimate", dir)
 	if err != nil || !strings.Contains(out, "1 set, 1 call") {
 		t.Fatalf("err=%v\n%s", err, out)
+	}
+	// The free look computation --estimate did (a v3 report) must be persisted,
+	// exactly as Rank's own Ctrl-C path keeps looks computed so far.
+	saved, err := report.Load(rp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range saved.Results {
+		if r.Look == "" {
+			t.Fatalf("looks computed during --estimate must be saved: %+v", r)
+		}
+	}
+	if saved.Sets != nil {
+		t.Fatalf("--estimate must not write sets to the report: %+v", saved.Sets)
+	}
+}
+
+func TestRankForceEstimateCountsAlreadyRankedSets(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	rankReportFixture(t, dir, "claude-code", "sonnet", 2)
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeRank), 0o755)
+
+	if out, err := run(t, "rank", "--claude-bin", bin, dir); err != nil {
+		t.Fatalf("rank: %v\n%s", err, out)
+	}
+	// Now fully ranked: without --force it needs no more ranking...
+	out, err := run(t, "rank", "--estimate", dir)
+	if err != nil || !strings.Contains(out, "0 sets, 0 calls") {
+		t.Fatalf("already ranked, no --force: err=%v\n%s", err, out)
+	}
+	// ...but --force must still count it.
+	out, err = run(t, "rank", "--force", "--estimate", dir)
+	if err != nil || !strings.Contains(out, "1 set, 1 call") {
+		t.Fatalf("--force --estimate must count the already-ranked set: err=%v\n%s", err, out)
 	}
 }
 
@@ -672,24 +729,13 @@ echo '{"type":"result","is_error":false,"structured_output":{"ranking":[{"frame"
 func TestRankCommandRanksAV3ReportEndToEnd(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
-	f1, f2 := filepath.Join(dir, "L1.DNG"), filepath.Join(dir, "L2.DNG")
-	tinyDNG(t, f1)
-	tinyDNG(t, f2)
-	sharp := &eval.Evaluation{Sharpness: eval.Sharpness{Score: 8, Status: "sharp"}, Exposure: eval.Exposure{Status: "good"},
-		Composition: eval.Composition{Status: "good"}, People: eval.People{Present: true, Eyes: "open", Expression: "good"}}
-	// schema_version 3, no look: a report from before sequence ranking.
-	rep := &report.Report{SchemaVersion: 3, Backend: "claude-code", Model: "sonnet", Dir: dir, Results: []report.Result{
-		{File: f1, Preview: &report.PreviewInfo{Orientation: 1}, Evaluation: sharp},
-		{File: f2, Preview: &report.PreviewInfo{Orientation: 1}, Evaluation: sharp},
-	}}
-	rp := filepath.Join(dir, "cull-report.json")
-	if err := rep.Save(rp); err != nil {
-		t.Fatal(err)
-	}
+	rp := rankReportFixture(t, dir, "claude-code", "sonnet", 2)
 	bin := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeRank), 0o755)
 
-	out, err := run(t, "rank", "--backend", "claude-code", "--claude-bin", bin, dir)
+	// --keep-best 1: only the winner (L1, frame 1) should stay keep; the other
+	// is outranked (default --outranked review).
+	out, err := run(t, "rank", "--backend", "claude-code", "--claude-bin", bin, "--keep-best", "1", dir)
 	if err != nil {
 		t.Fatalf("rank: %v\n%s", err, out)
 	}
@@ -714,32 +760,81 @@ func TestRankCommandRanksAV3ReportEndToEnd(t *testing.T) {
 	if len(got.Sets[0].Order) != 2 {
 		t.Fatalf("order: %+v", got.Sets[0].Order)
 	}
+	for _, r := range got.Results {
+		switch filepath.Base(r.File) {
+		case "L1.DNG":
+			if r.Decision != eval.Keep {
+				t.Errorf("L1 (rank 1, --keep-best 1): decision=%s, want keep", r.Decision)
+			}
+		case "L2.DNG":
+			if r.Decision != eval.Review {
+				t.Errorf("L2 (outranked): decision=%s, want review", r.Decision)
+			}
+		}
+	}
 }
 
 func TestRankWarnsWhenBackendOrModelDiffersFromTheReport(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
-	f1, f2 := filepath.Join(dir, "L1.DNG"), filepath.Join(dir, "L2.DNG")
-	tinyDNG(t, f1)
-	tinyDNG(t, f2)
-	sharp := &eval.Evaluation{Sharpness: eval.Sharpness{Score: 8, Status: "sharp"}, Exposure: eval.Exposure{Status: "good"},
-		Composition: eval.Composition{Status: "good"}, People: eval.People{Present: true, Eyes: "open", Expression: "good"}}
-	rep := &report.Report{SchemaVersion: 3, Backend: "anthropic", Model: "claude-sonnet-5", Dir: dir, Results: []report.Result{
-		{File: f1, Preview: &report.PreviewInfo{Orientation: 1}, Evaluation: sharp},
-		{File: f2, Preview: &report.PreviewInfo{Orientation: 1}, Evaluation: sharp},
-	}}
-	rp := filepath.Join(dir, "cull-report.json")
-	if err := rep.Save(rp); err != nil {
-		t.Fatal(err)
-	}
+	rankReportFixture(t, dir, "anthropic", "claude-sonnet-5", 2)
 	bin := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeRank), 0o755)
 
-	out, err := run(t, "rank", "--backend", "claude-code", "--claude-bin", bin, dir)
+	want := "warning: report was judged with anthropic/claude-sonnet-5; ranking with claude-code/sonnet"
+
+	// The warning must appear before an --estimate too, not only before a paid
+	// run (--estimate only saves the report's looks, so the fixture is still
+	// good for the real run below).
+	out, err := run(t, "rank", "--backend", "claude-code", "--estimate", dir)
+	if err != nil || !strings.Contains(out, want) {
+		t.Fatalf("no mismatch warning on --estimate: %v\n%s", err, out)
+	}
+
+	out, err = run(t, "rank", "--backend", "claude-code", "--claude-bin", bin, dir)
 	if err != nil {
 		t.Fatalf("rank: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "warning: report was judged with anthropic/claude-sonnet-5; ranking with claude-code/sonnet") {
+	if !strings.Contains(out, want) {
 		t.Fatalf("no mismatch warning:\n%s", out)
+	}
+}
+
+func TestRankDefaultsBackendAndModelFromTheReport(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	dir := t.TempDir()
+	rankReportFixture(t, dir, "claude-code", "sonnet", 2)
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeRank), 0o755)
+
+	// No --backend given: it must default to the report's claude-code, not
+	// anthropic (which would fail here with no API key).
+	out, err := run(t, "rank", "--claude-bin", bin, dir)
+	if err != nil {
+		t.Fatalf("rank: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "backend: claude-code") {
+		t.Fatalf("did not default to the report's backend:\n%s", out)
+	}
+}
+
+func TestRankAppliesBackendDefaultConcurrency(t *testing.T) {
+	for _, c := range NewRootCmd().Commands() {
+		if c.Name() == "rank" {
+			if f := c.Flags().Lookup("concurrency"); f == nil || f.DefValue != "0" {
+				t.Fatalf("rank --concurrency flag: %+v", f)
+			}
+			return
+		}
+	}
+	t.Fatal("no rank command")
+}
+
+func TestKeepBestTooHighExplainsWhy(t *testing.T) {
+	dir := t.TempDir()
+	_, err := run(t, "judge", "--keep-best", "6", dir)
+	if err == nil || !strings.Contains(err.Error(), "8-frames-per-call") {
+		t.Fatalf("want an explanation mentioning the 8-frames-per-call limit, got %v", err)
 	}
 }

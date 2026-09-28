@@ -25,13 +25,15 @@ make vet
 ./bin/cull judge <dir>                               # anthropic: spends API credits
 ./bin/cull judge --backend claude-code <dir>        # subscription quota
 ./bin/cull judge --backend openai --model <m> <dir>  # local OpenAI-compatible server (free)
+./bin/cull rank <dir>                                # rank sequences already judged (or after --no-rank)
 ```
 
 ## Layout
 
 - `cmd/cull` — main; signal-aware context into cobra (binary `cull`; module and repo stay `gophotocull`)
-- `internal/cli` — cobra tree: `scan`, `judge` (model; code in cull.go), `decide`, `review`, `calibrate`, `apply-c1`,
-  `restore`, `version` (+ built-in `completion`)
+- `internal/cli` — cobra tree: `scan`, `judge` (model; code in cull.go), `rank` (rank.go),
+  `decide`, `review`, `calibrate`, `apply-c1`, `restore`, `version` (+ built-in `completion`);
+  backend.go (`--backend`/`--model`/credential flags shared by judge and rank)
 - `internal/dng` — pure-Go TIFF IFD/SubIFD walk for the largest reduced-resolution
   JPEG; reads IFDs + preview bytes only. `exiftool` fallback.
 - `internal/imageprep` — `Frame`: decoder's YCbCr kept in stored orientation + display
@@ -41,12 +43,18 @@ make vet
 - `internal/llm` — `Backend` interface (system + text/JPEG parts + JSON Schema →
   validated JSON, usage, quota) with `anthropic` (output_config json_schema),
   `claude-code` (`claude -p`, subscription), `openai` (OpenAI-compatible, streaming)
-- `internal/eval` — prompts, schemas, `Evaluate`, `Locate`, **Policy**
+- `internal/eval` — prompts, schemas, `Evaluate`, `Locate`, **Policy** (types.go), the
+  rank call's prompt/schema/request and permutation-checked decode (rank.go)
 - `internal/pipeline` — detect → locate → crops → evaluate → decide; worker pool,
   resume (path+size+mtime; refuses a different backend/model/schema), checkpointing,
   quota stop, `--save-inputs`, `--move-culled` / `Restore` (move.go; Discover skips `culled/`),
-  stages.go (shared frame stages), decide.go, groups.go (decideAll), batch.go (Message
-  Batches driver with re-attachable `<report>.batch.json` state), escalation, cost budget
+  stages.go (shared frame stages), decide.go, groups.go (decideAll: regroups sequences,
+  reuses/applies stored ranks, marks best), batch.go (Message Batches driver with
+  re-attachable `<report>.batch.json` state), escalation, cost budget; rank.go (`Rank`/
+  `RankSets`: chunk-then-final calls per set, sync and batch executors), rank_batch.go
+  (Message Batches ranking executor, re-attachable `<report>.rank-batch.json` state),
+  rankplan.go (chunk/finalist/merge math), rankcalls.go (`RankCalls`: exact call count
+  for `--estimate` without spending anything)
 - `internal/group` — look fingerprint (8×8 mean RGB) + sequence grouping (time gap +
   look to the previous frame), score order
 - `internal/rawclip` — pure-Go lossless-JPEG (SOF3) decoder; raw highlight clipping
@@ -254,6 +262,16 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
 - Capture One AppleScript property names for rating, keywords, exposure, crop.
   Dump the real dictionary with `sdef "/Applications/Capture One.app"` and read it
   before writing the applier.
+- How good and how stable the model's side-by-side ranking is: verdicts stay
+  `review` (`--outranked` default) until the calibrate sets section shows it's
+  trustworthy on a labeled sample.
+- M11-P capture-time spacing on files straight off the card: the 17-frame sample's
+  timestamps look rewritten (all fall within 2 s), so whether `--seq-gap` ever
+  actually splits a sequence on real files is unconfirmed; grouping there relied on
+  look distance alone.
+- Batch ranking (`cull rank --batch` / `judge --batch` with ranking on) has not been
+  run against the live Message Batches API; only `judge --batch`'s evaluate/locate
+  calls have (2026-09-27, above).
 
 ## Roadmap (priority order)
 
@@ -269,7 +287,13 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
 3. ~~`apply-c1`~~ built (dry run default); confirm with `--probe` on a real catalog.
 4. ~~Raw-level clipping~~ built (pure Go).
 5. ~~Message Batches~~ built (`--batch`); verified live 2026-09-27 on 3 frames.
-6. ~~Burst grouping~~ built.
+6. ~~Burst grouping~~ built, then superseded 2026-09-28 by **sequences and
+   best-of-set ranking**: look fingerprint + capture-time/look-distance grouping
+   (`internal/group`), side-by-side model ranking of each set (`eval.Rank`,
+   `pipeline.Rank`/`RankSets`), `--keep-best`/`--outranked` policy, `cull rank`
+   (sync and `--batch`), `cull:best` keyword, review-sheet set badges/filter/
+   filmstrip, and a calibrate sets section. Replaces `--burst-gap`, `--burst-hash`,
+   `--duplicates`. Ranking quality/stability still unverified (see above).
 
 ## Working style
 

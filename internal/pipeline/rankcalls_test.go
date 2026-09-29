@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,7 +44,7 @@ var sharpEval = &eval.Evaluation{
 
 func TestRankCallsCountsExactCalls(t *testing.T) {
 	c, rep := seqShoot(t, 5) // one set of 5 identical frames
-	sets, calls, filled, err := RankCalls(context.Background(), rep, c, false)
+	sets, calls, filled, err := RankCalls(context.Background(), rep, c, false, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestRankCallsForceCountsAlreadyRankedSets(t *testing.T) {
 		t.Fatalf("setup: the set should be fully ranked: %+v", rep.Sets[0])
 	}
 
-	sets, calls, _, err := RankCalls(context.Background(), rep, c, false)
+	sets, calls, _, err := RankCalls(context.Background(), rep, c, false, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +78,7 @@ func TestRankCallsForceCountsAlreadyRankedSets(t *testing.T) {
 		t.Fatalf("without --force, a fully-ranked set must not be counted: sets=%d calls=%d", sets, calls)
 	}
 
-	sets, calls, _, err = RankCalls(context.Background(), rep, c, true)
+	sets, calls, _, err = RankCalls(context.Background(), rep, c, true, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +95,7 @@ func TestRankCallsFillsLooksOnAV3ReportAndCountsForReal(t *testing.T) {
 	}
 	rep.Sets = nil // a v3 report also has no sets
 
-	sets, calls, filled, err := RankCalls(context.Background(), rep, c, false)
+	sets, calls, filled, err := RankCalls(context.Background(), rep, c, false, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +130,7 @@ func TestRankCallsCountChangesWithSeqLook(t *testing.T) {
 	}
 	cfg := Config{Seq: group.Options{Gap: time.Minute, MaxLook: d + 0.02}, Policy: eval.Policy{KeepBest: 3, Outranked: eval.ActionReview}}
 
-	sets, calls, _, err := RankCalls(context.Background(), newRep(), cfg, false)
+	sets, calls, _, err := RankCalls(context.Background(), newRep(), cfg, false, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func TestRankCallsCountChangesWithSeqLook(t *testing.T) {
 	if cfg.Seq.MaxLook < 0 {
 		t.Fatalf("premise: distance %.4f too small for this test", d)
 	}
-	sets, calls, _, err = RankCalls(context.Background(), newRep(), cfg, false)
+	sets, calls, _, err = RankCalls(context.Background(), newRep(), cfg, false, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +153,7 @@ func TestRankCallsCountChangesWithSeqLook(t *testing.T) {
 
 func TestRankCallsMakesNoModelCallsAndMovesNothing(t *testing.T) {
 	c, rep := seqShoot(t, 3)
-	if _, _, _, err := RankCalls(context.Background(), rep, c, false); err != nil {
+	if _, _, _, err := RankCalls(context.Background(), rep, c, false, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(c.Dir, "culled")); err == nil {

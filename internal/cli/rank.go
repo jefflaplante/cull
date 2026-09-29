@@ -98,7 +98,7 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 
 			price, priced := llm.PriceFor(o.backend, o.model)
 			if o.estimate || priced {
-				sets, calls, filled, cerr := pipeline.RankCalls(cmd.Context(), rep, cfg, o.force)
+				sets, calls, filled, cerr := pipeline.RankCalls(cmd.Context(), rep, cfg, o.force, cmd.ErrOrStderr())
 				if filled > 0 {
 					fmt.Fprintf(cmd.ErrOrStderr(), "computed the look of %d frame(s) from their DNGs\n", filled)
 					if serr := rep.Save(cfg.ReportPath); serr != nil {

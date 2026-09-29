@@ -207,27 +207,44 @@ func decodeWhereItLives(r report.Result) (*imageprep.Frame, error) {
 	return imageprep.Decode(pv.Data, pv.Orientation)
 }
 
+// lookProgressEvery is how often fillLooks logs progress.
+const lookProgressEvery = 50
+
 // fillLooks computes the look of every measured frame that has none (a schema-v3
 // report) from its preview, read from where the frame lives now. A frame that
 // can't be read keeps none, so it joins no set. It returns how many it filled; once
 // ctx is cancelled it stops between frames with ctx's error, leaving the rest
 // without a look (which decideAll takes: they join no set).
-func fillLooks(ctx context.Context, rep *report.Report) (int, error) {
-	n := 0
+//
+// On real DNGs this is ~1s/frame (a full-preview decode), so a large schema-v3
+// report can spend many silent minutes here: log progresses every
+// lookProgressEvery frames to w, which may be nil (io.Discard).
+func fillLooks(ctx context.Context, rep *report.Report, w io.Writer) (int, error) {
+	if w == nil {
+		w = io.Discard
+	}
+	var todo []int
 	for i := range rep.Results {
 		r := &rep.Results[i]
-		if r.Look != "" || r.Error != "" || r.Preview == nil {
-			continue
+		if r.Look == "" && r.Error == "" && r.Preview != nil {
+			todo = append(todo, i)
 		}
+	}
+	n := 0
+	for _, i := range todo {
 		if err := ctx.Err(); err != nil {
 			return n, err
 		}
+		r := &rep.Results[i]
 		f, err := decodeWhereItLives(*r)
 		if err != nil {
 			continue
 		}
 		r.Look = report.EncodeLook(f.Grid(group.LookSize))
 		n++
+		if n%lookProgressEvery == 0 {
+			fmt.Fprintf(w, "computing looks: %d/%d\n", n, len(todo))
+		}
 	}
 	return n, nil
 }
@@ -275,7 +292,7 @@ func rank(ctx context.Context, cfg Config, ex rankExec, force bool) (*report.Rep
 	if err != nil {
 		return nil, err
 	}
-	n, err := fillLooks(ctx, rep)
+	n, err := fillLooks(ctx, rep, log)
 	if n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
 	}

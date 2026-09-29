@@ -208,11 +208,27 @@ func TestResumeRefusesDifferentBackendOrSchema(t *testing.T) {
 	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err == nil || !strings.Contains(err.Error(), "drop --resume") {
 		t.Fatalf("backend mismatch: want refusal, got %v", err)
 	}
+}
 
+// A report from an older schema (e.g. saved before sequence ranking) advises the
+// free fix (cull decide upgrades it in place), not dropping --resume: that would
+// re-judge, and pay for, the whole shoot again.
+func TestResumeOnOlderSchemaAdvisesDecideNotRejudging(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	c := cfg(dir)
+	c.Backend, c.Model = "openai", "local-model"
 	os.WriteFile(c.ReportPath, []byte(`{"schema_version":1,"model":"local-model","backend":"openai","results":[]}`), 0o644)
-	c.Backend = "openai"
-	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err == nil || !strings.Contains(err.Error(), "drop --resume") {
-		t.Fatalf("schema mismatch: want refusal, got %v", err)
+	c.Resume = true
+	_, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
+	if err == nil {
+		t.Fatal("want a refusal")
+	}
+	if !strings.Contains(err.Error(), "cull decide") || !strings.Contains(err.Error(), "--resume") {
+		t.Fatalf("want advice to run cull decide then --resume, got %v", err)
+	}
+	if strings.Contains(err.Error(), "drop --resume") {
+		t.Fatalf("must not advise dropping --resume (that re-judges and pays again): %v", err)
 	}
 }
 

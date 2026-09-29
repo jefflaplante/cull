@@ -56,6 +56,14 @@ func reverse(n int) []int {
 	return o
 }
 
+func identity(n int) []int {
+	o := make([]int, n)
+	for i := range o {
+		o[i] = i + 1
+	}
+	return o
+}
+
 // seqShoot: n identical textured frames, all judged sharp 9 by the fake judge backend.
 func seqShoot(t *testing.T, n int) (Config, *report.Report) {
 	t.Helper()
@@ -131,10 +139,43 @@ func TestRankReadsFramesWhereTheyLiveAndFillsLooks(t *testing.T) {
 	for i := range rep.Results {
 		rep.Results[i].Look = ""
 	}
-	if n, err := fillLooks(context.Background(), rep); n != 2 || err != nil || rep.Results[0].Look == "" {
+	if n, err := fillLooks(context.Background(), rep, io.Discard); n != 2 || err != nil || rep.Results[0].Look == "" {
 		t.Fatalf("filled %d, %v", n, err)
 	}
 	_ = c
+}
+
+// fillLooks decodes a full preview per frame (~1s/frame on real DNGs): a large
+// schema-v3 report must not sit silent for minutes. It logs progress every
+// lookProgressEvery frames, and stays nil-safe when given no writer.
+func TestFillLooksLogsProgress(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "L1.DNG")
+	texturedDNG(t, p) // one cheap-to-decode DNG, reused by every result below
+	n := lookProgressEvery*2 + 10
+	rep := &report.Report{}
+	for i := 0; i < n; i++ {
+		rep.Results = append(rep.Results, report.Result{File: p, Preview: &report.PreviewInfo{Width: 1600, Height: 1067, Orientation: 1}})
+	}
+	var buf bytes.Buffer
+	filled, err := fillLooks(context.Background(), rep, &buf)
+	if err != nil || filled != n {
+		t.Fatalf("filled %d/%d, err %v", filled, n, err)
+	}
+	out := buf.String()
+	want1 := fmt.Sprintf("computing looks: %d/%d", lookProgressEvery, n)
+	want2 := fmt.Sprintf("computing looks: %d/%d", lookProgressEvery*2, n)
+	if !strings.Contains(out, want1) || !strings.Contains(out, want2) {
+		t.Fatalf("progress lines: got %q, want %q and %q", out, want1, want2)
+	}
+	if got := strings.Count(out, "computing looks:"); got != 2 {
+		t.Fatalf("want exactly 2 progress lines for %d frames (every %d), got %d:\n%s", n, lookProgressEvery, got, out)
+	}
+
+	// nil-safe: no writer, nothing left to fill.
+	if _, err := fillLooks(context.Background(), rep, nil); err != nil {
+		t.Fatalf("nil writer: %v", err)
+	}
 }
 
 func jpegSize(t *testing.T, b []byte) (int, int) {
@@ -178,7 +219,7 @@ func TestRankImagesSizesAndMovedFrames(t *testing.T) {
 
 	rep.Results[0] = r
 	rep.Results[0].Look, rep.Results[1].Look = "", ""
-	if n, err := fillLooks(context.Background(), rep); n != 2 || err != nil || rep.Results[0].Look == "" {
+	if n, err := fillLooks(context.Background(), rep, io.Discard); n != 2 || err != nil || rep.Results[0].Look == "" {
 		t.Fatalf("filled %d (%v), the moved frame too", n, err)
 	}
 }
@@ -211,7 +252,7 @@ func TestRankImageWorkHonoursCancel(t *testing.T) {
 	for i := range rep.Results { // a v3 report: looks to compute
 		rep.Results[i].Look = ""
 	}
-	if n, err := fillLooks(ctx, rep); n != 0 || !errors.Is(err, context.Canceled) || rep.Results[0].Look != "" {
+	if n, err := fillLooks(ctx, rep, io.Discard); n != 0 || !errors.Is(err, context.Canceled) || rep.Results[0].Look != "" {
 		t.Fatalf("fillLooks: %d, %v", n, err)
 	}
 	if err := rep.Save(c.ReportPath); err != nil {
@@ -421,6 +462,75 @@ func TestJudgeRanksSetsAtTheEnd(t *testing.T) {
 	}
 	if saved, err := report.Load(c.ReportPath); err != nil || saved.Sets[0].By != "model" {
 		t.Fatalf("saved: %v", err)
+	}
+}
+
+// judge --write-xmp must write cull:best on every winning frame, even one whose
+// decision never changes across ranking (a plain "changed decision" rewrite misses
+// it): with 3 sharp frames and KeepBest 3, all 3 are best both before and after the
+// model's (identity) order, so their decision is keep throughout.
+func TestJudgeWritesBestKeywordWhenDecisionDoesNotChange(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 3; i++ {
+		texturedDNG(t, filepath.Join(dir, fmt.Sprintf("L%07d.DNG", i)))
+	}
+	c := moveCfg(dir)
+	c.MoveCulled, c.Rank = false, true
+	c.Seq = group.Options{Gap: time.Minute, MaxLook: group.DefaultLook}
+	c.Policy.KeepBest, c.Policy.Outranked = 3, eval.ActionReview
+	b := &judgeRankBackend{fakeBackend: fakeBackend{status: "sharp"}, rank: rankBackend{order: identity}}
+	rep, _, err := Run(context.Background(), c, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := rep.Sets[0]; s.By != "model" || b.rank.calls != 1 {
+		t.Fatalf("set not ranked: %+v (%d rank calls)", s, b.rank.calls)
+	}
+	for i := 1; i <= 3; i++ {
+		name := fmt.Sprintf("L%07d.DNG", i)
+		r := result(t, rep, name)
+		if r.Decision != eval.Keep {
+			t.Fatalf("%s decision %s, want keep (unchanged by ranking)", name, r.Decision)
+		}
+		if !r.Group.Best {
+			t.Fatalf("%s: want best, got %+v", name, r.Group)
+		}
+		x, err := os.ReadFile(r.XMP)
+		if err != nil {
+			t.Fatalf("%s sidecar: %v", name, err)
+		}
+		if !strings.Contains(string(x), "cull:best") {
+			t.Fatalf("%s sidecar missing cull:best:\n%s", name, x)
+		}
+	}
+}
+
+// A 4th frame outside --keep-best is never marked best, whether or not ranking
+// changed its decision.
+func TestJudgeDoesNotWriteBestKeywordForOutrankedFrame(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 4; i++ {
+		texturedDNG(t, filepath.Join(dir, fmt.Sprintf("L%07d.DNG", i)))
+	}
+	c := moveCfg(dir)
+	c.MoveCulled, c.Rank = false, true
+	c.Seq = group.Options{Gap: time.Minute, MaxLook: group.DefaultLook}
+	c.Policy.KeepBest, c.Policy.Outranked = 3, eval.ActionReview
+	b := &judgeRankBackend{fakeBackend: fakeBackend{status: "sharp"}, rank: rankBackend{order: identity}}
+	rep, _, err := Run(context.Background(), c, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := result(t, rep, "L0000004.DNG")
+	if r.Group == nil || r.Group.Best {
+		t.Fatalf("L4 should not be best: %+v", r.Group)
+	}
+	x, err := os.ReadFile(r.XMP)
+	if err != nil {
+		t.Fatalf("L4 sidecar: %v", err)
+	}
+	if strings.Contains(string(x), "cull:best") {
+		t.Fatalf("L4 (outranked) sidecar must not have cull:best:\n%s", x)
 	}
 }
 

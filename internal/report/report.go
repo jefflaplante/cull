@@ -177,6 +177,15 @@ func Load(path string) (*Report, error) {
 	if err := json.Unmarshal(b, &r); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	if r.SchemaVersion < SchemaVersion {
+		// Groups from before sequence ranking (schema < 4) carried only a size and a
+		// stale "best" file name (see Group.UnmarshalJSON): no current rank. decide and
+		// rank always regroup from looks regardless, so drop them here rather than let
+		// review or calib show a stale "set 0 · #0/0" badge before that first decide.
+		for i := range r.Results {
+			r.Results[i].Group = nil
+		}
+	}
 	return &r, nil
 }
 

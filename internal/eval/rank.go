@@ -28,7 +28,7 @@ type Ranking struct {
 	Summary string      `json:"summary"`
 }
 
-const rankPrompt = `You compare a small set of near-duplicate photographs from the same moment and rank them best to worst. The frames are near-duplicates of one scene; compare them to each other, not against an absolute standard. Judge in this priority order:
+const rankPrompt = `You compare a sequence of similar frames of one scene (the same subject or set-up over seconds to minutes; pose, expression, framing or distance may change) and rank them best to worst. Compare them to each other, not against an absolute standard. Judge in this priority order:
 1. subject sharpness where it matters (the eyes), judged on the crops when given;
 2. eyes and expression (open, engaged, natural; not mid-blink or mid-word);
 3. gesture and moment;
@@ -63,7 +63,7 @@ var rankSchema = map[string]any{
 	},
 }
 
-// RankRequest builds the rank call for a set of near-duplicate frames.
+// RankRequest builds the rank call for a set of similar frames (a sequence).
 func RankRequest(frames []RankFrame, maxTokens int) llm.Request {
 	var parts []llm.Part
 	for i, f := range frames {
@@ -106,7 +106,7 @@ func DecodeRank(raw []byte, n int) (*Ranking, error) {
 	return &r, nil
 }
 
-// Rank asks the backend to rank a set of near-duplicate frames, best first.
+// Rank asks the backend to rank a set of similar frames (a sequence), best first.
 // It retries once if the answer isn't a permutation of the input frames (the
 // schema mismatch retry already lives in the backend). Like Evaluate, a
 // result delivered together with llm.ErrQuotaStop is returned with that

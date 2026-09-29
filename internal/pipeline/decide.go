@@ -47,7 +47,7 @@ func Decide(ctx context.Context, reportPath string, o DecideOptions, log io.Writ
 	if err != nil {
 		return DecideSummary{Changed: map[string]int{}}, err
 	}
-	n, err := fillLooks(ctx, rep)
+	n, err := fillLooks(ctx, rep, log)
 	if n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
 	}

@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"io"
 
 	"github.com/jefflaplante/gophotocull/internal/report"
 )
@@ -14,15 +15,17 @@ import (
 // exactly as Rank does: that mutates rep's Results in place and is free, so a
 // caller should persist rep when filled > 0, the same way Rank's own Ctrl-C path
 // does. If ctx is cancelled mid-fill, sets and calls come back 0 and err is
-// ctx's error; filled still reports how many looks were kept.
+// ctx's error; filled still reports how many looks were kept. log receives
+// fillLooks's progress (nil-safe: it default to io.Discard) — a large v3 report is
+// a full DNG-decode pass here, seconds per frame.
 //
 // The set selection and counting run on a private copy of rep, decided fresh
 // with cfg.Policy and cfg.Seq (decideAll) so the estimate reflects those flags
 // even when they differ from the report's last decide. Nothing here writes a
 // sidecar, moves a file, or changes rep's own Sets or decisions — only rep's
 // Results' Look field, via fillLooks.
-func RankCalls(ctx context.Context, rep *report.Report, cfg Config, force bool) (sets, calls, filled int, err error) {
-	filled, err = fillLooks(ctx, rep)
+func RankCalls(ctx context.Context, rep *report.Report, cfg Config, force bool, log io.Writer) (sets, calls, filled int, err error) {
+	filled, err = fillLooks(ctx, rep, log)
 	if err != nil {
 		return 0, 0, filled, err
 	}

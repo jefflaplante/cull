@@ -417,6 +417,14 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 				if prev.Backend == "" {
 					scan = " (a scan report)"
 				}
+				// An older-schema report (e.g. from before sequence ranking) has a free
+				// upgrade: cull decide rewrites it in place with no model call. Dropping
+				// --resume instead would re-judge, and pay for, the whole shoot again.
+				if prev.SchemaVersion < report.SchemaVersion {
+					return nil, nil, fmt.Errorf("resume: %s%s was produced by schema v%d; this run is schema v%d: "+
+						"run `cull decide %s` (free; it upgrades the report in place), then --resume",
+						cfg.ReportPath, scan, prev.SchemaVersion, report.SchemaVersion, cfg.Dir)
+				}
 				return nil, nil, fmt.Errorf("resume: %s%s was produced by schema v%d, backend %q, model %q, escalation %q; "+
 					"this run is schema v%d, backend %q, model %q, escalation %q: drop --resume or use -o for a separate report",
 					cfg.ReportPath, scan, prev.SchemaVersion, prev.Backend, prev.Model, prev.Escalation,
@@ -475,10 +483,22 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 		}
 	}
 	if cfg.WriteXMP {
+		o := DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP, Labels: lab}
 		for i := range rep.Results {
 			if changed[i] {
-				writeDecidedSidecar(&rep.Results[i], DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP, Labels: lab})
+				writeDecidedSidecar(&rep.Results[i], o)
 			}
+		}
+		// finish() (stages.go) writes each frame's sidecar during processing, before
+		// grouping exists, so a set's cull:best keyword (labels.Sidecar) never lands
+		// there. Catch every frame left in a set (Group != nil, set by decideAll above)
+		// whose decision didn't change above, so its sidecar still gets cull:best.
+		for i := range rep.Results {
+			r := &rep.Results[i]
+			if changed[i] || r.Evaluation == nil || r.Error != "" || r.Group == nil {
+				continue
+			}
+			writeDecidedSidecar(r, o)
 		}
 	}
 	if cfg.MoveCulled && !cfg.DryRun {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"io"
@@ -164,6 +165,43 @@ func TestPageOmitsStaleSummaryForScoresSets(t *testing.T) {
 	}
 	if strings.Contains(page, `"set_summary"`) {
 		t.Error("page has a set_summary field for a by-scores set")
+	}
+}
+
+// A v3 report's legacy groups (size only, no current rank; report.Load drops
+// them) must not surface as a stale "set 0 · #0/0" badge in the built page before
+// the first decide/rank.
+func TestBuildOfV3ReportHasNoSetBadge(t *testing.T) {
+	dir := t.TempDir()
+	f1, f2 := filepath.Join(dir, "L1.DNG"), filepath.Join(dir, "L2.DNG")
+	tinyDNG(t, f1)
+	tinyDNG(t, f2)
+	v3 := fmt.Sprintf(`{"schema_version": 3, "backend": "anthropic", "model": "m", "dir": %q, "results": [
+  {"file": %q, "size": 10, "group": {"id": 1, "size": 2, "best": "L2.DNG"}},
+  {"file": %q, "size": 11, "group": {"id": 1, "size": 2}}]}`, dir, f1, f2)
+	p := filepath.Join(dir, "r.json")
+	if err := os.WriteFile(p, []byte(v3), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := report.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rep.Results {
+		if r.Group != nil {
+			t.Fatalf("premise: report.Load must drop legacy groups, got %+v", r.Group)
+		}
+	}
+	sheet, err := Build(rep, p, Options{Out: t.TempDir(), Concurrency: 1}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(sheet.Index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"group":{`) {
+		t.Errorf("v3 report's legacy group must not reach the page data:\n%s", b)
 	}
 }
 

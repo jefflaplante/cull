@@ -49,6 +49,12 @@ func TestRankRequestHasNoNamesOrScores(t *testing.T) {
 			t.Errorf("rubric lacks %q", want)
 		}
 	}
+	// Sequences span up to a minute per link and different poses, not the same
+	// instant: calling them "near-duplicates" invites the model to under-weight
+	// genuine moment/gesture differences (rubric items 2-3).
+	if strings.Contains(strings.ToLower(req.System), "near-duplicate") {
+		t.Errorf("prompt must not call sequence members near-duplicates: %q", req.System)
+	}
 }
 
 func TestRankDecodes(t *testing.T) {

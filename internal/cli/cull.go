@@ -161,6 +161,16 @@ Backends (--backend):
 			}
 			cfg.RawClip = o.rawClip
 			cfg.Policy, _ = o.policy.policy() // validated in PreRunE
+			// Continuing a report: keep the policy its decisions came from.
+			if o.resume {
+				if prev, err := report.Load(cfg.ReportPath); err == nil {
+					var notes []string
+					if cfg.Policy, notes, err = o.policy.resolve(cmd.Flags(), prev.Policy); err != nil {
+						return err
+					}
+					noteStoredPolicy(cmd.ErrOrStderr(), notes)
+				}
+			}
 			cfg.CheckpointN = o.checkpoint
 			cfg.Rank = !o.noRank
 

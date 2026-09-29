@@ -141,6 +141,7 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 		rep.Sets = append(rep.Sets, s)
 	}
 	rep.KeepBest = p.KeepBest
+	rep.Policy = &p
 
 	var changed []int
 	for _, i := range idx {

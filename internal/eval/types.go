@@ -95,13 +95,13 @@ func (a Action) decision() (Decision, bool) {
 // cropped where possible and never culls on its own. Other signals default to
 // review and are culled only when configured to.
 type Policy struct {
-	MinCropArea          float64
-	ReviewBelowSharpness float64 // 0 = off; keep -> review when the sharpness score is lower
-	EyesClosed           Action
-	RawClipped           Action  // raw highlights clipped beyond RawClipThreshold
-	RawClipThreshold     float64 // percent of raw samples at white level; 0 = default 0.5
-	KeepBest             int     // per set, keep this many best-ranked frames; 0 = rank only
-	Outranked            Action  // frames ranked below KeepBest in their set
+	MinCropArea          float64 `json:"min_crop_area"`
+	ReviewBelowSharpness float64 `json:"review_below_sharpness"` // 0 = off; keep -> review when the sharpness score is lower
+	EyesClosed           Action  `json:"eyes_closed"`
+	RawClipped           Action  `json:"raw_clipped"`        // raw highlights clipped beyond RawClipThreshold
+	RawClipThreshold     float64 `json:"raw_clip_threshold"` // percent of raw samples at white level; 0 = default 0.5
+	KeepBest             int     `json:"keep_best"`          // per set, keep this many best-ranked frames; 0 = rank only
+	Outranked            Action  `json:"outranked"`          // frames ranked below KeepBest in their set
 }
 
 // Facts are measurements the policy uses beside the model's assessment.

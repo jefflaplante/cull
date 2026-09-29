@@ -432,7 +432,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 			}
 			// Paid rankings carry over: decideAll reuses a stored order while it still
 			// covers its set, and ranking spend never leaves the report.
-			rep.Sets, rep.RankCostUSD, rep.KeepBest = prev.Sets, prev.RankCostUSD, prev.KeepBest
+			rep.Sets, rep.RankCostUSD, rep.KeepBest, rep.Policy = prev.Sets, prev.RankCostUSD, prev.KeepBest, prev.Policy
 			for _, r := range prev.Results {
 				if r.Error == "" && (r.Evaluation != nil || cfg.DryRun) {
 					rep.Results = append(rep.Results, r)

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/spf13/pflag"
 
@@ -31,12 +33,6 @@ func (pf *policyFlags) register(f *pflag.FlagSet) {
 }
 
 func (pf *policyFlags) policy() (eval.Policy, error) {
-	if pf.minCropArea <= 0 || pf.minCropArea > 1 {
-		return eval.Policy{}, fmt.Errorf("--min-crop-area must be in (0, 1]")
-	}
-	if pf.reviewBelowSharpness < 0 || pf.reviewBelowSharpness > 10 {
-		return eval.Policy{}, fmt.Errorf("--review-below-sharpness must be in [0, 10]")
-	}
 	eyes, err := eval.ParseAction(pf.eyesClosed)
 	if err != nil {
 		return eval.Policy{}, fmt.Errorf("--eyes-closed %w", err)
@@ -49,14 +45,90 @@ func (pf *policyFlags) policy() (eval.Policy, error) {
 	if err != nil {
 		return eval.Policy{}, fmt.Errorf("--raw-clipped %w", err)
 	}
-	if pf.rawClipThreshold <= 0 || pf.rawClipThreshold > 100 {
-		return eval.Policy{}, fmt.Errorf("--raw-clip-threshold must be in (0, 100]")
-	}
-	if pf.keepBest < 0 || pf.keepBest > 5 {
-		return eval.Policy{}, fmt.Errorf("--keep-best must be in [0, 5]: at 6 or more, a chunked set's final ranking round could exceed the 8-frames-per-call limit")
-	}
-	return eval.Policy{
+	p := eval.Policy{
 		MinCropArea: pf.minCropArea, ReviewBelowSharpness: pf.reviewBelowSharpness, EyesClosed: eyes, Outranked: outranked,
 		RawClipped: raw, RawClipThreshold: pf.rawClipThreshold, KeepBest: pf.keepBest,
-	}, nil
+	}
+	return p, validPolicy(p)
+}
+
+// validPolicy checks a policy whether it came from flags or from a report (which a
+// person may have edited by hand).
+func validPolicy(p eval.Policy) error {
+	if p.MinCropArea <= 0 || p.MinCropArea > 1 {
+		return fmt.Errorf("--min-crop-area must be in (0, 1]")
+	}
+	if p.ReviewBelowSharpness < 0 || p.ReviewBelowSharpness > 10 {
+		return fmt.Errorf("--review-below-sharpness must be in [0, 10]")
+	}
+	for _, a := range []struct {
+		flag string
+		a    eval.Action
+	}{{"--eyes-closed", p.EyesClosed}, {"--outranked", p.Outranked}, {"--raw-clipped", p.RawClipped}} {
+		if _, err := eval.ParseAction(string(a.a)); err != nil {
+			return fmt.Errorf("%s %w", a.flag, err)
+		}
+	}
+	if p.RawClipThreshold <= 0 || p.RawClipThreshold > 100 {
+		return fmt.Errorf("--raw-clip-threshold must be in (0, 100]")
+	}
+	if p.KeepBest < 0 || p.KeepBest > 5 {
+		return fmt.Errorf("--keep-best must be in [0, 5]: at 6 or more, a chunked set's final ranking round could exceed the 8-frames-per-call limit")
+	}
+	return nil
+}
+
+// resolve is the policy for a command working on an existing report: the report's
+// stored policy (saved is nil in reports from before it was stored), with each flag
+// typed on the command line overriding its own setting. notes names the stored
+// settings in effect that differ from the flag defaults, as flags ("--keep-best 2"),
+// so the command can say it is still using them.
+func (pf *policyFlags) resolve(fs *pflag.FlagSet, saved *eval.Policy) (eval.Policy, []string, error) {
+	p, err := pf.policy()
+	if err != nil || saved == nil {
+		return p, nil, err
+	}
+	fields := []struct {
+		flag string
+		dst  any
+		src  any
+	}{
+		{"min-crop-area", &p.MinCropArea, saved.MinCropArea},
+		{"review-below-sharpness", &p.ReviewBelowSharpness, saved.ReviewBelowSharpness},
+		{"eyes-closed", &p.EyesClosed, saved.EyesClosed},
+		{"outranked", &p.Outranked, saved.Outranked},
+		{"raw-clipped", &p.RawClipped, saved.RawClipped},
+		{"raw-clip-threshold", &p.RawClipThreshold, saved.RawClipThreshold},
+		{"keep-best", &p.KeepBest, saved.KeepBest},
+	}
+	var notes []string
+	for _, f := range fields {
+		fl := fs.Lookup(f.flag)
+		if fl == nil || fl.Changed {
+			continue
+		}
+		switch d := f.dst.(type) {
+		case *float64:
+			*d = f.src.(float64)
+		case *int:
+			*d = f.src.(int)
+		case *eval.Action:
+			*d = f.src.(eval.Action)
+		}
+		if v := fmt.Sprint(f.src); v != fl.DefValue {
+			notes = append(notes, "--"+f.flag+" "+v)
+		}
+	}
+	if err := validPolicy(p); err != nil {
+		return p, nil, fmt.Errorf("the report's stored policy: %w", err)
+	}
+	return p, notes, nil
+}
+
+// noteStoredPolicy tells the user which stored settings a command is still using, so
+// tuning from an earlier decide is visible rather than a silent surprise.
+func noteStoredPolicy(w io.Writer, notes []string) {
+	if len(notes) > 0 {
+		fmt.Fprintf(w, "policy from the report: %s (a flag on the command line overrides it)\n", strings.Join(notes, " "))
+	}
 }

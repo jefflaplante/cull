@@ -49,7 +49,10 @@ landed" tiles, default 1, sent only when there is no subject crop unless
 Policy flags (`judge`, `rank`, `decide`, `calibrate`): `--review-below-sharpness`, `--eyes-closed`,
 `--outranked`, `--raw-clipped` (each `ignore|review|cull`, default `review`),
 `--raw-clip-threshold` (0.5 % of raw samples at white level), `--min-crop-area`,
-`--keep-best` (default 3).
+`--keep-best` (default 3). The report stores the policy its decisions came from.
+`decide`, `rank`, `calibrate` and `judge --resume` start from that stored policy and
+say which non-default settings they're reusing; a flag you type overrides only its
+own setting. So `decide --review-below-sharpness 7` sticks until you change it.
 
 Cost and scale (`judge`): `--estimate` (print and exit), `--max-cost USD`, `--batch`
 (Message Batches API: half price; Ctrl-C safe, `--resume` re-attaches), `--no-rank`

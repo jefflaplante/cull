@@ -30,8 +30,7 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 		Example: "  cull calibrate sonnet.json local.json",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			p, err := pol.policy()
-			if err != nil {
+			if _, err := pol.policy(); err != nil {
 				return err
 			}
 			if labelsPath == "" {
@@ -51,6 +50,12 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 				if err != nil {
 					return err
 				}
+				// Each report's sweep starts from the policy its decisions came from.
+				p, notes, err := pol.resolve(cmd.Flags(), rep.Policy)
+				if err != nil {
+					return fmt.Errorf("%s: %w", path, err)
+				}
+				noteStoredPolicy(cmd.ErrOrStderr(), notes)
 				calib.Format(w, path, rep, calib.Compare(rep, verdicts))
 				calib.FormatSweep(w, calib.Sweep(rep, verdicts, p, []float64{0, 3, 4, 5, 6, 7, 8}))
 				calib.FormatSets(w, calib.Sets(rep, verdicts, rep.KeepBest), calib.SweepKeepBest(rep, verdicts, []int{1, 2, 3, 4, 5}))

@@ -7,7 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/pipeline"
+	"github.com/jefflaplante/gophotocull/internal/report"
 )
 
 func newDecideCmd(so *sharedOpts) *cobra.Command {
@@ -22,7 +24,8 @@ func newDecideCmd(so *sharedOpts) *cobra.Command {
 		Short: "Re-apply the keep/review/cull policy to a report without calling a model",
 		Long: `decide re-runs the policy on every assessment stored in the report, so tuning
 thresholds after calibration is free and instant. It prints what changed and saves
-the report. --write-xmp rewrites sidecars the report says cull wrote (and
+the report, with the policy it used: later runs (decide, rank, calibrate, judge
+--resume) start from that stored policy, and only the flags you give override it. --write-xmp rewrites sidecars the report says cull wrote (and
 creates missing ones); other sidecars are never touched unless --overwrite-xmp.
 --move-culled syncs culled/: new culls move there, frames no longer culled come back.
 Your labels from the review sheet (cull-labels.jsonl beside the report, or
@@ -36,10 +39,15 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 			if err != nil {
 				return err
 			}
-			p, err := pol.policy()
+			var saved *eval.Policy
+			if rep, err := report.Load(cfg.ReportPath); err == nil { // a missing report is Decide's error to report
+				saved = rep.Policy
+			}
+			p, notes, err := pol.resolve(cmd.Flags(), saved)
 			if err != nil {
 				return err
 			}
+			noteStoredPolicy(cmd.ErrOrStderr(), notes)
 			if xmpDevelop && !writeXMP {
 				return fmt.Errorf("--xmp-develop requires --write-xmp")
 			}

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/pflag"
+
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/labels"
 	"github.com/jefflaplante/gophotocull/internal/pipeline"
@@ -971,5 +973,112 @@ func TestKeepBestTooHighExplainsWhy(t *testing.T) {
 	_, err := run(t, "judge", "--keep-best", "6", dir)
 	if err == nil || !strings.Contains(err.Error(), "8-frames-per-call") {
 		t.Fatalf("want an explanation mentioning the 8-frames-per-call limit, got %v", err)
+	}
+}
+
+// A report remembers the policy its decisions came from, so a later decide (or rank,
+// or calibrate) without the flags keeps that tuning instead of silently resetting it
+// to the defaults (seen live: rank after `decide --review-below-sharpness 7` undid it).
+// A flag typed on the command line still wins, field by field.
+func TestDecideReusesTheReportsPolicyUnlessAFlagOverrides(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("judge: %v\n%s", err, out)
+	}
+	rp := filepath.Join(dir, "cull-report.json")
+	policy := func() eval.Policy {
+		t.Helper()
+		rep, err := report.Load(rp)
+		if err != nil || rep.Policy == nil {
+			t.Fatalf("report policy: %v, %+v", err, rep)
+		}
+		return *rep.Policy
+	}
+	if out, err := run(t, "decide", "--review-below-sharpness", "7", "--eyes-closed", "cull", "--keep-best", "2", dir); err != nil {
+		t.Fatalf("decide: %v\n%s", err, out)
+	}
+	out, err := run(t, "decide", dir)
+	if err != nil {
+		t.Fatalf("decide: %v\n%s", err, out)
+	}
+	if p := policy(); p.ReviewBelowSharpness != 7 || p.EyesClosed != eval.ActionCull || p.KeepBest != 2 {
+		t.Fatalf("plain decide reset the stored policy: %+v", p)
+	}
+	for _, want := range []string{"--review-below-sharpness 7", "--eyes-closed cull", "--keep-best 2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the reused setting %q isn't named:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "--min-crop-area") {
+		t.Errorf("a setting still at its default is named:\n%s", out)
+	}
+	if out, err := run(t, "decide", "--review-below-sharpness", "0", dir); err != nil {
+		t.Fatalf("decide: %v\n%s", err, out)
+	}
+	if p := policy(); p.ReviewBelowSharpness != 0 || p.EyesClosed != eval.ActionCull || p.KeepBest != 2 {
+		t.Fatalf("a typed flag must override only its own field: %+v", p)
+	}
+}
+
+// Flags without a stored policy behave as before; a stored policy that is invalid
+// (hand-edited) is refused rather than applied.
+func TestPolicyResolve(t *testing.T) {
+	var pf policyFlags
+	fs := pflag.NewFlagSet("t", pflag.ContinueOnError)
+	pf.register(fs)
+	p, notes, err := pf.resolve(fs, nil)
+	if err != nil || p.KeepBest != 3 || p.Outranked != eval.ActionReview || len(notes) != 0 {
+		t.Fatalf("defaults: %+v %v %v", p, notes, err)
+	}
+	saved := p
+	saved.RawClipThreshold = 2
+	if err := fs.Parse([]string{"--raw-clipped", "cull"}); err != nil {
+		t.Fatal(err)
+	}
+	p, notes, err = pf.resolve(fs, &saved)
+	if err != nil || p.RawClipThreshold != 2 || p.RawClipped != eval.ActionCull {
+		t.Fatalf("merge: %+v %v", p, err)
+	}
+	if len(notes) != 1 || notes[0] != "--raw-clip-threshold 2" {
+		t.Fatalf("notes: %q", notes)
+	}
+	bad := saved
+	bad.KeepBest = 9
+	var fresh policyFlags
+	fs2 := pflag.NewFlagSet("u", pflag.ContinueOnError)
+	fresh.register(fs2)
+	if _, _, err := fresh.resolve(fs2, &bad); err == nil || !strings.Contains(err.Error(), "keep-best") {
+		t.Fatalf("an invalid stored policy must be refused: %v", err)
+	}
+}
+
+// judge --resume continues a report, so it keeps the report's policy too.
+func TestJudgeResumeKeepsTheReportsPolicy(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	judge := []string{"judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off"}
+	if out, err := run(t, append(judge, dir)...); err != nil {
+		t.Fatalf("judge: %v\n%s", err, out)
+	}
+	if out, err := run(t, "decide", "--eyes-closed", "cull", dir); err != nil {
+		t.Fatalf("decide: %v\n%s", err, out)
+	}
+	out, err := run(t, append(judge, "--resume", dir)...)
+	if err != nil {
+		t.Fatalf("judge --resume: %v\n%s", err, out)
+	}
+	rep, err := report.Load(filepath.Join(dir, "cull-report.json"))
+	if err != nil || rep.Policy == nil || rep.Policy.EyesClosed != eval.ActionCull {
+		t.Fatalf("judge --resume reset the stored policy: %v %+v\n%s", err, rep.Policy, out)
+	}
+	if !strings.Contains(out, "--eyes-closed cull") {
+		t.Fatalf("the reused setting isn't named:\n%s", out)
 	}
 }

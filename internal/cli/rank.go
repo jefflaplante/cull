@@ -35,9 +35,9 @@ and merged into a final call, whether sent one wave at a time or, with --batch, 
 at once). The --keep-best best of each set keep their decision; the rest get
 --outranked. Run it after 'judge --no-rank'.
 
-rank re-applies the full policy the way 'cull decide' does (--eyes-closed,
---raw-clipped, --min-crop-area, --keep-best, --outranked, ...), so repeat any of
-those you tuned there. --force re-ranks sets that already have a model order; if
+rank re-applies the full policy the way 'cull decide' does, starting from the
+policy stored in the report (so tuning from an earlier decide carries over); a
+policy flag given here overrides its own setting. --force re-ranks sets that already have a model order; if
 only the policy changed (--keep-best, say), 'cull decide --keep-best N' re-applies
 the stored order for free, so save --force for when the frames themselves changed
 (a re-judge, added frames).
@@ -80,13 +80,15 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 					return err
 				}
 			}
-			if cfg.Policy, err = o.policy.policy(); err != nil {
-				return err
-			}
 			rep, err := report.Load(cfg.ReportPath)
 			if err != nil {
 				return err
 			}
+			var notes []string
+			if cfg.Policy, notes, err = o.policy.resolve(cmd.Flags(), rep.Policy); err != nil {
+				return err
+			}
+			noteStoredPolicy(cmd.ErrOrStderr(), notes)
 
 			warning, err := o.applyBackendModel(&cfg, cmd.Flags().Changed("backend"), cmd.Flags().Changed("model"), rep)
 			if err != nil {

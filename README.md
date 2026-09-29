@@ -1,289 +1,361 @@
 # cull
 
-`cull` culls Leica M11-P DNGs using a vision model on the embedded JPEG preview.
-Priority: **sharpness gates, exposure gets fixed, composition gets cropped.**
-Go + [cobra](https://github.com/spf13/cobra).
+`cull` sorts a folder of DNG raw files into **keep**, **review** and **cull**. A vision
+model assesses each frame's embedded JPEG preview, and deterministic Go rules make
+the decision. Its priorities:
 
-The binary is `cull` (`make build` → `bin/cull`, `make install` → `$GOPATH/bin/cull`,
-or `go install github.com/jefflaplante/cull/cmd/cull@latest`). The repo and Go module
-are `github.com/jefflaplante/cull`; the project was first called gophotocull. Checked 2026-09-28: no `cull` on macOS or
-in Homebrew, Debian, Ubuntu, Arch or Fedora, but npm, crates.io and PyPI each have a
-`cull` package that installs its own `cull` command (npm's deletes files). If you
-install one of those globally, make sure `which cull` is this one.
+- **Sharpness gates.** A missed-focus or motion-blurred frame is culled.
+- **Exposure gets fixed, not culled.** Fixable exposure only produces a suggested
+  correction.
+- **Composition gets cropped, never culled.** A weak composition only produces a
+  suggested crop.
+
+It also groups similar frames into sets and ranks each set side by side, so you keep
+the best few of a sequence. Results go to XMP sidecars and to Capture One.
+
+For a step-by-step walkthrough of a shoot, from folder to Capture One, see
+[WORKFLOW.md](WORKFLOW.md).
+
+- [Camera support](#camera-support)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Commands](#commands)
+- [How decisions are made](#how-decisions-are-made)
+- [Sequences and best of set](#sequences-and-best-of-set)
+- [Reviewing and labelling](#reviewing-and-labelling)
+- [Model backends](#model-backends)
+- [Cost control](#cost-control)
+- [Output: sidecars, Capture One and moving culls](#output-sidecars-capture-one-and-moving-culls)
+- [Flag reference](#flag-reference)
+- [Limitations](#limitations)
+
+## Camera support
+
+`cull` never renders the raw data. It judges sharpness on the **JPEG preview embedded
+in the DNG**, so a camera works only if its DNGs embed a large preview. Full
+resolution is best: focus is judged on a crop at the preview's native resolution.
+The brand doesn't matter; the camera's DNG writer does.
+
+| Result | Cameras tested |
+|---|---|
+| **Works: full-resolution preview** | Leica M11-P, M10, M10-R, Q2, SL2, CL; Pentax K-1 Mark II, K-3 Mark III; Ricoh GR III; Sigma fp; Apple iPhone 12 Pro (ProRAW); Samsung Galaxy S23 Ultra; Adobe DNG Converter output with a full-size preview |
+| **Usable: reduced preview** (2560 px, about a third of the sensor width) | Google Pixel 8 Pro. Focus is judged on less detail than the sensor recorded. |
+| **Unreliable: small preview** (≤ 960 px, flagged "focus judgement unreliable") | Apple iPhone XS, Google Pixel 4a, DJI drones (Mini 2, Mavic 3 / Hasselblad L2D-20c) |
+| **Doesn't work: no usable preview** | Leica M9 (320 px uncompressed thumbnail only), Leica M (Typ 240) and M Monochrom (Typ 246) (160 px thumbnail only), OnePlus 6T (no preview) |
+
+Tested on 22 sample files from [raw.pixls.us](https://raw.pixls.us) with
+`cull scan`, which extracts previews, EXIF and raw clipping without calling a model.
+
+- **Check your own camera** with `cull scan <dir>`. It reports each preview's size,
+  and flags any preview smaller than `--min-preview-edge` (1500 px). When the file's
+  own structure yields nothing large enough, `cull` also tries `exiftool` if it's
+  installed.
+- **Workaround for cameras without a large preview:** convert the files with Adobe
+  DNG Converter, with *JPEG Preview: Full Size*. That output embeds a full-resolution
+  preview. This wasn't tested on the failing cameras above.
+- **Raw highlight clipping** (see [How decisions are made](#how-decisions-are-made))
+  needs a raw that is stored as **striped lossless JPEG**. That covers the Leica M10,
+  M10-R, M11, M (Typ 240) and Monochrom (Typ 246), and the Pentax and Ricoh bodies
+  tested. Other layouts (tiled, uncompressed, lossy DNG) fall back to judging clipping
+  on the preview, which overstates it.
+- **The prompts describe a manual-focus Leica M rangefinder** shot wide open. That
+  matches M-mount bodies. With autofocus cameras and phones the model's framing is
+  slightly off, though the rules themselves are camera-agnostic.
+
+## Install
+
+Requires Go 1.22+.
+
+```sh
+make build                                            # bin/cull, version stamped from git
+make install                                          # $GOPATH/bin/cull
+go install github.com/jefflaplante/cull/cmd/cull@latest
+```
+
+- **Optional:** `exiftool`, which finds previews in unusual locations.
+- **For the `claude-code` backend:** the `claude` CLI, logged in to your Claude
+  subscription.
+- **Name clash:** npm, crates.io and PyPI each have an unrelated package that installs
+  a `cull` command, and npm's deletes files. If you have one of those installed, check
+  that `which cull` is this one.
 
 ## Quick start
 
-For a step-by-step walkthrough of a whole shoot, from folder to Capture One, see
-[WORKFLOW.md](WORKFLOW.md).
-
 ```sh
-make build
-# 1. Verify previews first (no model calls): resolution, source, faces found.
-#    --save-inputs shows exactly what the model would be sent.
-./bin/cull scan --save-inputs /tmp/inputs /path/to/shoot
-# 2. Evaluate (pick a backend; see below)
-./bin/cull judge /path/to/shoot
-# 3. Check, label and star frames in your browser; every keypress is saved to the
-#    labels log and the frame's sidecar (Capture One reads it on import)
-./bin/cull review /path/to/shoot
-# Optional, before importing into Capture One: move culls aside, and undo it
-./bin/cull judge --resume --move-culled /path/to/shoot
-./bin/cull restore /path/to/shoot
+cull scan ~/Pictures/shoot                # free: previews, faces, EXIF; no model calls
+cull judge --estimate ~/Pictures/shoot    # free: what judging would cost
+cull judge ~/Pictures/shoot               # model assessment + decisions + set ranking
+cull review ~/Pictures/shoot              # browser: check, label keep/review/cull, add stars
+cull decide --write-xmp --move-culled ~/Pictures/shoot   # sidecars; culls into culled/
 ```
 
-| Command | Purpose |
+Everything is recorded in `cull-report.json` beside the photos. `cull restore <dir>`
+undoes `--move-culled`.
+
+## Commands
+
+| Command | What it does | Calls a model |
+|---|---|---|
+| `scan <dir>` | Extract previews, EXIF, faces and look fingerprints; write the report | no |
+| `judge <dir>` | Assess every frame, decide keep/review/cull, then rank the sets | yes |
+| `rank <dir>` | Rank the sets in an existing report (after `judge --no-rank`, or after new frames) | yes |
+| `decide <dir>` | Re-apply the policy to stored assessments; regroup sets; write sidecars or move culls | no |
+| `review <dir>` | Browser contact sheet for checking, labelling and rating frames | no |
+| `calibrate <report>...` | Compare a report's decisions with your labels; sweep thresholds | no |
+| `apply-c1 <dir>` | AppleScript that applies verdicts, stars and keywords in Capture One (dry run by default) | no |
+| `restore <dir>` | Move frames that `--move-culled` moved back where they were | no |
+| `version`, `completion` | Build version; shell completion | no |
+
+Every command has `--help` with examples.
+
+## How decisions are made
+
+For each DNG:
+
+1. **Preview.** The largest embedded JPEG preview is read directly from the file's
+   TIFF structure; the raw data isn't read for this. EXIF orientation is applied.
+2. **Focus target.** Face detection ([pigo](https://github.com/esimov/pigo)) finds the
+   subject, centred on the eyes. With no confident face (`--face-min-q`, default 80),
+   `judge` asks the model to locate the intended focus target (`--locate off` to skip).
+3. **Assessment.** The model receives:
+   - the full frame, downscaled to `--max-edge` (1568 px);
+   - the subject cropped at native resolution;
+   - when there's no subject crop, a "where focus landed" tile (`--tiles`).
+
+   It returns structured scores for sharpness, exposure, composition, and people
+   (eyes, expression). Every answer is checked against a JSON Schema, with one retry.
+4. **Decision in Go** (`eval.Policy`). The model only assesses; these rules decide:
+   - `missed_focus` or `motion_blur` → **cull**; `soft` → **review**. Optionally,
+     sharpness below `--review-below-sharpness` → review.
+   - Closed eyes → `--eyes-closed` (default review).
+   - Raw highlight clipping at or above `--raw-clip-threshold` → `--raw-clipped`
+     (default review). When the raw shows headroom, a "clipped" preview isn't held
+     against the frame.
+   - Composition never culls. A suggested crop is dropped if it keeps less than
+     `--min-crop-area` of the frame.
+   - Frames ranked below `--keep-best` in their set → `--outranked` (default review).
+5. **Report.** `cull-report.json` is the source of truth: assessments, decisions,
+   reasons, sets, cost, and the policy used. It is checkpointed as `judge` runs, and
+   `--resume` skips files already done. `jq` works on it, e.g.
+   `jq '.results[] | select(.decision=="cull") | .file' cull-report.json`.
+
+## Sequences and best of set
+
+Similar frames (the same subject or scene over seconds to minutes) are grouped into
+**sets**. Each set is ranked by one side-by-side model call, and Go keeps the best few.
+
+**Grouping.** Frames are ordered by capture time, then file name. A frame joins the
+previous frame's set when both hold:
+
+- **Time:** it was taken within `--seq-gap` (default 60 s) of the previous frame. The
+  gap is ignored when either frame has no capture time. `--seq-gap 0` turns grouping
+  off.
+- **Look:** its look distance to the previous frame is at most `--seq-look` (default
+  0.08). The look is an 8×8 colour grid of the preview, levelled for exposure and
+  compared over small shifts. Small reframing and exposure changes stay close; a new
+  scene or subject doesn't.
+
+A set holds at most 40 frames. At the default threshold, only nearly identical
+framings link, so retakes of a pose after reframing usually form separate sets. Raise
+`--seq-look` to group more loosely.
+
+**Ranking.** Each frame is sent as a 768 px full frame plus its subject crop, with no
+file names and no scores. The rubric, in order:
+
+1. subject sharpness where it matters (the eyes);
+2. eyes and expression;
+3. gesture and moment;
+4. composition and background, judged on the full frame;
+5. exposure only if it can't be fixed.
+
+A set of more than 8 frames is split into chunks of at most 8. The top frames of each
+chunk then meet in one final call; a 40-frame set takes 6 calls. Frames that failed
+the sharpness gate stay in the set but aren't ranked.
+
+**Keeping the best.**
+- `--keep-best` (default 3, range 0–5; 0 ranks without demoting) sets how many of
+  each set stay keep. The rest get `--outranked` (`ignore`, `review` or `cull`;
+  default `review`).
+- Ranking only demotes keep; it never promotes a frame.
+- A set that isn't ranked (`--no-rank`, a failed call, the cost limit) is ordered by
+  the frames' own scores instead, and the reason says so.
+- The best frames get the keyword `cull:best`.
+
+**Reuse.** A set's ranking is reused, with no new call, while every rankable frame in
+it is still covered. A frame dropping out keeps the order; a new frame makes the set
+unranked until the next `cull rank`. `cull decide` regroups and re-applies stored
+rankings for free, so changing `--keep-best` or `--outranked` costs nothing.
+Regrouping can lose rankings:
+- when two ranked sets merge, only the first one's order is kept;
+- `--seq-gap 0` drops them all.
+
+A split set keeps its order. What was paid always stays in the report's cost total.
+
+**Ranking separately.**
+- `cull rank <dir>` ranks sets that have no current ranking. `--force` re-ranks all of
+  them, `--estimate` gives the exact call count and cost, and `--batch` runs it at
+  half price.
+- It uses the backend and model the report was judged with, unless you pass others.
+  `--batch` implies anthropic.
+- An interrupted `--batch` ranking leaves `cull-report.json.rank-batch.json`.
+  Re-running `cull rank --batch` re-attaches without paying twice; deleting the file
+  abandons it.
+
+## Reviewing and labelling
+
+`cull review <dir>` builds a contact sheet and serves it on `127.0.0.1`, with a
+per-session token, then opens your browser.
+- **Saving:** every change is saved at once, to `cull-labels.jsonl` beside the report
+  and to the frame's XMP sidecar.
+- **Other modes:** `--no-xmp` saves only the labels log. `--static` writes an offline
+  page that keeps labels in the browser, with JSONL export and import.
+
+| Key | Action |
 |---|---|
-| `scan <dir>` | Extract + measure previews, detect faces; writes report only, calls no model |
-| `judge <dir>` | Evaluate with the model, apply policy, optional sidecars; ranks sequences at the end unless `--no-rank`; `--move-culled` moves culls (with their `.xmp`) into `culled/` beside them |
-| `rank <dir>` | Rank the sets `judge` found (or skipped with `--no-rank`), without re-judging; see "Sequences and best of set" below |
-| `decide <dir>` | Re-apply the policy to stored assessments (no model calls); regroups sequences and re-applies stored ranks for free; `--write-xmp` / `--move-culled` sync; `--labels` applies your verdicts and stars |
-| `review <dir>` | Opens the contact sheet in your browser: subject crops, decisions, reasons; label keep/review/cull and 1–5 stars. Every change is saved to `cull-labels.jsonl` and the frame's sidecar (`--no-xmp`: log only; `--static`: offline page) |
-| `calibrate REPORT...` | Agreement with your labels (the log beside the first report, or `--labels`): confusion matrix, false-cull / missed-cull / review rates, threshold sweep |
-| `apply-c1 <dir>` | AppleScript for the open Capture One document (color tag, keyword; your stars with `--labels`; optional exposure/crop); dry run by default, `--probe` first |
-| `restore <dir>` | Move frames that `--move-culled` moved back to where they were (never overwrites) |
-| `version` | Build version (set via `make build`) |
-| `completion <shell>` | Shell completion (cobra built-in) |
+| ← → | previous / next frame |
+| ↑ ↓ | one grid row (one frame in the detail view) |
+| Enter / Esc | open the detail view / back to the grid |
+| K / R / C | label keep / review / cull, and advance |
+| U | clear the label |
+| 1–5 / 0 | set stars / clear them |
 
-Global flags: `-o/--report`, `-r/--recursive`, `--max-edge`, `--tiles` ("where focus
-landed" tiles, default 1, sent only when there is no subject crop unless
-`--landed-with-subject`), `--face-min-q` (default 80), `--save-inputs <dir>`,
-`--seq-gap` (60s; 0 disables sequence grouping) / `--seq-look` (0.08; see
-"Sequences and best of set" below), `--min-preview-edge`.
+**Filters** combine three rows:
+- **Verdict:** your label, else the model's.
+- **Progress:** unlabelled, unrated, and where you disagree with the model.
+- **Sets:** all, best, outranked.
 
-Policy flags (`judge`, `rank`, `decide`, `calibrate`): `--review-below-sharpness`, `--eyes-closed`,
-`--outranked`, `--raw-clipped` (each `ignore|review|cull`, default `review`),
-`--raw-clip-threshold` (0.5 % of raw samples at white level), `--min-crop-area`,
-`--keep-best` (default 3). The report stores the policy its decisions came from.
-`decide`, `rank`, `calibrate` and `judge --resume` start from that stored policy and
-say which non-default settings they're reusing; a flag you type overrides only its
-own setting. So `decide --review-below-sharpness 7` sticks until you change it.
+For example, *Keep + Unrated* shows the keepers you haven't starred yet.
 
-Cost and scale (`judge`): `--estimate` (print and exit), `--max-cost USD`, `--batch`
-(Message Batches API: half price; Ctrl-C safe, `--resume` re-attaches), `--no-rank`
-(skip end-of-run ranking; rank later with `cull rank`),
-`--escalate-backend/--escalate-model/--escalate-on` (re-evaluate doubtful frames on a
-stronger model), `--raw-clip` (on for judge, off for scan). Run `cull judge --help`.
+**On each card and in the detail view:**
+- The model's verdict is outlined, top right; your label sits bottom right.
+- A frame in a set shows "set N · #rank/of", with a *best* marker on the best frames.
+- The detail view shows the model's reasons, the frame's rank with its strengths and
+  weaknesses, and a filmstrip of its set.
 
-Calibration loop: `judge` → `review` (label) → `calibrate` → tune with `decide`
-(free). Culling pass: `review` (confirm or override the model, add stars) →
-`decide --move-culled` → import into Capture One.
-
-### Review sheet and labels
-
-`cull review <dir>` builds the sheet, serves it on 127.0.0.1 (a port fixed
-per report, `--port` to pick; a per-session token in the printed URL) and opens it
-in your browser (`--no-open` to skip). The header shows the shoot folder and the
-labels log. Keys: **K/R/C** keep/review/cull (advance), **U** clears, **1–5** stars
-(advance only under the *Unrated* filter), **0** clears stars, **←/→** one frame,
-**↑/↓** one grid row (one frame in the detail view), Enter/Esc. Each card's top-right
-badge (thin outline) is your label; the bottom one is the model's verdict. Filters
-combine a verdict (All/Keep/Review/Cull: your label, else the model's) with progress
-(All/Unlabeled/Unrated/Disagreements), e.g. Keep + Unrated to star the keepers. A
-frame you change stays on screen until you move on. If the server is unreachable,
-changes queue in the browser and are sent when it's back: restart `review` and
-open the new URL (same port, so the same browser storage).
-
-Every change is appended to `cull-labels.jsonl` beside the report, one line
-per change; the last line per file wins:
+**The labels log** is append-only; the last line for a file wins:
 
 ```jsonl
 {"file":"L1000123.DNG","label":"keep","stars":4,"at":"2026-09-27T20:14:09-07:00"}
 ```
 
-Your labels never replace the report's decisions (the report stays the model's
-record). Everything that writes sidecars or moves files uses them by default when
-the log exists beside the report — `decide`, `apply-c1`, and `judge --move-culled` /
-`--write-xmp` — so your verdict wins where you gave one and your stars become the
-rating; `--labels <path>` points elsewhere, `--no-labels` ignores them. `calibrate`
-reads the same log. If frames in a `-r` run share a file name, labels can't say
-which one they mean: `decide`/`apply-c1` refuse, `judge` falls back to the model.
-With `--static` the page works offline from `index.html` and keeps labels in the
-browser; export/import them as the same JSONL. Don't run `judge` on a report while
-reviewing it: both write the report.
+Your labels never change the report's decisions: the report stays the model's
+record. Everything that writes sidecars or moves files uses them by default, so your
+verdict wins and your stars become the rating. That covers `decide`, `apply-c1`, and
+`judge --write-xmp` / `--move-culled`. `--labels <path>` reads the log from somewhere
+else; `--no-labels` ignores it. `calibrate` reads the same log.
 
-### Backends (`judge --backend`)
+**Calibrating.**
+1. Label a sample in `review`.
+2. Run `cull calibrate <dir>/cull-report.json`. It reports:
+   - the false-cull rate (you kept, it culled) and missed-cull rate;
+   - the review rate;
+   - a `--review-below-sharpness` sweep;
+   - a `--keep-best` sweep for sets.
+3. Apply the settings you pick with `cull decide`. The report stores that policy, so
+   later `decide`, `rank`, `calibrate` and `judge --resume` runs start from it. A flag
+   you type overrides only its own setting.
 
-| Backend | Model default | Auth / cost | Notes |
-|---|---|---|---|
-| `anthropic` (default) | `claude-sonnet-5` | API key, billed per token | `--api-key-file` > `$ANTHROPIC_API_KEY` > `~/.anthropic/api_key`, `~/.config/anthropic/api_key`, `~/.anthropic_api_key`, `~/.anthropic` (warns if group/world readable) |
-| `claude-code` | `sonnet` | your Claude subscription via `claude -p` | never uses an API key (aborts if claude reports one); stops cleanly at `--quota-stop` (default 0.9 of the 5-hour window) — rerun with `--resume` later |
-| `openai` | required (`--model`) | optional key (`--openai-key-file`, `$OPENAI_API_KEY`) | any OpenAI-compatible server at `--base-url` (default `http://127.0.0.1:8000/v1`). Streams and hangs up once the JSON closes (`--openai-stream=false` to disable) |
+## Model backends
 
-`--resume` refuses a report written by a different backend or model: use `-o` to
-keep one report per backend when comparing them.
-
-`--move-culled` is meant for culling before import: moving files that Capture One
-already references makes them show as missing. Moves are same-disk renames that
-never overwrite; each is recorded as `moved_to` in the report, `culled/` folders are
-skipped by later runs, and `cull restore` puts everything back. Until the
-sharpness gate is calibrated, look through `culled/` before deleting anything.
-
-## Sequences and best of set
-
-The user shoots **sequences** far more than bursts: the same subject or scene over
-tens of seconds to minutes, with small changes in pose, expression, framing or
-distance. `judge` groups similar frames and asks the model to pick the strongest
-few, instead of scoring every frame in isolation.
-
-**Grouping.** Frames are ordered by capture time, then file name (frames without a
-capture time sort by file name among their neighbours). A frame joins the previous
-frame's set when both hold:
-
-- the gap to the previous frame is ≤ `--seq-gap` (default **60s**; ignored when
-  either frame has no capture time — rewritten, near-identical times leave the look
-  to decide; `0` disables sequence grouping entirely);
-- its look distance to the **previous** frame (not the first frame of the set) is ≤
-  `--seq-look` (default **0.08**). The look is an 8×8 grid of mean RGB from the
-  preview, levelled for exposure and compared over small shifts, so small reframing
-  or zoom stays close while a different scene or subject is far apart. See the
-  measurement table in `CLAUDE.md` for how the default was chosen.
-
-A set is capped at 40 frames, so a slow pan can't chain a whole walk into one set.
-Frames that failed the sharpness gate stay in their set (visible in `review`) but
-aren't ranked.
-
-**Ranking.** Once every frame in a set (of at least 2 rankable frames) is judged,
-one model call compares them side by side — the model never scored them in
-isolation, so it isn't anchored on those scores. Each frame sends a full-frame view
-(768px) and, when a focus target was found (face detection or the model's locate
-call), its crop at native resolution (capped at 512px) — both re-extracted from the
-DNG at rank time. The rubric, in priority order:
-
-1. subject sharpness where it matters (the eyes);
-2. eyes and expression (open, engaged, natural; not mid-blink or mid-word);
-3. gesture and moment;
-4. composition and background (framing, horizon, edge distractions, cropped limbs);
-5. exposure only if it can't be fixed — fixable exposure never counts against a frame.
-
-A set larger than 8 frames is split into nearly equal chunks (≤ 8 frames per call),
-each ranked, then the top finishers from each chunk go to one final call — a full
-40-frame set with the default `--keep-best` (3) makes 5 chunk calls of 8 plus 1
-final call of 5: 6 calls total. Go, not the model, then keeps the top N:
-**`--keep-best`** (default **3**, range 0–5; `0` means
-rank only, nothing is demoted) and **`--outranked`** (`ignore|review|cull`, default
-**`review`**) decide what happens to the rest. Ranking only ever *demotes*: a kept
-frame can become review or cull, but review and cull are never promoted back to
-keep, and nothing is promoted past keep.
-
-A set the model didn't rank (`--no-rank`, a failed call, or the cost budget) falls
-back to ordering by the frames' own scores (sharpness, open eyes, composition,
-exposure) — the same `--keep-best`/`--outranked` policy still applies, with the
-reason noting it wasn't compared.
-
-**Commands.** `judge --no-rank` skips ranking (judge every frame, rank later).
-`cull rank <dir>` ranks the sets in an existing report without re-judging — useful
-after `--no-rank`, after tuning `--keep-best`/`--outranked`, or to rank an older
-schema-v3 report (it computes any missing look fingerprints from the DNGs first,
-free, about 1s/frame). It takes `--force` (re-rank every set, even one that already
-has a model order), `--estimate` (exact call count and cost, no model calls),
-`--max-cost`, and `--batch` (anthropic only, half price through the Message Batches
-API; `--batch-poll`, default 30s, sets how often it checks progress). With `--batch`
-and no `--backend`, `rank` defaults to anthropic. Without `--backend`/`--model`,
-`rank` defaults to whatever the report was judged with.
-
-A `--batch` ranking run is re-attachable: Ctrl-C leaves `<report>.rank-batch.json`
-beside the report, and rerunning `cull rank --batch` picks up where it left off
-(a sync `judge` with ranking on, or a sync `cull rank`, refuses to run while that
-file exists, since it would pay for the same sets again); delete the file to
-abandon it instead.
-
-**Reuse.** A set's stored order is reused — no new model call — while every
-currently rankable member of the set appears in it. A member that drops out (say, a
-frame newly culled by a policy change) is simply removed from the stored order; the
-relative order of the rest stays valid. A new or newly rankable member makes the
-set unranked again until the next `cull rank`. `cull decide` re-applies stored
-orders (and regroups sequences) for free — it never calls a model — so retuning
-`--keep-best` or `--outranked` after ranking doesn't cost anything. Regrouping
-can lose paid orders:
-
-- A regroup that **merges** two ranked sets (a changed `--seq-look` or `--seq-gap`)
-  keeps only the first-matched set's order, summary and cost. The merged set falls
-  back to "scores" and needs `cull rank` again.
-- `decide --seq-gap 0` turns grouping off and saves the report with no sets, which
-  drops **every** stored order. Going back to a normal gap regroups, but every set
-  is unranked until `cull rank` runs again.
-- A **split** keeps each piece's order; the set's cost is counted once, on the first
-  piece.
-
-What was paid always stays in the report's running cost total.
-
-**Estimates.** `judge --estimate` adds an approximate ranking cost that assumes every
-frame lands in a full 8-frame set (~10k in / ~1k out tokens per call). It is neither
-a bound nor exact, because set sizes aren't known before judging: pairs and small
-sets cost more per frame, and frames in no set cost nothing. `--max-cost` is the hard
-cap. `cull rank --estimate`
-is exact, because the sets are already known.
-
-**Sidecars, Capture One and the review sheet.** A set's best frame(s) get the
-keyword `cull:best`, in sidecars and in `apply-c1`. `calibrate` gains a sets
-section over multi-frame sets containing labelled frames: how often a frame you
-labelled keep got ranked out of the best cut, how often one you labelled cull or
-review got ranked into it, and a `--keep-best` 1–5 sweep recomputed from the stored
-ranks, without new model calls. The review sheet marks a set frame with a
-"set N · #rank/of" badge and a distinct "best" marker, adds a **Sets: All / Best /
-Outranked** filter, and the detail view shows the frame's rank with the model's
-strength/weakness notes, the set's summary, and a filmstrip of the set's thumbnails
-(click one to jump to it, if it's visible under the current filters).
-
-## Pipeline
-
-1. `internal/dng` — walks TIFF IFDs/SubIFDs for the largest reduced-resolution JPEG
-   (reads IFDs + preview bytes only, never raw data). On the M11-P that is a
-   full-resolution 9504×6320 preview. Falls back to `exiftool` below `--min-preview-edge`.
-2. `internal/imageprep` — applies EXIF orientation; downsizes the full frame to
-   `--max-edge`; crops at native resolution; measures luma percentiles and clipping.
-3. `internal/focus` — what should be sharp, and where focus landed:
-   - pigo face detection (embedded cascades); the most confident face with
-     Q ≥ `--face-min-q` is the target, centred on the eyes when found;
-   - otherwise `judge` asks the model to locate the intended focus target on a small
-     frame (`--locate off` to skip);
-   - the subject crop (768–1536 px, native) plus `--tiles` regions with the most fine
-     detail relative to local contrast — raw Laplacian variance rewards contrast, not
-     focus, and picks sunlit out-of-focus foreground.
-4. `internal/llm` — one structured call (system prompt, text + JPEG parts, JSON
-   Schema) implemented by the `anthropic`, `claude-code` and `openai` backends; every
-   answer is schema-validated in Go, with one retry.
-5. `eval.Policy` — **deterministic decision in Go**, not the model's call:
-   - `missed_focus` / `motion_blur` → cull; `soft` → review; optional score floor
-   - raw clipping (pure-Go decode of the DNG's lossless-JPEG raw) decides exposure:
-     preview "clipped" with raw headroom → no review; raw ≥ threshold → `--raw-clipped`
-   - closed eyes → `--eyes-closed`; frames ranked below `--keep-best` in their
-     sequence → `--outranked`
-   - composition never culls; invalid or < `-min-crop-area` crops are dropped
-6. `internal/report` — JSON is the source of truth (schema v4; checkpointed every
-   `--checkpoint` results; `--resume` keys on path+size+mtime). Filter it with `jq`,
-   e.g. `jq '.results[] | select(.decision=="cull") | .file'`.
-
-## Write-back
-
-| Target | Rating / label / keyword | Exposure / crop |
+| `--backend` | Default model | Auth and billing |
 |---|---|---|
-| XMP sidecar → Capture One | yes, read on import (verified with C1 16.7.2); Image › Sync Metadata after import | **no** — C1 doesn't reliably translate `crs:` settings |
-| XMP sidecar → Lightroom Classic | ignored for DNG (LR uses embedded XMP) | ignored |
-| `apply-c1` (AppleScript) | yes | yes |
+| `anthropic` (default) | `claude-sonnet-5` | API key, billed per token. Looked up in `--api-key-file`, `$ANTHROPIC_API_KEY`, `~/.anthropic/api_key`, `~/.config/anthropic/api_key`, `~/.anthropic_api_key` |
+| `claude-code` | `sonnet` | Your Claude subscription, via `claude -p`. Never uses an API key. Stops at `--quota-stop` (default 0.9 of the 5-hour window); continue later with `--resume` |
+| `openai` | required (`--model`) | Any OpenAI-compatible server at `--base-url` (default `http://127.0.0.1:8000/v1`); key optional. Streams, and stops as soon as the JSON is complete |
 
-What gets written (`review` unless `--no-xmp`; `judge`/`decide` with `--write-xmp`; `apply-c1`):
+- `--resume` refuses a report written by a different backend or model. Use `-o` to
+  keep one report per backend when comparing them.
+- `--escalate-backend` / `--escalate-model` re-assess doubtful frames on a stronger
+  model; `--escalate-on` picks the outcomes that escalate.
+- Small local vision models judge focus poorly. Calibrate before trusting one.
+
+## Cost control
+
+- `judge --estimate` and `rank --estimate` print the cost without calling a model or
+  needing a key.
+  - `rank`'s figure is exact.
+  - `judge`'s includes an approximate ranking cost that assumes 8-frame sets. It
+    usually overestimates.
+- `--max-cost USD` stops the run once it has spent that much. Continue with `--resume`.
+- `--batch` (anthropic) uses the Message Batches API: half price, with results within
+  minutes to hours. Ctrl-C is safe; `--resume` re-attaches to batches already paid for.
+- Costs so far are recorded in the report; `judge` and `rank` print them when they
+  finish.
+
+## Output: sidecars, Capture One and moving culls
+
+**XMP sidecars** (`L1000123.xmp` beside `L1000123.DNG`) are written:
+- by `review`, unless `--no-xmp`;
+- by `judge` and `decide`, with `--write-xmp`.
+
+Sidecars that `cull` didn't write are never overwritten without `--overwrite-xmp`.
 
 | Field | Value |
 |---|---|
 | Rating | your stars only; left out when you haven't rated (the model never sets stars) |
-| Colour | the verdict — yours if you labeled, else the model's: keep **Green**, review **Yellow**, cull **Red** (C1 colour tags 4/3/1 in `apply-c1`) |
-| Keywords | `cull:<verdict>`, plus `cull:labeled` when the verdict is yours, plus `cull:best` for a set's best frame(s) |
+| Label | the verdict (yours if you labelled, else the model's): keep **Green**, review **Yellow**, cull **Red** |
+| Keywords | `cull:<verdict>`; `cull:labeled` when the verdict is yours; `cull:best` for a set's best frames |
 
-Sidecars not written by `cull` are never overwritten without `--overwrite-xmp`.
+`--xmp-develop` also writes `crs:Exposure2012` and `crs:Crop*` for Adobe Camera Raw
+and Bridge.
 
-`-xmp-develop` writes `crs:Exposure2012` and `crs:Crop*` for ACR/Bridge-style consumers.
+| Target | Rating, label, keywords | Exposure, crop |
+|---|---|---|
+| Capture One, from sidecars | read on import; use Image › Sync Metadata after import | not applied |
+| Capture One, via `apply-c1` | yes | yes, with `--exposure` / `--crop` |
+| Lightroom Classic | ignores sidecars for DNG files | — |
 
-## Known gaps / TODO
+**`apply-c1`** writes an AppleScript for the open Capture One document. Run
+`--probe` first (read-only), read the dry-run output, then use `--run` to apply it.
 
-- [x] Verify M11-P preview dimensions: full resolution (9504×6320), no raw rendering needed.
-- [ ] Calibrate the sharpness gate and `--face-min-q` against hand labels (tooling done:
-      `review` → `calibrate` → `decide`).
-- [x] Raw-level clipping check (pure Go, no LibRaw).
-- [x] `apply-c1`: names verified against C1 16.7.2's dictionary (compiles with osacompile);
-      run `--probe` to confirm color-tag numbering and image naming before writing.
-- [ ] `crs:Crop*` coordinate space for rotated images is an unverified assumption
-      (stored orientation); `crs:CropAngle` not written.
-- [x] Message Batches API mode (`--batch`).
-- [x] Sequence grouping and best-of-set ranking (`--seq-gap`, `--seq-look`, `--keep-best`,
-      `--outranked`, `cull rank`), replacing burst/near-duplicate grouping.
+**Moving culls.** `--move-culled` (on `judge` or `decide`) moves each culled DNG and
+its sidecar into a `culled/` folder beside it.
+- **When:** do it before importing into Capture One. Moving files the catalog
+  already references makes them show as missing.
+- **Safety:** moves are same-disk renames that never overwrite, and each is recorded
+  in the report.
+- **Later runs** skip `culled/`, and `cull restore` puts everything back.
+- Look through `culled/` before deleting anything.
+
+## Flag reference
+
+**Global** (every command):
+- `-o/--report` sets the report path; `-r/--recursive` includes subfolders.
+- `--max-edge` (1568) sets the size of the full frame sent to the model.
+- `--min-preview-edge` (1500) sets the preview size below which a frame is flagged.
+- `--face-min-q` (80) is the face-detection confidence needed.
+- `--tiles` (1) sets how many "where focus landed" tiles to send. Add
+  `--landed-with-subject` to send them even when there's a subject crop.
+- `--seq-gap` (60 s) and `--seq-look` (0.08) control grouping.
+- `--save-inputs <dir>` writes exactly what the model sees.
+
+**Policy** (`judge`, `rank`, `decide`, `calibrate`):
+- `--review-below-sharpness` (0 = off);
+- `--eyes-closed`, `--raw-clipped` and `--outranked` (each `ignore`, `review` or
+  `cull`; default `review`);
+- `--raw-clip-threshold` (0.5 % of raw samples);
+- `--min-crop-area` (0.6);
+- `--keep-best` (3).
+
+**`judge`:**
+- **Backend:** `--backend`, `--model`, `-j/--concurrency`, `--locate`, `--resume`,
+  `--checkpoint`.
+- **Cost:** `--estimate`, `--max-cost`, `--batch`, `--quota-stop`.
+- **Ranking:** `--no-rank`.
+- **Other assessment options:** `--escalate-*`, `--raw-clip` (on by default).
+- **Output:** `--write-xmp`, `--xmp-develop`, `--overwrite-xmp`, `--move-culled`,
+  `--no-labels`.
+
+## Limitations
+
+- **Calibrate before trusting it at scale.** Model verdicts vary between runs on
+  borderline frames. Keep culls going to review until `calibrate` on your own labels
+  shows an acceptable false-cull rate.
+- **Ranking quality and stability** are not yet measured beyond a few sets.
+- **Grouping** links nearly identical framings only; reframed retakes of one pose
+  form separate sets.
+- **Capture One:** `apply-c1` assumes Capture One's colour-tag numbering (1 red,
+  3 yellow, 4 green) and image naming; confirm with `--probe`.
+- **Crop coordinates** in `crs:Crop*` for rotated images follow the stored
+  orientation. This hasn't been verified in Adobe tools, and `crs:CropAngle` isn't
+  written.

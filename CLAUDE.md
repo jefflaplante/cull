@@ -210,6 +210,25 @@ make vet
   (the pre-feature-batch sync run said 5.5 with a landed tile), M1103817 review 3.5
   "soft" (the subscription run called it missed_focus → cull; it is soft at 100%).
 
+### Camera support (tested 2026-09-29 on 22 raw.pixls.us samples with `cull scan --raw-clip`)
+
+- `cull` judges only the embedded JPEG preview, so support depends on the camera's DNG
+  writer. Previews ≥ 97% of the raw's width (the rest is masked border): Leica M10,
+  M10-R, Q2, SL2, CL; Pentax K-1 II, K-3 III; Ricoh GR III; Sigma fp; iPhone 12 Pro
+  ProRAW; Galaxy S23 Ultra; Adobe DNG Converter full-size output.
+- Pixel 8 Pro: 2560 px (31% of 8160). Small (17–24%, flagged): iPhone XS, Pixel 4a,
+  DJI Mini 2 / Mavic 3. No usable preview: Leica M9 (320×216 *uncompressed* RGB
+  thumbnail, not JPEG), M (Typ 240) and Monochrom (Typ 246) (160×120), OnePlus 6T (none).
+- Raw clipping (striped lossless JPEG only) worked on M10, M10-R, Typ 240, Typ 246,
+  K-1 II, K-3 III, GR III. Fails, falling back to the preview: tiled LJPEG (phones,
+  Sigma fp, Adobe converter), uncompressed (Q2, SL2, CL, DJI), lossy DNG (34892),
+  Samsung (restart intervals).
+- EXIF: Leica M10 also lacks `FNumber`; Pentax, Ricoh, Sigma, DJI and phones mostly lack
+  `LensModel`. iPhone 12 Pro previews have orientation 6 (extraction fine; display not
+  checked visually).
+- The evaluate and locate prompts still describe "a Leica M11-P rangefinder (manual
+  focus)"; autofocus bodies and phones get that framing too.
+
 ### Sequences: look distances on the 17 sample frames (2026-09-28)
 
 `scan -o <tmp>` looks, `group.LookDistance` between consecutive frames in `Sequences`

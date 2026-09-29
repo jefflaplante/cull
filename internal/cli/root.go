@@ -35,7 +35,7 @@ func NewRootCmd() *cobra.Command {
 	var so sharedOpts
 	root := &cobra.Command{
 		Use:   "cull",
-		Short: "Cull Leica DNGs with a vision model: sharpness gates, exposure is fixed, composition is cropped",
+		Short: "Cull DNG raw files with a vision model: sharpness gates, exposure is fixed, composition is cropped",
 		Long: `cull extracts the embedded JPEG preview from each DNG, measures it, and asks a
 vision model to assess sharpness, exposure, and composition. A deterministic policy
 turns those assessments into keep / review / cull decisions.

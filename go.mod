@@ -1,4 +1,4 @@
-module github.com/jefflaplante/gophotocull
+module github.com/jefflaplante/cull
 
 go 1.22
 

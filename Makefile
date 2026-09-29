@@ -1,6 +1,6 @@
 BIN     := bin/cull
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -X github.com/jefflaplante/gophotocull/internal/cli.version=$(VERSION)
+LDFLAGS := -X github.com/jefflaplante/cull/internal/cli.version=$(VERSION)
 
 .PHONY: build install test vet tidy clean
 build:

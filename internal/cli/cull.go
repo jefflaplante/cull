@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/llm"
-	"github.com/jefflaplante/gophotocull/internal/pipeline"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/llm"
+	"github.com/jefflaplante/cull/internal/pipeline"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 type cullOpts struct {

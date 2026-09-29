@@ -8,7 +8,7 @@ import (
 
 	pigo "github.com/esimov/pigo/core"
 
-	"github.com/jefflaplante/gophotocull/internal/imageprep"
+	"github.com/jefflaplante/cull/internal/imageprep"
 )
 
 //go:embed cascade/facefinder

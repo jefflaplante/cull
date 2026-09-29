@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/group"
-	"github.com/jefflaplante/gophotocull/internal/labels"
-	"github.com/jefflaplante/gophotocull/internal/report"
-	"github.com/jefflaplante/gophotocull/internal/xmp"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/group"
+	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/xmp"
 )
 
 // DecideOptions re-apply a policy to a report's stored assessments.

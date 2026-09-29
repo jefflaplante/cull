@@ -12,8 +12,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/llm"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/llm"
 )
 
 // batchExec runs rank calls as Message Batches (half price, asynchronous).

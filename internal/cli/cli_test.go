@@ -17,10 +17,10 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/labels"
-	"github.com/jefflaplante/gophotocull/internal/pipeline"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/pipeline"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 func run(t *testing.T, args ...string) (string, error) {

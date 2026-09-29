@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jefflaplante/gophotocull/internal/llm"
+	"github.com/jefflaplante/cull/internal/llm"
 )
 
 // Usage is kept as an eval name so the report schema doesn't depend on llm.

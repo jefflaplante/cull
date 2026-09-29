@@ -14,9 +14,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/labels"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 const testAddr = "127.0.0.1:4567"

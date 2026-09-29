@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 // ScanSummary condenses a scan into one line: whether previews are big enough

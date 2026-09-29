@@ -7,8 +7,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/jefflaplante/gophotocull/internal/config"
-	"github.com/jefflaplante/gophotocull/internal/llm"
+	"github.com/jefflaplante/cull/internal/config"
+	"github.com/jefflaplante/cull/internal/llm"
 )
 
 // backendFlags select and construct a model backend: shared by judge and rank so

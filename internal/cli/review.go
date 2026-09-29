@@ -15,9 +15,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jefflaplante/gophotocull/internal/labels"
-	"github.com/jefflaplante/gophotocull/internal/report"
-	"github.com/jefflaplante/gophotocull/internal/review"
+	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/review"
 )
 
 func newReviewCmd(so *sharedOpts) *cobra.Command {

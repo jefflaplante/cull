@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/llm"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/llm"
 )
 
 type failingBackend struct{ calls int32 }

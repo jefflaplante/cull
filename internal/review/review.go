@@ -15,11 +15,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jefflaplante/gophotocull/internal/dng"
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/focus"
-	"github.com/jefflaplante/gophotocull/internal/imageprep"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/dng"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/focus"
+	"github.com/jefflaplante/cull/internal/imageprep"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 //go:embed page.html

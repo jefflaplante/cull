@@ -8,10 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/labels"
-	"github.com/jefflaplante/gophotocull/internal/report"
-	"github.com/jefflaplante/gophotocull/internal/xmp"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/xmp"
 )
 
 // CulledDir is the folder, next to the frames, that --move-culled moves culls

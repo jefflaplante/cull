@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/jefflaplante/gophotocull/internal/labels"
+	"github.com/jefflaplante/cull/internal/labels"
 )
 
 // userLabels loads your labels for a report: path when given (it must exist), else

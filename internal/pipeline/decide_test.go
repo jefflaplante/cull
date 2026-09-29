@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/group"
-	"github.com/jefflaplante/gophotocull/internal/labels"
-	"github.com/jefflaplante/gophotocull/internal/rawclip"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/group"
+	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/rawclip"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 // culled runs cull on the three-frame shoot (L1 cull, L2 keep at score 8, L3 review).

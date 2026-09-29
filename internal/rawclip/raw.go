@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jefflaplante/gophotocull/internal/dng"
+	"github.com/jefflaplante/cull/internal/dng"
 )
 
 // Result is the share of raw samples at (or within 0.2% of) the white level.

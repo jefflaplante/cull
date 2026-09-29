@@ -1,11 +1,12 @@
-# cull (gophotocull)
+# cull
 
 `cull` culls Leica M11-P DNGs using a vision model on the embedded JPEG preview.
 Priority: **sharpness gates, exposure gets fixed, composition gets cropped.**
 Go + [cobra](https://github.com/spf13/cobra).
 
-The binary is `cull` (`make build` → `bin/cull`, `make install` → `$GOPATH/bin/cull`);
-the repo and Go module stay `gophotocull`. Checked 2026-09-28: no `cull` on macOS or
+The binary is `cull` (`make build` → `bin/cull`, `make install` → `$GOPATH/bin/cull`,
+or `go install github.com/jefflaplante/cull/cmd/cull@latest`). The repo and Go module
+are `github.com/jefflaplante/cull`; the project was first called gophotocull. Checked 2026-09-28: no `cull` on macOS or
 in Homebrew, Debian, Ubuntu, Arch or Fedora, but npm, crates.io and PyPI each have a
 `cull` package that installs its own `cull` command (npm's deletes files). If you
 install one of those globally, make sure `which cull` is this one.

@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jefflaplante/gophotocull/internal/pipeline"
+	"github.com/jefflaplante/cull/internal/pipeline"
 )
 
 func newRestoreCmd(so *sharedOpts) *cobra.Command {

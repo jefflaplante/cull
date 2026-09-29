@@ -9,12 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jefflaplante/gophotocull/internal/group"
-	"github.com/jefflaplante/gophotocull/internal/imageprep"
-	"github.com/jefflaplante/gophotocull/internal/pipeline"
+	"github.com/jefflaplante/cull/internal/group"
+	"github.com/jefflaplante/cull/internal/imageprep"
+	"github.com/jefflaplante/cull/internal/pipeline"
 )
 
-// Set via -ldflags "-X github.com/jefflaplante/gophotocull/internal/cli.version=..."
+// Set via -ldflags "-X github.com/jefflaplante/cull/internal/cli.version=..."
 var version = "dev"
 
 // sharedOpts are persistent flags that apply to every subcommand that reads a shoot.

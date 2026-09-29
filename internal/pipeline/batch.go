@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/focus"
-	"github.com/jefflaplante/gophotocull/internal/llm"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/focus"
+	"github.com/jefflaplante/cull/internal/llm"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 // BatchClient is the Message Batches API (implemented by *llm.Anthropic).

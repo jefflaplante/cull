@@ -1,4 +1,4 @@
-# gophotocull
+# cull
 
 Go CLI that culls Leica M11-P DNGs by sending each file's embedded JPEG preview to a
 vision model. Priority order: **sharpness gates; exposure gets fixed, not culled;
@@ -30,7 +30,7 @@ make vet
 
 ## Layout
 
-- `cmd/cull` — main; signal-aware context into cobra (binary `cull`; module and repo stay `gophotocull`)
+- `cmd/cull` — main; signal-aware context into cobra (binary `cull`; module and repo `github.com/jefflaplante/cull`, first called gophotocull)
 - `internal/cli` — cobra tree: `scan`, `judge` (model; code in cull.go), `rank` (rank.go),
   `decide`, `review`, `calibrate`, `apply-c1`, `restore`, `version` (+ built-in `completion`);
   backend.go (`--backend`/`--model`/credential flags shared by judge and rank)
@@ -91,7 +91,7 @@ make vet
   Image › Sync Metadata). It does **not** reliably apply Adobe `crs:` develop
   settings (exposure, crop) from sidecars. Edits into C1 must go through AppleScript.
 - **Capture One 16.7.2 reads a DNG's `.xmp` sidecar on import** (user-tested 2026-09-27
-  on a clone of M1103817 with a gophotocull-written sidecar): `xmp:Rating` stars and
+  on a clone of M1103817 with a cull-written sidecar): `xmp:Rating` stars and
   the `xmp:Label` colour showed up. So write sidecars before import; after import,
   changes go through `apply-c1`.
 - Lightroom Classic ignores sidecars for DNG files (uses embedded XMP).

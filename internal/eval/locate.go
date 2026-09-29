@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/jefflaplante/gophotocull/internal/llm"
+	"github.com/jefflaplante/cull/internal/llm"
 )
 
 // NormBox is a box in [0,1] fractions of the image as displayed (after EXIF

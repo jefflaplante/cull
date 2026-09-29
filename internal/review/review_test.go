@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 // tinyDNG writes a minimal DNG whose only preview is a 1600×1067 JPEG.

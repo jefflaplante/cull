@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 // RankCalls counts, without spending anything, what `cull rank` would actually do

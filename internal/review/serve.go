@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jefflaplante/gophotocull/internal/labels"
-	"github.com/jefflaplante/gophotocull/internal/report"
-	"github.com/jefflaplante/gophotocull/internal/xmp"
+	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/xmp"
 )
 
 // ServeOptions configure a review server.

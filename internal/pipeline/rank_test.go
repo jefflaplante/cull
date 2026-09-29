@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/group"
-	"github.com/jefflaplante/gophotocull/internal/llm"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/group"
+	"github.com/jefflaplante/cull/internal/llm"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 type rankBackend struct {

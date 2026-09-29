@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
+	"github.com/jefflaplante/cull/internal/eval"
 )
 
 func TestSchemaV4RoundTrip(t *testing.T) {

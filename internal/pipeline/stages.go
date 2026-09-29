@@ -7,15 +7,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jefflaplante/gophotocull/internal/dng"
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/focus"
-	"github.com/jefflaplante/gophotocull/internal/group"
-	"github.com/jefflaplante/gophotocull/internal/imageprep"
-	"github.com/jefflaplante/gophotocull/internal/labels"
-	"github.com/jefflaplante/gophotocull/internal/rawclip"
-	"github.com/jefflaplante/gophotocull/internal/report"
-	"github.com/jefflaplante/gophotocull/internal/xmp"
+	"github.com/jefflaplante/cull/internal/dng"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/focus"
+	"github.com/jefflaplante/cull/internal/group"
+	"github.com/jefflaplante/cull/internal/imageprep"
+	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/rawclip"
+	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/xmp"
 )
 
 // The stages of one frame, shared by the synchronous pipeline and batch mode:

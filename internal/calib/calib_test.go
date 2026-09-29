@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 func frame(name string, d eval.Decision, score float64) report.Result {

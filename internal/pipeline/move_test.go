@@ -10,11 +10,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/focus"
-	"github.com/jefflaplante/gophotocull/internal/imageprep"
-	"github.com/jefflaplante/gophotocull/internal/llm"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/focus"
+	"github.com/jefflaplante/cull/internal/imageprep"
+	"github.com/jefflaplante/cull/internal/llm"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 // perFileBackend answers each frame with the sharpness status for its file name.

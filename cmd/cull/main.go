@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jefflaplante/gophotocull/internal/cli"
+	"github.com/jefflaplante/cull/internal/cli"
 )
 
 func main() {

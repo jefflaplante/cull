@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jefflaplante/gophotocull/internal/llm"
-	"github.com/jefflaplante/gophotocull/internal/report"
+	"github.com/jefflaplante/cull/internal/llm"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 // saveInputs writes req's images and text in send order, so calibration can see

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jefflaplante/gophotocull/internal/llm"
+	"github.com/jefflaplante/cull/internal/llm"
 )
 
 const evalJSON = `{

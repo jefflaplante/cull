@@ -10,10 +10,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jefflaplante/gophotocull/internal/dng"
-	"github.com/jefflaplante/gophotocull/internal/eval"
-	"github.com/jefflaplante/gophotocull/internal/imageprep"
-	"github.com/jefflaplante/gophotocull/internal/rawclip"
+	"github.com/jefflaplante/cull/internal/dng"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/imageprep"
+	"github.com/jefflaplante/cull/internal/rawclip"
 )
 
 const SchemaVersion = 4

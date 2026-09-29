@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/jefflaplante/gophotocull/internal/eval"
+	"github.com/jefflaplante/cull/internal/eval"
 )
 
 // policyFlags are the decision knobs shared by judge, rank, and decide. New

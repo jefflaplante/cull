@@ -28,7 +28,7 @@ type Ranking struct {
 	Summary string      `json:"summary"`
 }
 
-const rankPrompt = `You compare a sequence of similar frames of one scene (the same subject or set-up over seconds to minutes; pose, expression, framing or distance may change) and rank them best to worst. Compare them to each other, not against an absolute standard. Judge in this priority order:
+const rankPrompt = `You compare a sequence of similar frames of one scene (the same subject or set-up over seconds to minutes; pose, expression, framing or distance may change) and rank them best to worst. Compare them to each other, not against an absolute standard. Each frame comes as a full frame and, when there is one, a detail crop of its subject at native resolution. The detail crops are cut by this tool, not by the photographer: use them to judge sharpness, eyes and expression, and judge framing and composition on the full frame only, so never count a crop's tightness or cut-off edges against a frame. Judge in this priority order:
 1. subject sharpness where it matters (the eyes), judged on the crops when given;
 2. eyes and expression (open, engaged, natural; not mid-blink or mid-word);
 3. gesture and moment;
@@ -70,7 +70,7 @@ func RankRequest(frames []RankFrame, maxTokens int) llm.Request {
 		n := i + 1
 		parts = append(parts, llm.Text(fmt.Sprintf("Frame %d: full frame", n)), llm.JPEG(f.Full))
 		if f.Crop != nil {
-			parts = append(parts, llm.Text(fmt.Sprintf("Frame %d: subject at native resolution", n)), llm.JPEG(f.Crop))
+			parts = append(parts, llm.Text(fmt.Sprintf("Frame %d: subject detail crop at native resolution (cut by this tool, not the photo's framing)", n)), llm.JPEG(f.Crop))
 		}
 	}
 	parts = append(parts, llm.Text(fmt.Sprintf("Rank these %d frames.", len(frames))))

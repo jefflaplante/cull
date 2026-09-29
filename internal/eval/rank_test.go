@@ -57,6 +57,28 @@ func TestRankRequestHasNoNamesOrScores(t *testing.T) {
 	}
 }
 
+// The subject crops are cut by cull, not framed by the photographer. On the first live
+// run the model listed "slightly tighter crop on face in the detail view" as a
+// frame's weakness: it must judge framing on the full frame only.
+func TestRankPromptSaysTheCropsAreTheTools(t *testing.T) {
+	req := RankRequest(frames3(), 2000)
+	sys := strings.ToLower(req.System)
+	for _, want := range []string{"cut by this tool", "not by the photographer", "judge framing and composition on the full frame only"} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, req.System)
+		}
+	}
+	var crop string
+	for _, p := range req.Parts {
+		if strings.HasPrefix(p.Text, "Frame 1:") && !strings.Contains(p.Text, "full frame") {
+			crop = p.Text
+		}
+	}
+	if !strings.Contains(crop, "detail crop") || !strings.Contains(crop, "not the photo's framing") {
+		t.Errorf("crop label should say it's a detail crop, not the framing: %q", crop)
+	}
+}
+
 func TestRankDecodes(t *testing.T) {
 	f := &rankFake{answers: []string{good3}}
 	r, u, err := Rank(context.Background(), f, frames3(), 2000)

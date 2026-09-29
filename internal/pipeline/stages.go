@@ -163,6 +163,7 @@ func buildInput(cfg Config, p *prepared, target *focus.Target) (eval.Input, erro
 		Landed:      landed,
 		StatsText:   statsText(frame, p.stats, res.Exif, res.RawClip),
 		MinCropArea: cfg.Policy.MinCropArea,
+		Camera:      cameraOf(res.Exif),
 	}
 	if cfg.SaveInputs != "" {
 		names := []string{"full"}
@@ -196,4 +197,13 @@ func finish(cfg Config, res *report.Result, e *eval.Evaluation, orientation int)
 	default:
 		res.Fixups = append(res.Fixups, "xmp: "+err.Error())
 	}
+}
+
+// cameraOf names a frame's camera for the prompts; a frame without EXIF gets a
+// generic description.
+func cameraOf(e *dng.Exif) eval.Camera {
+	if e == nil {
+		return eval.Camera{}
+	}
+	return eval.Camera{Make: e.Make, Model: e.Model}
 }

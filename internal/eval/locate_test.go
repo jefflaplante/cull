@@ -31,7 +31,7 @@ func TestLocateSendsOneImageAndParses(t *testing.T) {
 	fb := &fakeBackend{replies: map[string]string{
 		"focus_target": `{"confident":true,"kind":"eye","subject":"woman's left eye","box":{"left":0.4,"top":0.2,"right":0.45,"bottom":0.25}}`,
 	}}
-	loc, u, err := Locate(context.Background(), fb, []byte{9}, 256)
+	loc, u, err := Locate(context.Background(), fb, []byte{9}, Camera{}, 256)
 	if err != nil {
 		t.Fatal(err)
 	}

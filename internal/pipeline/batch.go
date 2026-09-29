@@ -129,7 +129,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 				p.res.Error = "locate: " + err.Error()
 				return llm.BatchRequest{}, "error", false
 			}
-			return llm.BatchRequest{CustomID: "L-" + frameID(p.res.File), Req: eval.LocateRequest(small, locateMaxTokens)}, "locate", true
+			return llm.BatchRequest{CustomID: "L-" + frameID(p.res.File), Req: eval.LocateRequest(small, cameraOf(p.res.Exif), locateMaxTokens)}, "locate", true
 		}
 		return evalRequest(cfg, p, target)
 	})

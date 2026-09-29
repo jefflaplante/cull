@@ -36,7 +36,7 @@ type LocateResult struct {
 	Box       NormBox `json:"box"`
 }
 
-const locatePrompt = `You locate the intended focus target in photographs from a Leica M11-P rangefinder (manual focus, often shot wide open). Decide what the photographer meant to be sharp: for people, the eye nearest the camera (a box around both eyes if they are equally near); for animals, the nearest eye; otherwise the most important detail of the main subject. Judge intent from the composition, not from what happens to look sharp. Return a tight box around the target as fractions of the image width and height, measured from the top-left of the image as displayed. If there is no clear subject (an open landscape, an abstract), set confident to false and kind to "none". Keep subject to a few words.`
+const locatePrompt = `You locate the intended focus target in photographs from %s. Decide what the photographer meant to be sharp: for people, the eye nearest the camera (a box around both eyes if they are equally near); for animals, the nearest eye; otherwise the most important detail of the main subject. Judge intent from the composition, not from what happens to look sharp. Return a tight box around the target as fractions of the image width and height, measured from the top-left of the image as displayed. If there is no clear subject (an open landscape, an abstract), set confident to false and kind to "none". Keep subject to a few words.`
 
 var focusTargetSchema = map[string]any{
 	"type":                 "object",
@@ -60,10 +60,10 @@ var focusTargetSchema = map[string]any{
 	},
 }
 
-// LocateRequest builds the locate call for a downscaled frame.
-func LocateRequest(frame []byte, maxTokens int) llm.Request {
+// LocateRequest builds the locate call for a downscaled frame from camera cam.
+func LocateRequest(frame []byte, cam Camera, maxTokens int) llm.Request {
 	return llm.Request{
-		System:     locatePrompt,
+		System:     fmt.Sprintf(locatePrompt, cam.Describe()),
 		Parts:      []llm.Part{llm.Text("Find the intended focus target in this photograph:"), llm.JPEG(frame)},
 		SchemaName: "focus_target",
 		Schema:     focusTargetSchema,
@@ -86,8 +86,8 @@ func DecodeLocate(raw []byte) (*LocateResult, error) {
 // Locate asks the backend where the intended focus target is in a downscaled
 // frame. Like Evaluate, a result delivered with llm.ErrQuotaStop is returned
 // together with that error.
-func Locate(ctx context.Context, b llm.Backend, frame []byte, maxTokens int) (*LocateResult, Usage, error) {
-	resp, err := b.Call(ctx, LocateRequest(frame, maxTokens))
+func Locate(ctx context.Context, b llm.Backend, frame []byte, cam Camera, maxTokens int) (*LocateResult, Usage, error) {
+	resp, err := b.Call(ctx, LocateRequest(frame, cam, maxTokens))
 	if resp == nil || resp.JSON == nil {
 		if resp != nil {
 			return nil, resp.Usage, err

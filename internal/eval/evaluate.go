@@ -25,6 +25,7 @@ type Input struct {
 	Landed      []Labeled
 	StatsText   string
 	MinCropArea float64
+	Camera      Camera // from EXIF; the prompt describes it
 }
 
 // evalMaxTokens bounds the answer itself; backends add headroom for thinking.
@@ -48,7 +49,7 @@ func EvalRequest(in Input) llm.Request {
 	}
 	parts = append(parts, llm.Text("Measured statistics from the preview:\n"+in.StatsText))
 	return llm.Request{
-		System:     SystemPrompt(in.MinCropArea),
+		System:     SystemPrompt(in.MinCropArea, in.Camera),
 		Parts:      parts,
 		SchemaName: "evaluation",
 		Schema:     evaluationSchema,

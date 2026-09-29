@@ -234,7 +234,7 @@ func TestApplyOutranked(t *testing.T) {
 }
 
 func TestPromptWarnsAboutTextureComparisons(t *testing.T) {
-	if p := SystemPrompt(0.6); !strings.Contains(p, "always look crisper than skin") {
+	if p := SystemPrompt(0.6, Camera{}); !strings.Contains(p, "always look crisper than skin") {
 		t.Fatal("prompt lacks the texture caveat")
 	}
 }

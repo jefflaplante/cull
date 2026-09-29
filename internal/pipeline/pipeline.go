@@ -226,7 +226,7 @@ func processOne(ctx context.Context, cfg Config, b llm.Backend, path string) (re
 		var loc *eval.LocateResult
 		if err == nil {
 			var u llm.Usage
-			loc, u, err = eval.Locate(ctx, b, small, locateMaxTokens)
+			loc, u, err = eval.Locate(ctx, b, small, cameraOf(res.Exif), locateMaxTokens)
 			res.Usage.Add(u)
 		}
 		switch {

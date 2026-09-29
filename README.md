@@ -58,9 +58,9 @@ Tested on 22 sample files from [raw.pixls.us](https://raw.pixls.us) with
   M10-R, M11, M (Typ 240) and Monochrom (Typ 246), and the Pentax and Ricoh bodies
   tested. Other layouts (tiled, uncompressed, lossy DNG) fall back to judging clipping
   on the preview, which overstates it.
-- **The prompts describe a manual-focus Leica M rangefinder** shot wide open. That
-  matches M-mount bodies. With autofocus cameras and phones the model's framing is
-  slightly off, though the rules themselves are camera-agnostic.
+- **The prompts name each frame's camera** from its EXIF ("a Canon EOS 5D Mark III",
+  "an Apple iPhone 12 Pro"). Leica M bodies are also described as manual-focus
+  rangefinders, where missed focus is a common failure.
 
 ## Install
 

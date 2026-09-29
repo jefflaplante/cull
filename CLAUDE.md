@@ -226,8 +226,10 @@ make vet
 - EXIF: Leica M10 also lacks `FNumber`; Pentax, Ricoh, Sigma, DJI and phones mostly lack
   `LensModel`. iPhone 12 Pro previews have orientation 6 (extraction fine; display not
   checked visually).
-- The evaluate and locate prompts still describe "a Leica M11-P rangefinder (manual
-  focus)"; autofocus bodies and phones get that framing too.
+- The evaluate and locate prompts name each frame's camera from EXIF (`eval.Camera`,
+  `Describe`: model, or maker's first word + model); Leica M bodies (`LEICA M…`) add
+  "rangefinder (manual focus, often fast lenses shot wide open)". Checked on all 22
+  samples via `scan --save-inputs`.
 
 ### Sequences: look distances on the 17 sample frames (2026-09-28)
 

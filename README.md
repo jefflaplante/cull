@@ -186,14 +186,19 @@ frame newly culled by a policy change) is simply removed from the stored order; 
 relative order of the rest stays valid. A new or newly rankable member makes the
 set unranked again until the next `cull rank`. `cull decide` re-applies stored
 orders (and regroups sequences) for free — it never calls a model — so retuning
-`--keep-best` or `--outranked` after ranking doesn't cost anything. A regrouping
-that **merges** two previously-ranked sets (a changed `--seq-look`/`--seq-gap`, or
-`--seq-gap 0` and back) does not combine their paid rankings: it keeps only the
-first-matched set's order, summary and cost, the merged set falls back to By
-"scores", and the other set's paid ranking isn't reused — that cost stays counted
-in the report's running total, but the merged set needs `cull rank` again before it
-counts as ranked. A **split**, by contrast, keeps each piece's order and cost
-intact.
+`--keep-best` or `--outranked` after ranking doesn't cost anything. Regrouping
+can lose paid orders:
+
+- A regroup that **merges** two ranked sets (a changed `--seq-look` or `--seq-gap`)
+  keeps only the first-matched set's order, summary and cost. The merged set falls
+  back to "scores" and needs `cull rank` again.
+- `decide --seq-gap 0` turns grouping off and saves the report with no sets, which
+  drops **every** stored order. Going back to a normal gap regroups, but every set
+  is unranked until `cull rank` runs again.
+- A **split** keeps each piece's order; the set's cost is counted once, on the first
+  piece.
+
+What was paid always stays in the report's running cost total.
 
 **Estimates.** `judge --estimate` adds an approximate ranking cost that assumes every
 frame lands in a full 8-frame set (~10k in / ~1k out tokens per call). It is neither

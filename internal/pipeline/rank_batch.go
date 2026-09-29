@@ -40,6 +40,14 @@ type batchExec struct {
 // recorded for a re-run. It stops the stage.
 var errBatchPending = errors.New("batch ranking unfinished")
 
+// The two re-run hints a batchExec's rerun field takes, named for judge's and
+// rank's own re-run commands so every message about a recorded batch (judge's
+// own, or its ranking round; a rank-batch state) names the right one.
+const (
+	rerunJudgeBatch = "rerun with --batch --resume to re-attach"
+	rerunRankBatch  = "rerun cull rank with --batch to re-attach"
+)
+
 const rankBatchStateVersion = 2
 
 func rankBatchStatePath(cfg Config) string { return cfg.ReportPath + ".rank-batch.json" }
@@ -47,6 +55,24 @@ func rankBatchStatePath(cfg Config) string { return cfg.ReportPath + ".rank-batc
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// RankBatchPending reports the error to refuse with when an unfinished batch
+// ranking is recorded for cfg.ReportPath (nil when there is none): ranking on
+// a sync backend (or judging, with ranking on) would pay for the same sets
+// again. Run, Rank and rankSets check this before any work; CLI callers use it
+// too, to refuse a sync run before spending time on RankCalls/fillLooks.
+func RankBatchPending(cfg Config) error {
+	if p := rankBatchStatePath(cfg); fileExists(p) {
+		return rankBatchPendingGuard(p)
+	}
+	return nil
+}
+
+// rankBatchPendingGuard is RankBatchPending's error, naming the file at p.
+func rankBatchPendingGuard(p string) error {
+	return fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch to re-attach to it "+
+		"(ranking without it would pay for the same sets again), or delete %s to abandon it (what it already cost is paid; its answers are lost)", p, p)
 }
 
 // rankBatchState is a ranking's batches and the answers collected from them.
@@ -200,7 +226,7 @@ func (e batchExec) send(ctx context.Context, cfg Config, st *rankBatchState, cal
 		round = 2
 	}
 	for _, chunk := range chunkRequests(cfg, reqs) {
-		err := submitChunk(ctx, cfg, e.client, &st.Batches, chunk, "rank", round, save)
+		err := submitChunk(ctx, cfg, e.client, &st.Batches, chunk, "rank", round, e.rerun, save)
 		switch {
 		case err == nil:
 		case errors.Is(err, llm.ErrRejected):
@@ -275,9 +301,12 @@ func (e batchExec) open(cfg Config) (*rankBatchState, error) {
 	}
 	for _, b := range st.Batches {
 		if b.Status == "submitting" {
+			// No batch ID was recorded, so a rerun would only find the same
+			// "submitting" record and refuse again: the accurate advice here is
+			// to check, then abandon, not to re-attach.
 			return nil, fmt.Errorf("%w: a rank batch submission was interrupted before its ID was recorded, so it may have been created: "+
-				"check the Batches page in the Claude Console (not resubmitting, to avoid paying twice); %s, "+
-				"or delete %s to abandon it (what it already cost is paid; its answers are lost)", errBatchPending, e.rerun, e.statePath)
+				"check the Batches page in the Claude Console, then delete %s to abandon it (what it already cost is paid; its answers are lost) "+
+				"(not resubmitting, to avoid paying twice)", errBatchPending, e.statePath)
 		}
 	}
 	if st.Answers == nil {
@@ -357,7 +386,8 @@ func loadRankBatchState(path string) (*rankBatchState, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	if st.Version != rankBatchStateVersion {
-		return nil, fmt.Errorf("%s has format version %d, not %d: delete it to start over", path, st.Version, rankBatchStateVersion)
+		return nil, fmt.Errorf("%s has format version %d, not %d: delete it to abandon it (what it already cost is paid; its answers are lost)",
+			path, st.Version, rankBatchStateVersion)
 	}
 	return &st, nil
 }

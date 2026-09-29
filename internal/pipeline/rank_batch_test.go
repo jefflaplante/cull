@@ -21,7 +21,7 @@ import (
 )
 
 func rankEx(fb *fakeBatch, c Config) batchExec {
-	return batchExec{client: fb, cfg: c, statePath: c.ReportPath + ".rank-batch.json", rerun: "rerun cull rank with --batch to re-attach"}
+	return batchExec{client: fb, cfg: c, statePath: c.ReportPath + ".rank-batch.json", rerun: rerunRankBatch}
 }
 
 func TestRankBatchRoundsAndCost(t *testing.T) {
@@ -29,7 +29,7 @@ func TestRankBatchRoundsAndCost(t *testing.T) {
 	p := llm.Price{In: 2, Out: 10}
 	c.Price, c.Batch = &p, true
 	fb := &fakeBatch{}
-	ex := batchExec{client: fb, cfg: c, statePath: c.ReportPath + ".rank-batch.json"}
+	ex := batchExec{client: fb, cfg: c, statePath: c.ReportPath + ".rank-batch.json", rerun: rerunRankBatch}
 	if err := RankSets(context.Background(), rep, c, ex, false); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestRankBatchReattaches(t *testing.T) {
 	c, rep := seqShoot(t, 3)
 	c.Batch = true
 	fb := &fakeBatch{statusErr: errors.New("network down")}
-	ex := batchExec{client: fb, cfg: c, statePath: c.ReportPath + ".rank-batch.json"}
+	ex := batchExec{client: fb, cfg: c, statePath: c.ReportPath + ".rank-batch.json", rerun: rerunRankBatch}
 	if err := RankSets(context.Background(), rep, c, ex, false); err == nil {
 		t.Fatal("a status failure must surface")
 	}
@@ -557,7 +557,7 @@ func TestRankBatchChargesAnswerOfASetThatFailed(t *testing.T) {
 	defer cancel()
 	fb := &fakeBatch{}
 	cl := &cancelAfterSubmit{fakeBatch: fb, cancel: cancel}
-	ex := batchExec{client: cl, cfg: c, statePath: c.ReportPath + ".rank-batch.json"}
+	ex := batchExec{client: cl, cfg: c, statePath: c.ReportPath + ".rank-batch.json", rerun: rerunRankBatch}
 	if err := RankSets(ctx, rep, c, ex, false); !errors.Is(err, context.Canceled) || len(fb.submitted) != 1 {
 		t.Fatalf("run 1: %v, %d batches", err, len(fb.submitted))
 	}
@@ -676,6 +676,150 @@ func TestRankBatchRanksThenSavesThenDropsState(t *testing.T) {
 	}
 }
 
+// The invariant this task exists to protect: RankBatch (via the shared rank())
+// must not commit before the report holding the ranking is saved. When the
+// save fails, the state's answers stay uncharged, so a following successful
+// run charges them exactly once — never zero times (an unsaved ranking) and
+// never twice (a charged-but-unsaved answer paid for again).
+func TestRankBatchKeepsStateUnchargedWhenReportSaveFails(t *testing.T) {
+	c, _ := seqShoot(t, 2)
+	p := llm.Price{In: 2, Out: 10}
+	c.Price = &p
+	fb := &fakeBatch{}
+	if err := os.Mkdir(c.ReportPath+".tmp", 0o755); err != nil { // blocks report.Save's atomic rename
+		t.Fatal(err)
+	}
+	if _, err := RankBatch(context.Background(), c, fb, false); err == nil {
+		t.Fatal("the report save must fail")
+	}
+	if !exists(rankBatchStatePath(c)) {
+		t.Fatal("rank batch state must survive a failed save")
+	}
+	st, err := loadRankBatchState(rankBatchStatePath(c))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Answers) == 0 {
+		t.Fatal("setup: the batch's answer must already be collected")
+	}
+	for k, a := range st.Answers {
+		if a.Charged {
+			t.Fatalf("answer %s must not be charged: its report was never saved", k)
+		}
+	}
+	if err := os.Remove(c.ReportPath + ".tmp"); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := RankBatch(context.Background(), c, fb, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fb.submitted) != 1 {
+		t.Fatalf("the re-run must reuse the recorded answer, not resubmit: %d batches", len(fb.submitted))
+	}
+	one := p.Cost(llm.Usage{InputTokens: 1000, OutputTokens: 100}, true)
+	if rep.RankCostUSD != one {
+		t.Fatalf("charged exactly once: rank cost %v, want %v", rep.RankCostUSD, one)
+	}
+	if exists(rankBatchStatePath(c)) {
+		t.Fatal("rank batch state left behind")
+	}
+}
+
+// Important #1 (review round 1): cli/rank.go now sets cfg.Backend/cfg.Model to
+// what rank actually uses (applyBackendModel), matching judge's own
+// cfg.Backend/cfg.Model. Without that, RankBatch's cfg carried "" / "", so a
+// rank-batch state judge --batch's ranking round left behind (backend/model
+// recorded) could never be re-attached by 'cull rank --batch' (backend/model
+// "" / ""): batchExec.open's mismatch check refused it outright.
+//
+// This test exercises the round trip with the cfg values the fixed CLI now
+// builds (both entry points share the same *rankShoot* cfg, backend
+// "anthropic", model "claude-sonnet-5"): a rank-batch state judge --batch's
+// ranking round left pending is picked up by a later RankBatch call (what
+// 'cull rank --batch' runs) with no mismatch error.
+func TestRankBatchReattachesToJudgeBatchsPendingRankingState(t *testing.T) {
+	c, _ := rankShoot(t)                                                       // c.Backend, c.Model = "anthropic", "claude-sonnet-5"
+	fb := &fakeBatch{statusErr: errors.New("network down"), statusErrID: "b2"} // the ranking batch
+	if _, _, err := RunBatch(context.Background(), c, fb); err == nil {
+		t.Fatal("the ranking's status failure must surface")
+	}
+	if !exists(rankBatchStatePath(c)) {
+		t.Fatal("rank state must be recorded")
+	}
+	fb.statusErr = nil
+	// 'cull rank --batch': the fixed CLI passes the same cfg.Backend/Model as
+	// the judge run above (both come from the same judged-anthropic report).
+	rep, err := RankBatch(context.Background(), c, fb, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Sets[0].By != "model" {
+		t.Fatalf("not ranked: %+v", rep.Sets[0])
+	}
+	if len(fb.submitted) != 2 {
+		t.Fatalf("nothing should be resubmitted, only re-collected: %d batches", len(fb.submitted))
+	}
+}
+
+// The reverse of the above: a rank-batch state 'cull rank --batch' (RankBatch)
+// leaves pending must not break judge --batch --resume's own ranking round —
+// which it would if RankBatch's cfg (as the CLI used to build it) recorded ""
+// / "" while RunBatch's ranking round uses the real backend/model.
+func TestJudgeBatchResumeReattachesToRankBatchsPendingState(t *testing.T) {
+	c, _ := rankShoot(t)
+	c.Rank = false // as if judged with --no-rank: the sets exist, unranked
+	fb1 := &fakeBatch{}
+	if _, _, err := RunBatch(context.Background(), c, fb1); err != nil {
+		t.Fatal(err)
+	}
+	if exists(rankBatchStatePath(c)) {
+		t.Fatal("setup: no ranking attempted yet")
+	}
+	// 'cull rank --batch', interrupted (its cfg.Backend/Model, as the fixed CLI
+	// sets them, match this judged-anthropic report):
+	fb2 := &fakeBatch{statusErr: errors.New("network down")}
+	if _, err := RankBatch(context.Background(), c, fb2, false); err == nil {
+		t.Fatal("expected the ranking's status failure to surface")
+	}
+	if !exists(rankBatchStatePath(c)) {
+		t.Fatal("rank state must be recorded")
+	}
+	// judge --batch --resume, ranking on: must re-attach, not refuse on a
+	// backend/model mismatch.
+	c.Rank, c.Resume = true, true
+	fb2.statusErr = nil
+	rep, _, err := RunBatch(context.Background(), c, fb2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Sets[0].By != "model" {
+		t.Fatalf("not ranked: %+v", rep.Sets[0])
+	}
+	if exists(rankBatchStatePath(c)) {
+		t.Fatal("rank state left behind")
+	}
+}
+
+// The model-mismatch guard still fires for rank: 'cull rank --batch --model
+// claude-opus-5' after an interrupted run with a different model must refuse,
+// not silently reuse the other model's answers and price them at this one's
+// rate (Important #1's consequence (c)).
+func TestRankBatchRefusesModelMismatch(t *testing.T) {
+	c, _ := seqShoot(t, 3)
+	c.Backend, c.Model = "anthropic", "claude-sonnet-5"
+	fb := &fakeBatch{statusErr: errors.New("network down")}
+	if _, err := RankBatch(context.Background(), c, fb, false); err == nil {
+		t.Fatal("expected the ranking's status failure to surface")
+	}
+	fb.statusErr = nil
+	c.Model = "claude-opus-5"
+	_, err := RankBatch(context.Background(), c, fb, false)
+	if err == nil || !strings.Contains(err.Error(), "belongs to anthropic/claude-sonnet-5") {
+		t.Fatalf("got %v", err)
+	}
+}
+
 // While RankBatch is stuck polling a batch that never ends, Ctrl-C's error names
 // 'cull rank --batch' (this entry point's own re-run) and how to abandon the
 // recorded ranking; its state survives to re-attach.
@@ -686,7 +830,8 @@ func TestRankBatchPendingKeepsStateWithRankHint(t *testing.T) {
 	defer cancel()
 	fb := &fakeBatch{hold: true, onStatus: func(string) { cancel() }}
 	_, err := RankBatch(ctx, c, fb, false)
-	if err == nil || !strings.Contains(err.Error(), "rerun cull rank with --batch") || !strings.Contains(err.Error(), "delete") {
+	if err == nil || !strings.Contains(err.Error(), "rerun cull rank with --batch") ||
+		!strings.Contains(err.Error(), "delete "+rankBatchStatePath(c)+" to abandon it (what it already cost is paid; its answers are lost)") {
 		t.Fatalf("got %v", err)
 	}
 	if !exists(rankBatchStatePath(c)) {
@@ -716,17 +861,70 @@ func TestJudgeBatchPendingHintSaysResume(t *testing.T) {
 }
 
 // A Ctrl-C right as a batch chunk is about to be submitted (nothing sent yet)
-// gives the same re-attach hint collect() gives once a batch is submitted.
-func TestSubmitCtrlCKeepsResumeHint(t *testing.T) {
+// gives the same shape of re-attach hint collect() gives once a batch is
+// submitted — but submitChunk is shared by judge's submit and rank's send, so
+// it must use whatever hint its caller hands it, never a hard-coded one (that
+// was Important #2: judge's own "--resume" hint was leaking into cull rank
+// --batch). An arbitrary hint string, not either real caller's text, proves
+// submitChunk doesn't hard-code either.
+func TestSubmitChunkCtrlCKeepsCallersOwnHint(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var recs []*batchRecord
-	err := submitChunk(ctx, Config{}, &fakeBatch{}, &recs, []llm.BatchRequest{{CustomID: "x"}}, "judge", 1, func() error { return nil })
-	if err == nil || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "state saved; rerun with --batch --resume to re-attach") {
+	err := submitChunk(ctx, Config{}, &fakeBatch{}, &recs, []llm.BatchRequest{{CustomID: "x"}}, "judge", 1, "rerun with --waffles", func() error { return nil })
+	if err == nil || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "state saved; rerun with --waffles") {
 		t.Fatalf("got %v", err)
 	}
 	if len(recs) != 0 {
 		t.Fatalf("nothing sent: no record expected, got %+v", recs)
+	}
+}
+
+// judge's own submit gives its own "--batch --resume" hint on a pre-submit
+// Ctrl-C, reached through RunBatch (not a direct submitChunk call, so this
+// guards the real wiring judge uses).
+func TestJudgeSubmitCtrlCGivesResumeHint(t *testing.T) {
+	_, c := batchShoot(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	fb := &fakeBatch{}
+	_, _, err := RunBatch(ctx, c, fb)
+	if err == nil || !strings.Contains(err.Error(), "state saved; rerun with --batch --resume to re-attach") {
+		t.Fatalf("got %v", err)
+	}
+	if len(fb.submitted) != 0 {
+		t.Fatalf("nothing should be submitted: %d", len(fb.submitted))
+	}
+}
+
+// A Ctrl-C right as cull rank --batch is about to submit a chunk (frames
+// decoded, nothing sent yet) must give only cull rank's own hint, never
+// judge's "--resume" (Important #2): the two are reached through the same
+// shared submitChunk, so this exercises rank's own call site (send).
+func TestRankBatchSendCtrlCGivesOnlyRankHintNeverResume(t *testing.T) {
+	c, rep := seqShoot(t, 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	fb := &fakeBatch{}
+	ex := batchExec{client: fb, cfg: c, statePath: c.ReportPath + ".rank-batch.json", rerun: rerunRankBatch}
+	st := &rankBatchState{Version: rankBatchStateVersion, Answers: map[string]*rankAnswer{}}
+	j := newSetRank(&rep.Sets[0], rep.Sets[0].Members)
+	calls := []rankCall{j.call("S1", []int{0, 1})}
+	// A load that succeeds (frames "decoded") but cancels ctx right after, as if
+	// Ctrl-C landed between decoding and the submit call.
+	load := func(_ context.Context, calls []rankCall) error {
+		cancel()
+		for i := range calls {
+			calls[i].Frames = make([]eval.RankFrame, len(calls[i].pos))
+		}
+		return nil
+	}
+	out := make([]rankOut, len(calls))
+	err := ex.send(ctx, c, st, calls, []int{0}, load, func() error { return nil }, out)
+	if err == nil || !strings.Contains(err.Error(), "rerun cull rank with --batch") || strings.Contains(err.Error(), "--resume") {
+		t.Fatalf("got %v", err)
+	}
+	if len(fb.submitted) != 0 {
+		t.Fatalf("nothing should be submitted: %d", len(fb.submitted))
 	}
 }
 
@@ -746,5 +944,55 @@ func TestSyncJudgeRefusesBeforeJudgingWhileRankBatchRecorded(t *testing.T) {
 	_, _, err := Run(context.Background(), c, b)
 	if err == nil || !strings.Contains(err.Error(), p) || b.calls != 0 {
 		t.Fatalf("err=%v calls=%d", err, b.calls)
+	}
+}
+
+// judge --no-rank (cfg.Rank == false) is unaffected by the guard above: a
+// pending rank-batch state has nothing to do with a run that won't rank.
+func TestNoRankJudgeIsUnaffectedByRankBatchGuard(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	c := cfg(dir)
+	c.Rank = false
+	if err := os.WriteFile(rankBatchStatePath(c), []byte(`{"version":2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := &fakeBackend{status: "sharp"}
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatalf("--no-rank must ignore a pending rank-batch state: %v", err)
+	}
+	if b.calls == 0 {
+		t.Fatal("judging must still happen")
+	}
+}
+
+// Sync cull rank (pipeline.Rank) refuses before fillLooks too, while a rank
+// batch is recorded: a v3 report's looks are not computed (a free but slow DNG
+// decode pass) for a run about to refuse anyway.
+func TestRankRefusesBeforeFillLooksWhileRankBatchRecorded(t *testing.T) {
+	c, rep := seqShoot(t, 2)
+	rep.SchemaVersion, rep.Sets = 3, nil
+	for i := range rep.Results {
+		rep.Results[i].Look, rep.Results[i].Group = "", nil
+	}
+	if err := rep.Save(c.ReportPath); err != nil {
+		t.Fatal(err)
+	}
+	p := rankBatchStatePath(c)
+	if err := os.WriteFile(p, []byte(`{"version":2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := &rankBackend{order: reverse}
+	if _, err := Rank(context.Background(), c, b, false); err == nil || !strings.Contains(err.Error(), p) || b.calls != 0 {
+		t.Fatalf("err=%v calls=%d", err, b.calls)
+	}
+	saved, err := report.Load(c.ReportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range saved.Results {
+		if r.Look != "" {
+			t.Fatalf("looks must not be computed before the refusal: %+v", r)
+		}
 	}
 }

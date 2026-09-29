@@ -43,9 +43,8 @@ func RankCalls(ctx context.Context, rep *report.Report, cfg Config, force bool) 
 // rankTodo selects the sets Rank(force) ranks: every set of two or more
 // rankable frames with force, otherwise needsRanking's selection (no stored
 // model order covering every rankable member). rankSets
-// (internal/pipeline/rank.go) still has its own copy of this same selection;
-// switching it to call rankTodo instead is a follow-up — rank.go belongs to
-// another task right now.
+// (internal/pipeline/rank.go) uses this same selection, so RankCalls's count
+// always matches what a rank run actually does.
 func rankTodo(rep *report.Report, force bool) []int {
 	if !force {
 		return needsRanking(rep)

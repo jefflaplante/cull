@@ -124,8 +124,8 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 	// whose rank state is still pending a batch would pay to judge again just
 	// to pay again to rank the same sets.
 	if cfg.Rank {
-		if p := rankBatchStatePath(cfg); fileExists(p) {
-			return nil, total, rankBatchPendingGuard(p)
+		if err := RankBatchPending(cfg); err != nil {
+			return nil, total, err
 		}
 	}
 	rep, todo, err := startRun(&cfg)

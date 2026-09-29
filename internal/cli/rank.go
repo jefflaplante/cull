@@ -70,6 +70,16 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 			if err != nil {
 				return err
 			}
+			// Sync cull rank refuses up front while a rank-batch state is
+			// recorded, before RankCalls/fillLooks run for nothing (that's a
+			// full DNG decode pass on a schema-v3 report) for a run that's
+			// about to refuse anyway. --batch itself is exempt: re-attaching to
+			// that state is the whole point.
+			if !o.batch {
+				if err := pipeline.RankBatchPending(cfg); err != nil {
+					return err
+				}
+			}
 			if cfg.Policy, err = o.policy.policy(); err != nil {
 				return err
 			}
@@ -78,46 +88,12 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 				return err
 			}
 
-			// Default --backend/--model to what the report was judged with, unless
-			// given explicitly: a plain 'cull rank' should use the same backend
-			// judge did, not silently fall back to anthropic. The model only
-			// defaults from the report when the backend also matches it (as it
-			// does when backend wasn't overridden either) — the report's model
-			// name means nothing paired with a different, explicitly-chosen
-			// backend.
-			if !cmd.Flags().Changed("backend") && rep.Backend != "" {
-				o.backend = rep.Backend
+			warning, err := o.applyBackendModel(&cfg, cmd.Flags().Changed("backend"), cmd.Flags().Changed("model"), rep)
+			if err != nil {
+				return err
 			}
-			if !cmd.Flags().Changed("model") && rep.Model != "" && o.backend == rep.Backend {
-				o.model = rep.Model
-			}
-			if o.model == "" {
-				o.model = backendDefaults[o.backend].model
-			}
-			if rep.Backend != "" && (rep.Backend != o.backend || rep.Model != o.model) {
-				warn(cmd, []string{fmt.Sprintf("report was judged with %s/%s; ranking with %s/%s", rep.Backend, rep.Model, o.backend, o.model)})
-			}
-
-			// --batch needs anthropic. An explicit --backend must already be
-			// anthropic; otherwise force it, overriding whatever the
-			// report-based default above picked. The model still defaults from
-			// the report when the report's backend is anthropic too; otherwise
-			// it's anthropic's own default model, not the other backend's.
-			if o.batch {
-				if cmd.Flags().Changed("backend") {
-					if o.backend != "anthropic" {
-						return fmt.Errorf("--batch uses the Message Batches API: --backend anthropic only")
-					}
-				} else {
-					o.backend = "anthropic"
-					if !cmd.Flags().Changed("model") {
-						if rep.Backend == "anthropic" && rep.Model != "" {
-							o.model = rep.Model
-						} else {
-							o.model = backendDefaults["anthropic"].model
-						}
-					}
-				}
+			if warning != "" {
+				warn(cmd, []string{warning})
 			}
 
 			price, priced := llm.PriceFor(o.backend, o.model)
@@ -177,6 +153,60 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 	o.policy.register(f)
 	cmd.MarkFlagFilename("api-key-file")
 	return cmd
+}
+
+// applyBackendModel resolves rank's --backend/--model: unless given explicitly
+// (backendChanged, modelChanged — from cmd.Flags().Changed), they default to
+// the values rep was judged with; the model only defaults from the report when
+// the backend also matches it (the report's model name means nothing paired
+// with a different, explicitly-chosen backend). It then applies --batch's
+// anthropic-only override: an explicit non-anthropic --backend fails, with no
+// warning printed (the caller should print none before returning this error);
+// otherwise --backend is forced to anthropic, overriding whatever the
+// report-based default above picked, and the model defaults from the report
+// only when the report's own backend is anthropic too — otherwise it's
+// anthropic's own default model, not the other backend's.
+//
+// It sets cfg.Backend/cfg.Model to the backend/model rank ends up using (as
+// judge sets them too — cull.go), so a rank-batch state rank writes or reads
+// records and checks against the right values.
+//
+// The report-mismatch warning to print is computed and returned last, AFTER
+// the --batch override: printed before it, a claude-code-judged report's
+// warning would say "ranking with claude-code/sonnet" right before silently
+// moving to anthropic, and an explicit non-anthropic --backend would print a
+// warning for a run that's about to fail anyway.
+func (o *rankOpts) applyBackendModel(cfg *pipeline.Config, backendChanged, modelChanged bool, rep *report.Report) (warning string, err error) {
+	if !backendChanged && rep.Backend != "" {
+		o.backend = rep.Backend
+	}
+	if !modelChanged && rep.Model != "" && o.backend == rep.Backend {
+		o.model = rep.Model
+	}
+	if o.model == "" {
+		o.model = backendDefaults[o.backend].model
+	}
+	if o.batch {
+		if backendChanged {
+			if o.backend != "anthropic" {
+				return "", fmt.Errorf("--batch uses the Message Batches API: --backend anthropic only")
+			}
+		} else {
+			o.backend = "anthropic"
+			if !modelChanged {
+				if rep.Backend == "anthropic" && rep.Model != "" {
+					o.model = rep.Model
+				} else {
+					o.model = backendDefaults["anthropic"].model
+				}
+			}
+		}
+	}
+	if rep.Backend != "" && (rep.Backend != o.backend || rep.Model != o.model) {
+		warning = fmt.Sprintf("report was judged with %s/%s; ranking with %s/%s", rep.Backend, rep.Model, o.backend, o.model)
+	}
+	cfg.Backend, cfg.Model = o.backend, o.model
+	return warning, nil
 }
 
 // printRankEstimate projects list- or batch-price ranking cost from an exact

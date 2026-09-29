@@ -17,6 +17,7 @@ import (
 
 	"github.com/jefflaplante/gophotocull/internal/eval"
 	"github.com/jefflaplante/gophotocull/internal/labels"
+	"github.com/jefflaplante/gophotocull/internal/pipeline"
 	"github.com/jefflaplante/gophotocull/internal/report"
 )
 
@@ -838,9 +839,14 @@ func TestRankBatchRejectsNonAnthropicBackend(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	rankReportFixture(t, dir, "claude-code", "sonnet", 2)
-	_, err := run(t, "rank", "--batch", "--backend", "openai", "--model", "m", dir)
+	out, err := run(t, "rank", "--batch", "--backend", "openai", "--model", "m", dir)
 	if err == nil || !strings.Contains(err.Error(), "--batch uses the Message Batches API: --backend anthropic only") {
 		t.Fatalf("got %v", err)
+	}
+	// The mismatch warning (report judged with claude-code, ranking with
+	// openai) must not print before this error: it's about to refuse anyway.
+	if strings.Contains(out, "report was judged with") {
+		t.Fatalf("must not print the mismatch warning before erroring:\n%s", out)
 	}
 }
 
@@ -855,6 +861,108 @@ func TestRankBatchEstimateUsesAnthropicAndBatchPrice(t *testing.T) {
 	out, err := run(t, "rank", "--batch", "--estimate", dir)
 	if err != nil || !strings.Contains(out, "batch price (50%)") || !strings.Contains(out, "claude-sonnet-5") {
 		t.Fatalf("err=%v\n%s", err, out)
+	}
+}
+
+// After a claude-code judge, rank --batch moves to anthropic (the API): the
+// mismatch warning this exists for ("report was judged with X; ranking with
+// Y") must print for that move too, not just for an explicitly-chosen backend
+// — and it must appear only AFTER the --batch override decides the real
+// backend/model, not the report-based default that --batch then overrides.
+func TestRankBatchWarnsAfterOverrideForClaudeCodeReport(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	dir := t.TempDir()
+	rankReportFixture(t, dir, "claude-code", "sonnet", 2)
+	out, err := run(t, "rank", "--batch", "--estimate", dir)
+	if err != nil {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	want := "warning: report was judged with claude-code/sonnet; ranking with anthropic/claude-sonnet-5"
+	if !strings.Contains(out, want) {
+		t.Fatalf("no mismatch warning after the --batch override:\n%s", out)
+	}
+}
+
+// applyBackendModel is rank's cfg-building extracted so it's testable without
+// cobra or a real backend/network call: it must set cfg.Backend/cfg.Model to
+// what rank ends up using (Important #1 — 'cull rank --batch' previously left
+// them "", so its rank-batch state recorded "" / "" and couldn't re-attach to
+// judge --batch's own state, or the reverse, and the model-mismatch guard was
+// disabled for rank).
+func TestRankApplyBackendModelSetsCfgBackendAndModel(t *testing.T) {
+	o := &rankOpts{}
+	o.batch = true
+	var cfg pipeline.Config
+	rep := &report.Report{Backend: "claude-code", Model: "sonnet"}
+	warning, err := o.applyBackendModel(&cfg, false, false, rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Backend != "anthropic" || cfg.Model != "claude-sonnet-5" {
+		t.Fatalf("cfg not set to what rank actually uses: %+v", cfg)
+	}
+	want := "report was judged with claude-code/sonnet; ranking with anthropic/claude-sonnet-5"
+	if warning != want {
+		t.Fatalf("warning=%q, want %q", warning, want)
+	}
+}
+
+// An explicit non-anthropic --backend with --batch errors before cfg or the
+// warning are touched.
+func TestRankApplyBackendModelRejectsExplicitNonAnthropicBatch(t *testing.T) {
+	o := &rankOpts{}
+	o.backend, o.batch = "openai", true
+	var cfg pipeline.Config
+	rep := &report.Report{Backend: "claude-code", Model: "sonnet"}
+	warning, err := o.applyBackendModel(&cfg, true, false, rep)
+	if err == nil || !strings.Contains(err.Error(), "--batch uses the Message Batches API: --backend anthropic only") {
+		t.Fatalf("got %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("no warning expected before the batch check errors, got %q", warning)
+	}
+	if cfg.Backend != "" || cfg.Model != "" {
+		t.Fatalf("cfg must be untouched on error: %+v", cfg)
+	}
+}
+
+// Without --batch, applyBackendModel still sets cfg.Backend/cfg.Model to what
+// a sync rank uses (matching judge's own cfg.Backend/cfg.Model, cull.go).
+func TestRankApplyBackendModelSetsCfgForSyncRank(t *testing.T) {
+	o := &rankOpts{}
+	var cfg pipeline.Config
+	rep := &report.Report{Backend: "claude-code", Model: "sonnet"}
+	if _, err := o.applyBackendModel(&cfg, false, false, rep); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Backend != "claude-code" || cfg.Model != "sonnet" {
+		t.Fatalf("cfg: %+v", cfg)
+	}
+}
+
+// Sync cull rank refuses before RankCalls/fillLooks while a rank-batch file
+// exists: a v3 report's looks stay uncomputed (that decode pass is skipped for
+// a run about to refuse anyway).
+func TestRankRefusesBeforeFillLooksAtCLILevelWhileRankBatchPending(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	rp := rankReportFixture(t, dir, "", "", 2) // v3, no looks
+	if err := os.WriteFile(rp+".rank-batch.json", []byte(`{"version":2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := run(t, "rank", "--estimate", dir)
+	if err == nil || !strings.Contains(err.Error(), rp+".rank-batch.json") {
+		t.Fatalf("got %v", err)
+	}
+	saved, err := report.Load(rp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range saved.Results {
+		if r.Look != "" {
+			t.Fatalf("looks must not be computed before the refusal: %+v", r)
+		}
 	}
 }
 

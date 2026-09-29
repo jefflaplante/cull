@@ -155,14 +155,6 @@ func isStop(err error) bool {
 	return errors.Is(err, llm.ErrQuotaStop) || errors.Is(err, llm.ErrAbortRun) || errors.Is(err, errBatchPending)
 }
 
-// rankBatchPendingGuard is the error a sync path (Run, Rank, rankSets) gives
-// when an unfinished batch ranking is recorded at p: ranking without --batch
-// would pay for the same sets again, so it refuses instead.
-func rankBatchPendingGuard(p string) error {
-	return fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch to re-attach to it "+
-		"(ranking without it would pay for the same sets again), or delete %s to abandon it (what it already cost is paid; its answers are lost)", p, p)
-}
-
 // rankPrice prices ranking usage at the executor's rate.
 func rankPrice(cfg Config, u llm.Usage, batch bool) float64 {
 	if cfg.Price == nil {
@@ -252,8 +244,8 @@ func fillLooks(ctx context.Context, rep *report.Report) (int, error) {
 // recorded for this report: ranking on a sync backend would pay for the same
 // sets again. Rerun with --batch to re-attach to it, or delete it to abandon it.
 func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.Report, error) {
-	if p := rankBatchStatePath(cfg); fileExists(p) {
-		return nil, rankBatchPendingGuard(p)
+	if err := RankBatchPending(cfg); err != nil {
+		return nil, err
 	}
 	ex := syncExec{b: b, concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
 	return rank(ctx, cfg, ex, force)
@@ -264,7 +256,7 @@ func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.R
 // while polling, or a batch left pending keeps its state in
 // rankBatchStatePath(cfg): rerun 'cull rank --batch' to re-attach to it.
 func RankBatch(ctx context.Context, cfg Config, client BatchClient, force bool) (*report.Report, error) {
-	ex := batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg), rerun: "rerun cull rank with --batch to re-attach"}
+	ex := batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg), rerun: rerunRankBatch}
 	return rank(ctx, cfg, ex, force)
 }
 
@@ -340,8 +332,8 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 	}
 	todo := rankTodo(rep, force)
 	if len(todo) > 0 && !ex.batch() {
-		if p := rankBatchStatePath(cfg); fileExists(p) {
-			return total, run, rankBatchPendingGuard(p)
+		if err := RankBatchPending(cfg); err != nil {
+			return total, run, err
 		}
 	}
 	wave := max(1, cfg.Concurrency)

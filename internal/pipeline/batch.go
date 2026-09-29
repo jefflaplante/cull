@@ -133,7 +133,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 		}
 		return evalRequest(cfg, p, target)
 	})
-	if err := submit(ctx, cfg, client, &st.Batches, reqs, "judge", 1, save); err != nil {
+	if err := submit(ctx, cfg, client, &st.Batches, reqs, "judge", 1, rerunJudgeBatch, save); err != nil {
 		return rep, total, err
 	}
 	if err := collect(ctx, cfg, client, st, save); err != nil {
@@ -167,7 +167,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 			f.Locate, f.LocateErr = prev.Locate, prev.LocateErr
 		}
 	}
-	if err := submit(ctx, cfg, client, &st.Batches, reqs, "judge", 2, save); err != nil {
+	if err := submit(ctx, cfg, client, &st.Batches, reqs, "judge", 2, rerunJudgeBatch, save); err != nil {
 		return rep, total, err
 	}
 	if err := collect(ctx, cfg, client, st, save); err != nil {
@@ -203,8 +203,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 	}
 	os.Remove(statePath)
 	if cfg.Rank && !cfg.DryRun {
-		cfg.rankWith = batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg),
-			rerun: "rerun with --batch --resume to re-attach"}
+		cfg.rankWith = batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg), rerun: rerunJudgeBatch}
 	}
 	used, err := finishRun(ctx, rep, cfg, budget)
 	total.Add(used)
@@ -259,10 +258,13 @@ func prepareRound(cfg Config, files []string, st *batchState, build func(*prepar
 }
 
 // submit sends requests in size-capped chunks (submitChunk), stopping at the first
-// chunk that fails. what ("judge") and round are for the log and the record.
-func submit(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchRecord, reqs []llm.BatchRequest, what string, round int, save func() error) error {
+// chunk that fails. what ("judge") and round are for the log and the record. rerun
+// is the hint a Ctrl-C before any chunk is sent gives, naming the caller's own
+// re-run command (judge's "--batch --resume", cull rank's own hint): submitChunk
+// itself doesn't know which command called it, so it never hard-codes one.
+func submit(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchRecord, reqs []llm.BatchRequest, what string, round int, rerun string, save func() error) error {
 	for _, chunk := range chunkRequests(cfg, reqs) {
-		if err := submitChunk(ctx, cfg, client, recs, chunk, what, round, save); err != nil {
+		if err := submitChunk(ctx, cfg, client, recs, chunk, what, round, rerun, save); err != nil {
 			return err
 		}
 	}
@@ -295,12 +297,13 @@ func chunkRequests(cfg Config, reqs []llm.BatchRequest) [][]llm.BatchRequest {
 // submitChunk creates one batch, recording it in recs (and saving) before and after
 // the create call. A definitive rejection (llm.ErrRejected) removes the record:
 // nothing was created.
-func submitChunk(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchRecord, chunk []llm.BatchRequest, what string, round int, save func() error) error {
+func submitChunk(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchRecord, chunk []llm.BatchRequest, what string, round int, rerun string, save func() error) error {
 	if err := ctx.Err(); err != nil {
 		// Nothing sent for this chunk: no record, nothing to refuse later. Keep
-		// the same re-attach hint collect() gives once a batch is submitted, so
-		// Ctrl-C here and Ctrl-C while polling read the same way.
-		return fmt.Errorf("%w (state saved; rerun with --batch --resume to re-attach)", err)
+		// the same shape of re-attach hint collect() gives once a batch is
+		// submitted, so Ctrl-C here and Ctrl-C while polling read the same way —
+		// with the caller's own hint, never one hard-coded here.
+		return fmt.Errorf("%w (state saved; %s)", err, rerun)
 	}
 	rec := &batchRecord{Round: round, Status: "submitting"}
 	for _, r := range chunk {

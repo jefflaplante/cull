@@ -12,6 +12,9 @@ install one of those globally, make sure `which cull` is this one.
 
 ## Quick start
 
+For a step-by-step walkthrough of a whole shoot, from folder to Capture One, see
+[WORKFLOW.md](WORKFLOW.md).
+
 ```sh
 make build
 # 1. Verify previews first (no model calls): resolution, source, faces found.

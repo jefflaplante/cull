@@ -996,3 +996,21 @@ func TestRankRefusesBeforeFillLooksWhileRankBatchRecorded(t *testing.T) {
 		}
 	}
 }
+
+// A fresh batch ranking goes out as one batch that can't be stopped midway, so
+// an estimate over --max-cost refuses before anything is submitted. (A re-attach
+// is exempt: TestRankBatchBudget's second half collects past a tiny budget.)
+func TestRankBatchRefusesEstimateOverBudgetBeforeSubmitting(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	c.Price = &llm.Price{In: 10_000} // one estimated call (10k in) = $50 at batch price
+	c.MaxCost = 1
+	fb := &fakeBatch{}
+	ex := rankEx(fb, c)
+	err := RankSets(context.Background(), rep, c, ex, false)
+	if !errors.Is(err, llm.ErrBudget) || !strings.Contains(err.Error(), "estimated") {
+		t.Fatalf("want an up-front ErrBudget, got %v", err)
+	}
+	if len(fb.submitted) != 0 || exists(ex.statePath) {
+		t.Fatalf("submitted %d batches, state %v", len(fb.submitted), exists(ex.statePath))
+	}
+}

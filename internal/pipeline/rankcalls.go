@@ -32,15 +32,21 @@ func RankCalls(ctx context.Context, rep *report.Report, cfg Config, force bool, 
 	cp := cloneForRankCalls(rep)
 	decideAll(cp, cfg.Policy, cfg.Seq)
 	todo := rankTodo(cp, force)
-	sets = len(todo)
+	return len(todo), callsFor(cp, todo), filled, nil
+}
+
+// callsFor is the number of rank calls ranking todo takes: each set's chunks,
+// plus a final call merging the chunks' finalists when a set has more than one.
+func callsFor(rep *report.Report, todo []int) int {
+	calls := 0
 	for _, i := range todo {
-		parts := chunks(cp.Sets[i].Of)
+		parts := chunks(rep.Sets[i].Of)
 		calls += len(parts)
 		if len(parts) > 1 {
-			calls++ // the final round, merging the chunks' finalists
+			calls++
 		}
 	}
-	return sets, calls, filled, nil
+	return calls
 }
 
 // rankTodo selects the sets Rank(force) ranks: every set of two or more

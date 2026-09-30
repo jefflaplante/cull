@@ -114,7 +114,8 @@ func rankCustomID(c rankCall) string { return c.ID + "-" + framesKey(c.Files) }
 // keyOfCustomID returns the framesKey a custom ID ends with.
 func keyOfCustomID(id string) string { return id[strings.LastIndexByte(id, '-')+1:] }
 
-func (batchExec) batch() bool { return true }
+func (batchExec) batch() bool      { return true }
+func (e batchExec) recorded() bool { return fileExists(e.statePath) }
 
 func (e batchExec) config() Config {
 	cfg := e.cfg

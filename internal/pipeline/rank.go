@@ -71,6 +71,9 @@ type rankExec interface {
 	// (one round of chunk calls, one of finals), since a batch can't be stopped
 	// midway. Price and wave shape follow the executor, never cfg.Batch.
 	batch() bool
+	// recorded reports whether a batch ranking is already recorded for this
+	// executor (a re-attach): what it collects was paid for when it was sent.
+	recorded() bool
 	// settle runs once every set is recorded. It returns the usage of anything paid
 	// for that isn't in used (the answers this run took into the report) and was
 	// never charged to a saved report: an answer for a set that changed, one handed
@@ -141,7 +144,8 @@ func (s syncExec) Run(ctx context.Context, calls []rankCall, load loader) []rank
 	return out
 }
 
-func (syncExec) batch() bool { return false }
+func (syncExec) batch() bool    { return false }
+func (syncExec) recorded() bool { return false }
 func (syncExec) settle(context.Context, map[string]bool) (llm.Usage, error) {
 	return llm.Usage{}, nil
 }
@@ -360,6 +364,16 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 	byFile := make(map[string]int, len(rep.Results))
 	for i, r := range rep.Results {
 		byFile[r.File] = i
+	}
+	if ex.batch() && !ex.recorded() && len(todo) > 0 && cfg.MaxCost > 0 && cfg.Price != nil {
+		// One batch holds every set and can't be stopped midway without losing it,
+		// so check up front, as RunBatch does for judging. A re-attach is exempt:
+		// what it collects is already paid for.
+		usd, _, _ := llm.EstimateRank(callsFor(rep, todo), *cfg.Price, true)
+		if _, spent := budget.add(0, 0); spent+usd > cfg.MaxCost {
+			return total, run, fmt.Errorf("%w: ranking estimated at $%.2f with $%.2f already spent exceeds --max-cost $%.2f; %d set(s) left by scores",
+				llm.ErrBudget, usd, spent, cfg.MaxCost, len(todo))
+		}
 	}
 	var last error // the last wave's budget stop: the ranking still finished
 	for len(todo) > 0 {

@@ -542,3 +542,33 @@ func TestFreshRunOverwritesScanReport(t *testing.T) {
 		t.Fatalf("judge over a scan report: %v", err)
 	}
 }
+
+func TestResumeKeepsCostOfDiscardedResults(t *testing.T) {
+	dir := fourFiles(t)
+	c := cfg(dir)
+	c.Concurrency, c.WriteXMP = 1, false
+	c.Price = &llm.Price{In: 10_000} // $1 per call of 100 input tokens
+	// the second call fails after being billed: its usage rides on the error
+	if _, _, err := Run(context.Background(), c, &billedFailBackend{failOn: 2}); err != nil {
+		t.Fatal(err)
+	}
+	c.Resume = true
+	rep, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rep.Cost(); got != 5 { // 4 frames + 1 discarded failure
+		t.Fatalf("cost %v, want 5", got)
+	}
+}
+
+// billedFailBackend answers like fakeBackend but fails call failOn with usage attached.
+type billedFailBackend struct{ n, failOn int32 }
+
+func (b *billedFailBackend) Name() string { return "fake" }
+func (b *billedFailBackend) Call(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	if atomic.AddInt32(&b.n, 1) == b.failOn {
+		return &llm.Response{Usage: llm.Usage{InputTokens: 100}}, errors.New("model output does not match schema")
+	}
+	return (&fakeBackend{status: "sharp"}).Call(ctx, req)
+}

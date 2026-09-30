@@ -165,6 +165,9 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 	for id, prev := range prevs { // keep the locate answer in case round 2 must be resent
 		if f := st.Frames[id]; f != nil {
 			f.Locate, f.LocateErr = prev.Locate, prev.LocateErr
+			if f.Stage == "error" && f.Result.Usage == (llm.Usage{}) {
+				f.Result.Usage = prev.Result.Usage // the frame failed to prepare again; its locate call was still paid
+			}
 		}
 	}
 	if err := submit(ctx, cfg, client, &st.Batches, reqs, "judge", 2, rerunJudgeBatch, save); err != nil {

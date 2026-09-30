@@ -126,3 +126,12 @@ func TestValidatedKeepsQuotaStopWhenOutputIsInvalid(t *testing.T) {
 		t.Fatalf("want quota stop plus the schema problem, got %v", err)
 	}
 }
+
+func TestValidatedKeepsUsageWhenBothAttemptsFail(t *testing.T) {
+	resp, err := validated(context.Background(), testSchema, func(context.Context) (*Response, error) {
+		return &Response{JSON: json.RawMessage(`{"wrong":1}`), Usage: Usage{InputTokens: 10, OutputTokens: 2}}, nil
+	})
+	if err == nil || resp == nil || resp.Usage.InputTokens != 20 || resp.Usage.OutputTokens != 4 {
+		t.Fatalf("resp=%+v err=%v", resp, err)
+	}
+}

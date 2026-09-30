@@ -145,9 +145,12 @@ type Report struct {
 	Policy *eval.Policy `json:"policy,omitempty"`
 	// RankCostUSD is the list price of every rank call made for this report. It only
 	// grows: a regrouping or re-rank can drop a Set, but not what was paid for it.
-	RankCostUSD float64  `json:"rank_cost_usd,omitempty"`
-	Results     []Result `json:"results"`
-	Sets        []Set    `json:"sets,omitempty"`
+	RankCostUSD float64 `json:"rank_cost_usd,omitempty"`
+	// DiscardedCostUSD is what calls for results later discarded cost: an errored
+	// frame is re-run on --resume and its old result dropped, but its calls were paid.
+	DiscardedCostUSD float64  `json:"discarded_cost_usd,omitempty"`
+	Results          []Result `json:"results"`
+	Sets             []Set    `json:"sets,omitempty"`
 }
 
 // EncodeLook stores a look fingerprint compactly.
@@ -178,13 +181,14 @@ func (r *Report) PaidWork() (evaluated, moved int) {
 }
 
 // Cost is everything the report's model calls cost at list price: the frames'
-// calls plus every rank call (RankCostUSD; the sets' own CostUSD isn't added again).
+// calls plus every rank call (RankCostUSD; the sets' own CostUSD isn't added again)
+// plus the calls of results a resume discarded.
 func (r *Report) Cost() float64 {
 	c := 0.0
 	for _, x := range r.Results {
 		c += x.CostUSD
 	}
-	return c + r.RankCostUSD
+	return c + r.RankCostUSD + r.DiscardedCostUSD
 }
 
 func Load(path string) (*Report, error) {

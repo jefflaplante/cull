@@ -292,3 +292,25 @@ func TestBatchRejectedSubmitIsReleasedAndStrandedFramesAreSent(t *testing.T) {
 		t.Fatalf("results %d", len(rep.Results))
 	}
 }
+
+// A located frame whose DNG can't be read again for round 2 still carries what
+// its round-1 locate call cost.
+func TestBatchRound2PrepareFailureKeepsLocateCost(t *testing.T) {
+	dir, c := batchShoot(t)
+	fb := &fakeBatch{locate: map[string]string{
+		locatePrompt: `{"confident":true,"kind":"eye","subject":"eye","box":{"left":0.4,"top":0.3,"right":0.45,"bottom":0.35}}`,
+	}}
+	fb.onStatus = func(id string) {
+		if id == "b1" {
+			os.Remove(filepath.Join(dir, "L1000002.DNG"))
+		}
+	}
+	rep, _, err := RunBatch(context.Background(), c, fb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := result(t, rep, "L1000002.DNG")
+	if r.Error == "" || r.Usage.InputTokens != 50 || r.CostUSD != 0.25 { // the 50-token locate at half price
+		t.Fatalf("error=%q usage=%+v cost=%v", r.Error, r.Usage, r.CostUSD)
+	}
+}

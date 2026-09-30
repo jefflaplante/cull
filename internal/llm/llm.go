@@ -78,7 +78,8 @@ func incomplete(output string) error {
 }
 
 // validated runs attempt, checks the JSON against schema, and makes one fresh
-// attempt if it doesn't conform or never completed. Usage from both attempts is summed. Call errors
+// attempt if it doesn't conform or never completed. Usage from both attempts is
+// summed, and returned in a non-nil Response on every error path too. Call errors
 // are returned as-is (retrying transport failures is the backend's job);
 // ErrQuotaStop is passed through alongside a validated response.
 func validated(ctx context.Context, schema map[string]any, attempt func(context.Context) (*Response, error)) (*Response, error) {
@@ -95,14 +96,18 @@ func validated(ctx context.Context, schema map[string]any, attempt func(context.
 			continue
 		}
 		if err != nil && !errors.Is(err, ErrQuotaStop) {
+			if resp == nil {
+				resp = &Response{}
+			}
+			resp.Usage = total
 			return resp, err
 		}
 		if resp == nil {
-			return nil, fmt.Errorf("backend returned no response")
+			return &Response{Usage: total}, fmt.Errorf("backend returned no response")
 		}
 		if verr := Validate(schema, resp.JSON); verr != nil {
 			if err != nil { // quota stop: don't spend another call, and keep the stop signal
-				return nil, fmt.Errorf("%w; also, model output does not match schema: %v", err, verr)
+				return &Response{Usage: total}, fmt.Errorf("%w; also, model output does not match schema: %v", err, verr)
 			}
 			lastErr = verr
 			continue
@@ -110,7 +115,8 @@ func validated(ctx context.Context, schema map[string]any, attempt func(context.
 		resp.Usage = total
 		return resp, err
 	}
-	return nil, fmt.Errorf("model output does not match schema: %w", lastErr)
+	// Both attempts were paid for: their usage rides on the error.
+	return &Response{Usage: total}, fmt.Errorf("model output does not match schema: %w", lastErr)
 }
 
 func backoff(attempt int, retryAfter time.Duration) time.Duration {

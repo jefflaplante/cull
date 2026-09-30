@@ -60,8 +60,12 @@ func Append(path string, e Entry) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o644)
 	if err != nil {
+		return err
+	}
+	if err := healTail(f); err != nil {
+		f.Close()
 		return err
 	}
 	if _, err := f.Write(append(b, '\n')); err != nil {
@@ -73,6 +77,27 @@ func Append(path string, e Entry) error {
 		return err
 	}
 	return f.Close()
+}
+
+// healTail drops an interrupted append (bytes after the last newline) so the next
+// entry doesn't glue onto it: Read already treats such a tail as never written.
+// Each append is a single write, so a tail without its newline only comes from a
+// crash, never from a writer still in progress.
+func healTail(f *os.File) error {
+	st, err := f.Stat()
+	if err != nil || st.Size() == 0 {
+		return err
+	}
+	buf := make([]byte, min(st.Size(), 64*1024))
+	off := st.Size() - int64(len(buf))
+	if _, err := f.ReadAt(buf, off); err != nil {
+		return err
+	}
+	if buf[len(buf)-1] == '\n' {
+		return nil
+	}
+	i := bytes.LastIndexByte(buf, '\n') // -1: the whole window is one torn line
+	return f.Truncate(off + int64(i+1))
 }
 
 // Read folds the log: the last entry per file wins, and cleared frames are absent.

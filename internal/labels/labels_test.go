@@ -121,3 +121,35 @@ func TestDefaultPathAndVerdicts(t *testing.T) {
 		t.Fatalf("stars-only entries are not verdicts: %v", v)
 	}
 }
+
+func TestAppendAfterTornLineKeepsLog(t *testing.T) {
+	p := filepath.Join(t.TempDir(), FileName)
+	if err := Append(p, Entry{File: "A.DNG", Label: "keep"}); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := os.OpenFile(p, os.O_WRONLY|os.O_APPEND, 0)
+	f.WriteString(`{"file":"B.DNG","lab`) // a crash mid-append
+	f.Close()
+	if err := Append(p, Entry{File: "C.DNG", Label: "cull"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(p)
+	if err != nil {
+		t.Fatalf("log unreadable after a torn line: %v", err)
+	}
+	if got["A.DNG"].Label != "keep" || got["C.DNG"].Label != "cull" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+// A log that is nothing but one torn line: the next append leaves just itself.
+func TestAppendAfterOnlyATornLine(t *testing.T) {
+	p := filepath.Join(t.TempDir(), FileName)
+	os.WriteFile(p, []byte(`{"file":"B.DNG","lab`), 0o644)
+	if err := Append(p, Entry{File: "C.DNG", Label: "cull"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Read(p); err != nil || got["C.DNG"].Label != "cull" || len(got) != 1 {
+		t.Fatalf("got %+v err %v", got, err)
+	}
+}

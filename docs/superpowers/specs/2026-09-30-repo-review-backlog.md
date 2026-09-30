@@ -28,15 +28,34 @@ other sections get their own plans when started.
 
 | # | Finding | Where | Status |
 |---|---|---|---|
-| 1.1 | Re-running `scan` or `judge` without `--resume` silently replaces a report holding paid assessments, rankings and `moved_to` records. After a `--move-culled`, `restore` can then no longer find those frames. | `pipeline.go:406` (`startRun`) | verified |
-| 1.2 | Frames are moved before the report recording the move is saved. A failed save or crash leaves DNGs in `culled/` that `restore` doesn't know about. | `pipeline.go:504-511`, `decide.go` → `redecide` | verified |
-| 1.3 | The "never overwrite" check in `relocate` is stat-then-rename, and macOS `rename(2)` silently replaces an existing destination. | `move.go:94-105` | verified |
-| 1.4 | `apply-c1` finds images by name across the whole Capture One document. Leica file numbers repeat, so verdicts, keywords, exposure and crop land on same-named images from other shoots. | `c1.go:106` (`matchImages`) | verified |
-| 1.5 | AppleScript injection: the raw file name goes into a `--` comment line, so a name containing a newline becomes live script under `--run`. | `c1.go:61` | verified |
-| 1.6 | `claude-sonnet-5-5` isn't in the price table, so it's treated as $0, and `--max-cost` never trips. The default model is still `claude-sonnet-5`. | `pricing.go:10`, `cli/backend.go:109` | verified |
-| 1.7 | `validated` drops both attempts' usage when both fail schema or JSON checks. | `llm.go:113` | verified |
-| 1.8 | Resume drops errored results together with their `CostUSD`, so the report understates spend. Batch round 2 drops the round-1 locate usage when the frame can't be prepared again. | `pipeline.go:437`, `batch.go:156` | reported |
-| 1.9 | Batch ranking ignores `--max-cost`: the whole ranking goes in one wave, and the budget is only checked before it. | `rank.go:356-371` | reported |
+| 1.1 | Re-running `scan` or `judge` without `--resume` silently replaces a report holding paid assessments, rankings and `moved_to` records. After a `--move-culled`, `restore` can then no longer find those frames. | `pipeline.go:406` (`startRun`) | **done** `76929e9` |
+| 1.2 | Frames are moved before the report recording the move is saved. A failed save or crash leaves DNGs in `culled/` that `restore` doesn't know about. | `pipeline.go:504-511`, `decide.go` → `redecide` | **done** `08911a4` |
+| 1.3 | The "never overwrite" check in `relocate` is stat-then-rename, and macOS `rename(2)` silently replaces an existing destination. | `move.go:94-105` | **done** `08911a4` |
+| 1.4 | `apply-c1` finds images by name across the whole Capture One document. Leica file numbers repeat, so verdicts, keywords, exposure and crop land on same-named images from other shoots. | `c1.go:106` (`matchImages`) | **done** `9a3e762` |
+| 1.5 | AppleScript injection: the raw file name goes into a `--` comment line, so a name containing a newline becomes live script under `--run`. | `c1.go:61` | **done** `9a3e762` |
+| 1.6 | `claude-sonnet-5-5` isn't in the price table, so it's treated as $0, and `--max-cost` never trips. The default model is still `claude-sonnet-5`. | `pricing.go:10`, `cli/backend.go:109` | **done** `a1af81e` |
+| 1.7 | `validated` drops both attempts' usage when both fail schema or JSON checks. | `llm.go:113` | **done** `0bf41d6` |
+| 1.8 | Resume drops errored results together with their `CostUSD`, so the report understates spend. Batch round 2 drops the round-1 locate usage when the frame can't be prepared again. | `pipeline.go:437`, `batch.go:156` | **done** `0bf41d6` |
+| 1.9 | Batch ranking ignores `--max-cost`: the whole ranking goes in one wave, and the budget is only checked before it. | `rank.go:356-371` | **done** `5484ef7` |
+
+Section 1 was closed on branch `fix/safety-and-spend` (2026-09-30), plus the final
+review's fixes in `a471928`:
+- a failed source removal no longer strands a hard link;
+- `--fresh` counts unrecorded moves;
+- adoption requires the same size and mtime;
+- the resume-mismatch message names `--model`;
+- the escalation model is price-checked.
+
+**Deferred minors from that review** (not yet done):
+- `apply-c1` lists ambiguous names under "not found" too, and says "not applied" although the unambiguous frames were applied.
+- `apply-c1` tries only the frame's current path, not also its pre-move path (an import made before `--move-culled`).
+- Resume, plus an unrecorded move, plus `--write-xmp`, can write an orphan sidecar before `moveCulled` reconciles. Fix: reconcile at the top of `finishRun`.
+- The overwrite guard ignores spend on a report where every frame errored (`Cost() > 0`, no assessments).
+- The re-attach exemption for batch ranking also skips the estimate for newly needed calls.
+- A `culled/` DNG deleted by hand leaves `moved_to` set, so `--fresh` stays refused (`restore` can't clear it).
+- Test gaps:
+  - no test of `guardOverwrite` on a corrupt report;
+  - the no-hardlink (exFAT) fallback in `renameNoReplace` is untested.
 
 ## 2. Correctness
 

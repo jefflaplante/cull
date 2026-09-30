@@ -169,14 +169,16 @@ func (s *Server) writeSidecar(file string, e labels.Entry) string {
 		if r.File != file {
 			continue
 		}
-		before := r.XMP
-		switch err := labels.WriteSidecar(r, e, false, s.o.OverwriteXMP); {
+		before, develop := r.XMP, r.XMPDevelop
+		// Keep whatever develop settings the sidecar was written with (decide
+		// --xmp-develop): a label change says nothing about exposure or crop.
+		switch err := labels.WriteSidecar(r, e, develop, s.o.OverwriteXMP); {
 		case errors.Is(err, xmp.ErrExists):
 			return "skipped: sidecar exists and wasn't written by cull"
 		case err != nil:
 			return "skipped: " + err.Error()
 		}
-		if r.XMP != before {
+		if r.XMP != before || r.XMPDevelop != develop {
 			if err := rep.Save(s.o.ReportPath); err != nil {
 				return "written; report not updated: " + err.Error()
 			}

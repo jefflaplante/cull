@@ -223,3 +223,25 @@ func TestNewServerRefusesDuplicateNames(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// A sidecar written with develop settings (decide --write-xmp --xmp-develop) keeps
+// them when a label change in review rewrites it.
+func TestServerKeepsDevelopSettings(t *testing.T) {
+	dir, h, tok := serveFixture(t, true)
+	rp := filepath.Join(dir, "cull-report.json")
+	rep, _ := report.Load(rp)
+	r := &rep.Results[1] // L2, keep
+	r.Evaluation.Exposure = eval.Exposure{Status: "fixable", EVAdjust: 0.5}
+	if err := labels.WriteSidecar(r, labels.Entry{}, true, false); err != nil {
+		t.Fatal(err)
+	}
+	r.XMPDevelop = true // what WriteSidecar records once it knows to
+	rep.Save(rp)
+	if rec := call(h, "POST", "/api/labels", `{"file":"L2.DNG","label":"keep","stars":3}`, api(tok)); rec.Code != 200 {
+		t.Fatalf("post: %d %s", rec.Code, rec.Body)
+	}
+	sc, _ := os.ReadFile(filepath.Join(dir, "L2.xmp"))
+	if !strings.Contains(string(sc), "crs:Exposure2012") || !strings.Contains(string(sc), `xmp:Rating="3"`) {
+		t.Fatalf("develop settings dropped:\n%s", sc)
+	}
+}

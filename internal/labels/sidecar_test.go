@@ -121,3 +121,12 @@ func TestWriteSidecarLeavesForeignSidecar(t *testing.T) {
 		t.Fatalf("want ErrExists, got %v", err)
 	}
 }
+
+func TestWriteSidecarRecordsDevelop(t *testing.T) {
+	dir := t.TempDir()
+	ev := &eval.Evaluation{Exposure: eval.Exposure{Status: "fixable", EVAdjust: 0.5}}
+	r := report.Result{File: filepath.Join(dir, "L1.DNG"), Decision: eval.Keep, Evaluation: ev}
+	if err := WriteSidecar(&r, Entry{}, true, false); err != nil || !r.XMPDevelop {
+		t.Fatalf("err=%v develop=%v", err, r.XMPDevelop)
+	}
+}

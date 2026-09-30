@@ -56,7 +56,7 @@ func Sidecar(r report.Result, l Entry, orientation int, develop bool) xmp.Sideca
 // path if moved). A sidecar the report records as ours, or that still carries
 // cull's marker (xmp.Ours: its record was lost in a crash), is rewritten; any other
 // existing one is left alone (xmp.ErrExists) unless overwrite. On success the path
-// is recorded in r.XMP.
+// is recorded in r.XMP, and whether it carries develop settings in r.XMPDevelop.
 func WriteSidecar(r *report.Result, l Entry, develop, overwrite bool) error {
 	at := r.File
 	if r.MovedTo != "" {
@@ -70,7 +70,7 @@ func WriteSidecar(r *report.Result, l Entry, develop, overwrite bool) error {
 	if err := xmp.Write(p, Sidecar(*r, l, orientation, develop), r.XMP == p || overwrite || xmp.Ours(p)); err != nil {
 		return err
 	}
-	r.XMP = p
+	r.XMP, r.XMPDevelop = p, develop
 	return nil
 }
 

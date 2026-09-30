@@ -120,7 +120,8 @@ type Result struct {
 	Usage       eval.Usage       `json:"usage"`
 	CostUSD     float64          `json:"cost_usd,omitempty"` // list price of this frame's calls
 	XMP         string           `json:"xmp,omitempty"`
-	MovedTo     string           `json:"moved_to,omitempty"` // set by --move-culled; cleared by restore
+	XMPDevelop  bool             `json:"xmp_develop,omitempty"` // the sidecar at XMP carries crs: develop settings
+	MovedTo     string           `json:"moved_to,omitempty"`    // set by --move-culled; cleared by restore
 	Error       string           `json:"error,omitempty"`
 }
 

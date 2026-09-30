@@ -1122,3 +1122,11 @@ func TestJudgeDefaultsToCurrentSonnet(t *testing.T) {
 		t.Fatalf("default %q", got)
 	}
 }
+
+func TestJudgeRefusesMaxCostForUnpricedEscalationModel(t *testing.T) {
+	dir := t.TempDir()
+	_, err := run(t, "judge", "--escalate-backend", "anthropic", "--escalate-model", "claude-unknown-9", "--max-cost", "5", dir)
+	if err == nil || !strings.Contains(err.Error(), "no price") {
+		t.Fatalf("got %v", err)
+	}
+}

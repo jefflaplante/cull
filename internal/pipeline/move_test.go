@@ -334,3 +334,58 @@ func TestMoveFixupRecordedOnce(t *testing.T) {
 		t.Fatalf("%d move fixups, want 1", n)
 	}
 }
+
+// Link succeeded, Remove failed (the source folder is read-only): the new name
+// must not be left behind, or every later move and restore sees "already exists".
+func TestRenameNoReplaceUndoesLinkWhenSourceCannotBeRemoved(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	src, dst := filepath.Join(a, "x"), filepath.Join(b, "x")
+	os.WriteFile(src, []byte("src"), 0o644)
+	os.Chmod(a, 0o555)
+	defer os.Chmod(a, 0o755)
+	if err := renameNoReplace(src, dst); err == nil {
+		t.Fatal("want an error: the source can't be removed")
+	}
+	if exists(dst) || !exists(src) {
+		t.Fatalf("dst left: %v, src kept: %v", exists(dst), exists(src))
+	}
+}
+
+// A frame moved into culled/ by a run whose report was never saved is still a
+// moved frame: --fresh must refuse, or the new report forgets it.
+func TestFreshRefusedForUnrecordedMove(t *testing.T) {
+	dir, b := shoot(t)
+	c := moveCfg(dir)
+	c.MoveCulled = false
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatal(err)
+	}
+	culled := filepath.Join(dir, "culled")
+	os.MkdirAll(culled, 0o755)
+	os.Rename(filepath.Join(dir, "L1000001.DNG"), filepath.Join(culled, "L1000001.DNG"))
+	c.Fresh = true
+	if _, _, err := Run(context.Background(), c, b); err == nil || !strings.Contains(err.Error(), "cull restore") {
+		t.Fatalf("want a refusal naming cull restore, got %v", err)
+	}
+}
+
+// An unrelated file at the frame's culled/ path (the frame itself deleted by
+// hand) is not the frame: it is never adopted, restored or moved.
+func TestReconcileNeverAdoptsAStranger(t *testing.T) {
+	dir, b := shoot(t)
+	c := moveCfg(dir)
+	c.MoveCulled = false
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatal(err)
+	}
+	culled := filepath.Join(dir, "culled")
+	os.MkdirAll(culled, 0o755)
+	os.Remove(filepath.Join(dir, "L1000001.DNG"))
+	os.WriteFile(filepath.Join(culled, "L1000001.DNG"), []byte("someone else's file"), 0o644)
+	if n, err := Restore(filepath.Join(dir, "r.json"), io.Discard); err != nil || n != 0 {
+		t.Fatalf("restored %d, err %v", n, err)
+	}
+	if exists(filepath.Join(dir, "L1000001.DNG")) {
+		t.Fatal("stranger moved into the shoot folder")
+	}
+}

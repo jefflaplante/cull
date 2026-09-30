@@ -431,10 +431,16 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 						"run `cull decide %s` (free; it upgrades the report in place), then --resume",
 						cfg.ReportPath, scan, prev.SchemaVersion, report.SchemaVersion, cfg.Dir)
 				}
+				// Dropping --resume is no escape: the overwrite guard refuses it, and
+				// --fresh would pay for the shoot again. Name what continues the report.
+				fix := fmt.Sprintf("rerun with --backend %s --model %q (and the same --escalate-* flags) to continue it", prev.Backend, prev.Model)
+				if prev.Backend == "" {
+					fix = "judge it without --resume (a scan report holds nothing paid for)"
+				}
 				return nil, nil, fmt.Errorf("resume: %s%s was produced by schema v%d, backend %q, model %q, escalation %q; "+
-					"this run is schema v%d, backend %q, model %q, escalation %q: drop --resume or use -o for a separate report",
+					"this run is schema v%d, backend %q, model %q, escalation %q: %s, or use -o for a separate report",
 					cfg.ReportPath, scan, prev.SchemaVersion, prev.Backend, prev.Model, prev.Escalation,
-					report.SchemaVersion, cfg.Backend, cfg.Model, rep.Escalation)
+					report.SchemaVersion, cfg.Backend, cfg.Model, rep.Escalation, fix)
 			}
 			// Paid rankings carry over: decideAll reuses a stored order while it still
 			// covers its set, and ranking spend never leaves the report.
@@ -473,6 +479,9 @@ func guardOverwrite(cfg *Config) error {
 	}
 	if err != nil {
 		return fmt.Errorf("%s exists but can't be read (%v): move it aside, or use -o for a separate report", cfg.ReportPath, err)
+	}
+	for i := range prev.Results { // in memory only: count moves a crashed run never recorded
+		reconcileMove(&prev.Results[i])
 	}
 	evaluated, moved := prev.PaidWork()
 	if moved > 0 {

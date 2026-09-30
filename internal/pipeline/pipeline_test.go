@@ -205,8 +205,26 @@ func TestResumeRefusesDifferentBackendOrSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Resume, c.Backend = true, "claude-code"
-	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err == nil || !strings.Contains(err.Error(), "drop --resume") {
+	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err == nil || !strings.Contains(err.Error(), "-o for a separate report") {
 		t.Fatalf("backend mismatch: want refusal, got %v", err)
+	}
+}
+
+// Dropping --resume is no longer an escape (the overwrite guard refuses it, and
+// --fresh would pay for the shoot again): a model mismatch names the flags that
+// continue the report.
+func TestResumeModelMismatchNamesTheReportsModel(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	c := cfg(dir)
+	c.Backend, c.Model = "anthropic", "claude-sonnet-5"
+	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatal(err)
+	}
+	c.Resume, c.Model = true, "claude-sonnet-5-5"
+	_, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
+	if err == nil || !strings.Contains(err.Error(), `--model "claude-sonnet-5"`) || strings.Contains(err.Error(), "drop --resume") {
+		t.Fatalf("got %v", err)
 	}
 }
 

@@ -128,6 +128,11 @@ Backends (--backend):
 			if err := checkPriced(cmd, o.backend, o.model, o.maxCost); err != nil {
 				return err
 			}
+			if o.escalateBackend != "" {
+				if err := checkPriced(cmd, o.escalateBackend, o.escalateModel, o.maxCost); err != nil {
+					return fmt.Errorf("escalation: %w", err)
+				}
+			}
 			price, priced := llm.PriceFor(o.backend, o.model)
 			if o.estimate || priced {
 				files, err := pipeline.Discover(cfg.Dir, cfg.Recursive)

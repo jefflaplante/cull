@@ -98,7 +98,11 @@ func renameNoReplace(src, dst string) error {
 	err := os.Link(src, dst)
 	switch {
 	case err == nil:
-		return os.Remove(src)
+		if rerr := os.Remove(src); rerr != nil {
+			os.Remove(dst) // the name made a moment ago: leave nothing a later move would trip on
+			return rerr
+		}
+		return nil
 	case errors.Is(err, fs.ErrExist):
 		return fmt.Errorf("%s already exists, not moved: %w", dst, fs.ErrExist)
 	}
@@ -120,7 +124,7 @@ func reconcileMove(r *report.Result) bool {
 	if r.MovedTo != "" {
 		from, to = r.MovedTo, r.File // unrecorded restore
 	}
-	if exists(from) || !exists(to) {
+	if exists(from) || !sameVersion(to, r) {
 		return false
 	}
 	if r.XMP == xmp.Path(from) && !exists(xmp.Path(from)) && exists(xmp.Path(to)) {
@@ -135,6 +139,13 @@ func reconcileMove(r *report.Result) bool {
 }
 
 func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
+
+// sameVersion reports whether p is the file r describes: a same-disk rename (or
+// link) keeps size and mtime, so anything else at p is a stranger, never adopted.
+func sameVersion(p string, r *report.Result) bool {
+	st, err := os.Lstat(p)
+	return err == nil && st.Size() == r.Size && st.ModTime().Equal(r.ModTime)
+}
 
 // relocate renames src to dst and, if src has an .xmp sidecar, that too. Both
 // destinations are checked first so the pair moves together or not at all, and

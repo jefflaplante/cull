@@ -68,7 +68,7 @@ func TestResumeRefusesDifferentEscalation(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Resume, c.Escalate = true, nil
-	if _, _, err := Run(context.Background(), c, primary); err == nil || !strings.Contains(err.Error(), "drop --resume") {
+	if _, _, err := Run(context.Background(), c, primary); err == nil || !strings.Contains(err.Error(), "-o for a separate report") {
 		t.Fatalf("want refusal, got %v", err)
 	}
 }

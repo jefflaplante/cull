@@ -89,7 +89,7 @@ func TestScriptUsesYourLabelsAndStars(t *testing.T) {
 
 func TestScriptDevelopOnlyWhenAskedAndApplicable(t *testing.T) {
 	s := Script(testReport(), Options{Exposure: true, Crop: true})
-	if !strings.Contains(s, `set exposure of adjustments of v to 0.7`) || strings.Count(s, "exposure of adjustments") != 1 {
+	if !strings.Contains(s, `set exposure of adjustments of v to 0.7`) || strings.Count(s, "set exposure of adjustments") != 1 {
 		t.Errorf("exposure: only the fixable frame\n%s", s)
 	}
 	if !strings.Contains(s, "set crop of v to {") || !strings.Contains(s, "0.5 * w") || strings.Count(s, "set crop of v") != 1 {
@@ -160,5 +160,19 @@ func TestScriptMatchesByPathAndListsAmbiguousNames(t *testing.T) {
 func TestQuoteEscapesControlCharacters(t *testing.T) {
 	if got := quote("a\"b\\c\nd\re\tf"); got != `"a\"b\\c\nd\re\tf"` {
 		t.Fatalf("got %s", got)
+	}
+}
+
+func TestScriptAppliesEditsOnlyOverDefaults(t *testing.T) {
+	s := Script(testReport(), Options{Exposure: true, Crop: true})
+	b := block(s, "L1.DNG")
+	if !strings.Contains(b, "if (exposure of adjustments of v) is 0 then set exposure of adjustments of v to 0.7") {
+		t.Errorf("exposure not guarded:\n%s", b)
+	}
+	if !strings.Contains(b, "if my isFullFrame(crop of v, w, h) then set crop of v to") {
+		t.Errorf("crop not guarded:\n%s", b)
+	}
+	if !strings.Contains(s, "on isFullFrame(") {
+		t.Error("helper missing")
 	}
 }

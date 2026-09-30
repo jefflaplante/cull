@@ -124,7 +124,8 @@ cull apply-c1 --run ~/Pictures/2026-10-04                   # apply it
 ```
 
 It sets colour tags, keywords and your stars on the images already in your catalog.
-`--exposure` and `--crop` also apply the suggested fixes.
+`--exposure` and `--crop` also apply the suggested fixes, but only to images whose
+exposure and crop are still at their defaults: edits you made in Capture One stay.
 
 ## Ranking on its own
 

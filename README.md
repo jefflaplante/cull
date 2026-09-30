@@ -308,7 +308,7 @@ and Bridge.
 | Target | Rating, label, keywords | Exposure, crop |
 |---|---|---|
 | Capture One, from sidecars | read on import; use Image › Sync Metadata after import | not applied |
-| Capture One, via `apply-c1` | yes | yes, with `--exposure` / `--crop` |
+| Capture One, via `apply-c1` | yes | yes, with `--exposure` / `--crop`, only over default exposure and crop |
 | Lightroom Classic | ignores sidecars for DNG files | — |
 
 **`apply-c1`** writes an AppleScript for the open Capture One document. Run

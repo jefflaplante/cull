@@ -29,7 +29,9 @@ import (
 	"github.com/jefflaplante/cull/internal/report"
 )
 
-// Options select what the script writes.
+// Options select what the script writes. Exposure and Crop apply only where the
+// image still has Capture One's default exposure (0) or an uncropped frame, so
+// edits made in Capture One are never overwritten.
 type Options struct {
 	Rating, Label, Keyword bool
 	Exposure               bool                    // suggested EV for frames the model marked fixable
@@ -95,11 +97,12 @@ func Script(rep *report.Report, o Options) string {
 			}
 		}
 		if o.Exposure && e != nil && e.Exposure.Status == "fixable" {
-			fmt.Fprintf(&b, "\t\t\tset exposure of adjustments of v to %s\n", num(e.Exposure.EVAdjust))
+			// Only over the default: an exposure set in Capture One is the user's edit.
+			fmt.Fprintf(&b, "\t\t\tif (exposure of adjustments of v) is 0 then set exposure of adjustments of v to %s\n", num(e.Exposure.EVAdjust))
 		}
 		if crop {
 			c := e.Composition.Crop
-			fmt.Fprintf(&b, "\t\t\tset crop of v to {%s * w, %s * h, %s * w, %s * h}\n",
+			fmt.Fprintf(&b, "\t\t\tif my isFullFrame(crop of v, w, h) then set crop of v to {%s * w, %s * h, %s * w, %s * h}\n",
 				num((c.Left+c.Right)/2), num((c.Top+c.Bottom)/2), num(c.Right-c.Left), num(c.Bottom-c.Top))
 		}
 		b.WriteString("\t\tend repeat\n\tend repeat\n")
@@ -128,6 +131,14 @@ on matchImages(doc, posixPath, fileName, stem)
 		return {}
 	end tell
 end matchImages
+
+-- An untouched crop covers the whole image (within a pixel). Any other crop was
+-- set in Capture One and is kept. If the crop's orientation doesn't match
+-- dimensions (unverified), this is false and the suggestion is skipped: the safe
+-- way to be wrong.
+on isFullFrame(cr, w, h)
+	return ((item 3 of cr) ≥ w - 1) and ((item 4 of cr) ≥ h - 1)
+end isFullFrame
 
 on ensureKeyword(doc, kname)
 	tell application "Capture One"

@@ -19,6 +19,7 @@ type cullOpts struct {
 	locate       string
 	concurrency  int
 	resume       bool
+	fresh        bool
 	writeXMP     bool
 	xmpDevelop   bool
 	overwriteXMP bool
@@ -71,6 +72,9 @@ Backends (--backend):
   cull judge --move-culled ~/Pictures/2026-09-26`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			if o.fresh && o.resume {
+				return fmt.Errorf("--fresh and --resume contradict each other")
+			}
 			if o.xmpDevelop && !o.writeXMP {
 				return fmt.Errorf("--xmp-develop requires --write-xmp")
 			}
@@ -150,6 +154,7 @@ Backends (--backend):
 			cfg.Locate = o.locate == "model"
 			cfg.Concurrency = o.backendFlags.concurrencyOrDefault(o.concurrency)
 			cfg.Resume = o.resume
+			cfg.Fresh = o.fresh
 			cfg.WriteXMP = o.writeXMP
 			cfg.XMPDevelop = o.xmpDevelop
 			cfg.OverwriteXMP = o.overwriteXMP
@@ -205,6 +210,7 @@ Backends (--backend):
 	f.StringVar(&o.locate, "locate", "model", "when no face is found, ask the model for the focus target: model or off")
 	f.IntVarP(&o.concurrency, "concurrency", "j", 0, "parallel evaluations (0 = backend default: anthropic 4, claude-code 2, openai 4)")
 	f.BoolVar(&o.resume, "resume", false, "skip files already evaluated in the existing report")
+	f.BoolVar(&o.fresh, "fresh", false, "replace an existing report that holds assessments (default: refuse; see --resume)")
 	f.BoolVar(&o.writeXMP, "write-xmp", false, "write XMP sidecars (rating, label, keyword)")
 	f.BoolVar(&o.xmpDevelop, "xmp-develop", false, "also write Adobe crs exposure/crop (not applied by Capture One)")
 	f.BoolVar(&o.overwriteXMP, "overwrite-xmp", false, "overwrite existing sidecars (default: never clobber)")

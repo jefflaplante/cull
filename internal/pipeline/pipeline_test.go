@@ -502,3 +502,43 @@ func TestLandedTileOnlyWithoutSubjectByDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestRerunWithoutResumeRefusesPaidReport(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	if _, _, err := Run(context.Background(), cfg(dir), &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(dir, "r.json"))
+	for _, dry := range []bool{false, true} { // judge, then scan
+		c := cfg(dir)
+		c.DryRun = dry
+		_, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
+		if err == nil || !strings.Contains(err.Error(), "--resume") || !strings.Contains(err.Error(), "--fresh") {
+			t.Fatalf("dry=%v: want a refusal naming --resume and --fresh, got %v", dry, err)
+		}
+	}
+	if after, _ := os.ReadFile(filepath.Join(dir, "r.json")); !bytes.Equal(before, after) {
+		t.Fatal("report changed on disk")
+	}
+	c := cfg(dir)
+	c.Fresh = true
+	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatalf("--fresh: %v", err)
+	}
+}
+
+func TestFreshRunOverwritesScanReport(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	c := cfg(dir)
+	c.DryRun = true
+	for i := 0; i < 2; i++ { // scan twice: nothing paid, no refusal
+		if _, _, err := Run(context.Background(), c, nil); err != nil {
+			t.Fatalf("scan %d: %v", i, err)
+		}
+	}
+	if _, _, err := Run(context.Background(), cfg(dir), &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatalf("judge over a scan report: %v", err)
+	}
+}

@@ -34,6 +34,7 @@ type Config struct {
 	Concurrency    int
 	DryRun         bool // extract + prepare only; no API calls
 	Resume         bool
+	Fresh          bool // replace a report holding assessments; refused while it records moved frames
 	WriteXMP       bool
 	OverwriteXMP   bool
 	MoveCulled     bool                    // move cull decisions (and sidecars) into CulledDir after processing
@@ -403,6 +404,11 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 		}
 		cfg.detect = func(f *imageprep.Frame) []focus.Face { return d.Detect(f.Luma, f.W, f.H) }
 	}
+	if !cfg.Resume {
+		if err := guardOverwrite(cfg); err != nil {
+			return nil, nil, err
+		}
+	}
 	rep := &report.Report{SchemaVersion: report.SchemaVersion, Backend: cfg.Backend, Model: cfg.Model,
 		Escalation: cfg.Escalate.Label(), Dir: cfg.Dir}
 	done := map[string]bool{}
@@ -452,6 +458,29 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 	}
 	fmt.Fprintf(cfg.Log, "%d DNGs found, %d already done, %d to process\n", len(files), len(files)-len(todo), len(todo))
 	return rep, todo, nil
+}
+
+// guardOverwrite refuses a run that would replace a report holding paid
+// assessments (unless Fresh) or recording moved frames (always: restore first,
+// or those frames can't be found again). A scan-only report is free to replace.
+func guardOverwrite(cfg *Config) error {
+	prev, err := report.Load(cfg.ReportPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("%s exists but can't be read (%v): move it aside, or use -o for a separate report", cfg.ReportPath, err)
+	}
+	evaluated, moved := prev.PaidWork()
+	if moved > 0 {
+		return fmt.Errorf("%s records %d frame(s) moved into %s/: run `cull restore %s` first, or use --resume or -o",
+			cfg.ReportPath, moved, CulledDir, cfg.Dir)
+	}
+	if evaluated > 0 && !cfg.Fresh {
+		return fmt.Errorf("%s holds %d assessed frame(s) ($%.2f): use --resume to continue it, --fresh to replace it, or -o for a separate report",
+			cfg.ReportPath, evaluated, prev.Cost())
+	}
+	return nil
 }
 
 // finishRun decides sequences (they span frames, so only once everything is in),

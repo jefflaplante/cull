@@ -215,3 +215,16 @@ func TestRestoreNeverOverwrites(t *testing.T) {
 		t.Fatalf("culled copy should stay, with a note:\n%s", log.String())
 	}
 }
+
+func TestFreshRefusedWhileFramesAreMoved(t *testing.T) {
+	dir, b := shoot(t)
+	if _, _, err := Run(context.Background(), moveCfg(dir), b); err != nil {
+		t.Fatal(err)
+	}
+	c := moveCfg(dir)
+	c.Fresh = true
+	_, _, err := Run(context.Background(), c, b)
+	if err == nil || !strings.Contains(err.Error(), "cull restore") {
+		t.Fatalf("want a refusal naming cull restore, got %v", err)
+	}
+}

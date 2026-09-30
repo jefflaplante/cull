@@ -277,6 +277,9 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
   - `judge`'s includes an approximate ranking cost that assumes 8-frame sets. It
     usually overestimates.
 - `--max-cost USD` stops the run once it has spent that much. Continue with `--resume`.
+- A re-run without `--resume` refuses to replace a report that holds assessments:
+  `--fresh` (on `judge` and `scan`) starts over, and `-o` writes a separate report.
+  Even `--fresh` is refused while the report records frames moved into `culled/`.
 - `--batch` (anthropic) uses the Message Batches API: half price, with results within
   minutes to hours. Ctrl-C is safe; `--resume` re-attaches to batches already paid for.
 - Costs so far are recorded in the report; `judge` and `rank` print them when they

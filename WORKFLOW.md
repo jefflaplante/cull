@@ -58,6 +58,9 @@ cull judge --backend claude-code ~/Pictures/2026-10-04   # subscription quota
   - `--quota-stop 0.9` (claude-code) stops before the 5-hour window runs out.
 - **Interrupted (Ctrl-C, budget, quota):** rerun with `--resume`. With `--batch`, the
   rerun reconnects to batches you've already paid for.
+- **Re-running without `--resume`** is refused once the report holds assessments, so a
+  stray re-run can't throw away what you paid for. `--fresh` starts over; it is still
+  refused while frames sit in `culled/` (run `cull restore` first).
 - **Output:** `cull-report.json` in the shoot folder.
 
 ## 4. Review in your browser

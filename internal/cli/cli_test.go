@@ -42,6 +42,7 @@ func TestFlagValidation(t *testing.T) {
 		"bad min-crop-area":               {"judge", "--min-crop-area", "1.5", dir},
 		"missing dir arg":                 {"judge"},
 		"not a directory":                 {"scan", dir + "/nope"},
+		"fresh with resume":               {"judge", "--fresh", "--resume", dir},
 	}
 	for name, args := range cases {
 		if _, err := run(t, args...); err == nil || strings.Contains(err.Error(), "unknown command") {
@@ -1080,5 +1081,21 @@ func TestJudgeResumeKeepsTheReportsPolicy(t *testing.T) {
 	}
 	if !strings.Contains(out, "--eyes-closed cull") {
 		t.Fatalf("the reused setting isn't named:\n%s", out)
+	}
+}
+
+func TestScanRefusesJudgedReportUnlessFresh(t *testing.T) {
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	judged := &report.Report{SchemaVersion: report.SchemaVersion, Backend: "anthropic", Model: "m",
+		Results: []report.Result{{File: filepath.Join(dir, "L1.DNG"), Evaluation: &eval.Evaluation{}, CostUSD: 0.02}}}
+	if err := judged.Save(filepath.Join(dir, "cull-report.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "scan", dir); err == nil || !strings.Contains(err.Error(), "--fresh") {
+		t.Fatalf("scan over a judged report: got %v", err)
+	}
+	if out, err := run(t, "scan", "--fresh", dir); err != nil {
+		t.Fatalf("scan --fresh: %v\n%s", err, out)
 	}
 }

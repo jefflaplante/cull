@@ -162,6 +162,21 @@ func (r Result) LookBytes() ([]uint8, bool) {
 	return b, err == nil && len(b) > 0
 }
 
+// PaidWork counts what a report holds that a fresh run would lose: frames with a
+// model assessment (paid for) and frames moved into culled/ (only the report
+// knows where they came from).
+func (r *Report) PaidWork() (evaluated, moved int) {
+	for _, x := range r.Results {
+		if x.Evaluation != nil {
+			evaluated++
+		}
+		if x.MovedTo != "" {
+			moved++
+		}
+	}
+	return evaluated, moved
+}
+
 // Cost is everything the report's model calls cost at list price: the frames'
 // calls plus every rank call (RankCostUSD; the sets' own CostUSD isn't added again).
 func (r *Report) Cost() float64 {

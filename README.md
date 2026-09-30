@@ -185,6 +185,8 @@ the sharpness gate stay in the set but aren't ranked.
 it is still covered. A frame dropping out keeps the order; a new frame makes the set
 unranked until the next `cull rank`. `cull decide` regroups and re-applies stored
 rankings for free, so changing `--keep-best` or `--outranked` costs nothing.
+The report also stores the grouping (`--seq-gap`, `--seq-look`): later `decide`, `rank`
+and `judge --resume` runs regroup with it unless you type those flags again.
 Regrouping can lose rankings:
 - when two ranked sets merge, only the first one's order is kept;
 - `--seq-gap 0` drops them all.

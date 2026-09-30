@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/group"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 // policyFlags are the decision knobs shared by judge, rank, and decide. New
@@ -131,4 +133,40 @@ func noteStoredPolicy(w io.Writer, notes []string) {
 	if len(notes) > 0 {
 		fmt.Fprintf(w, "policy from the report: %s (a flag on the command line overrides it)\n", strings.Join(notes, " "))
 	}
+}
+
+// resolveSeq is resolve for the grouping flags: the report's stored settings, with
+// a typed --seq-gap or --seq-look overriding its own. A regroup at other settings
+// would move frames between sets, change which are best, and drop paid rankings.
+func resolveSeq(fs *pflag.FlagSet, cur group.Options, saved *report.Sequences) (group.Options, []string) {
+	if saved == nil {
+		return cur, nil
+	}
+	var notes []string
+	s := saved.Options()
+	if fl := fs.Lookup("seq-gap"); fl != nil && !fl.Changed {
+		cur.Gap = s.Gap
+		if v := s.Gap.String(); v != fl.DefValue {
+			notes = append(notes, "--seq-gap "+v)
+		}
+	}
+	if fl := fs.Lookup("seq-look"); fl != nil && !fl.Changed {
+		cur.MaxLook = s.MaxLook
+		if v := fmt.Sprint(s.MaxLook); v != fl.DefValue {
+			notes = append(notes, "--seq-look "+v)
+		}
+	}
+	return cur, notes
+}
+
+// validSeq checks grouping settings whether typed or stored (a person may have
+// edited the report by hand).
+func validSeq(o group.Options) error {
+	if o.Gap < 0 {
+		return fmt.Errorf("--seq-gap must be >= 0")
+	}
+	if o.MaxLook < 0 || o.MaxLook > 1 {
+		return fmt.Errorf("--seq-look must be in [0, 1]")
+	}
+	return nil
 }

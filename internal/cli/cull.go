@@ -181,7 +181,12 @@ Backends (--backend):
 					if cfg.Policy, notes, err = o.policy.resolve(cmd.Flags(), prev.Policy); err != nil {
 						return err
 					}
-					noteStoredPolicy(cmd.ErrOrStderr(), notes)
+					var seqNotes []string
+					cfg.Seq, seqNotes = resolveSeq(cmd.Flags(), cfg.Seq, prev.Seq)
+					if err := validSeq(cfg.Seq); err != nil {
+						return fmt.Errorf("the report's stored grouping: %w", err)
+					}
+					noteStoredPolicy(cmd.ErrOrStderr(), append(notes, seqNotes...))
 				}
 			}
 			cfg.CheckpointN = o.checkpoint

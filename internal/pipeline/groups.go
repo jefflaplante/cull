@@ -142,6 +142,7 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 	}
 	rep.KeepBest = p.KeepBest
 	rep.Policy = &p
+	rep.Seq = report.SequencesOf(o)
 
 	var changed []int
 	for _, i := range idx {

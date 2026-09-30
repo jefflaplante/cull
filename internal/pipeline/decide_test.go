@@ -537,3 +537,12 @@ func TestLabelsWithDuplicateNames(t *testing.T) {
 		t.Fatalf("cull fallback: %s", log.String())
 	}
 }
+
+// decideAll records the grouping it used, so later commands regroup the same way.
+func TestDecideRecordsSequenceSettings(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	decideAll(rep, c.Policy, group.Options{Gap: 90 * time.Second, MaxLook: 0.12})
+	if rep.Seq == nil || rep.Seq.GapSeconds != 90 || rep.Seq.Look != 0.12 {
+		t.Fatalf("seq %+v", rep.Seq)
+	}
+}

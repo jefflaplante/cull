@@ -71,11 +71,8 @@ func (so *sharedOpts) base(arg string) (pipeline.Config, error) {
 	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
 		return pipeline.Config{}, fmt.Errorf("%s is not a directory", arg)
 	}
-	if so.seqGap < 0 {
-		return pipeline.Config{}, fmt.Errorf("--seq-gap must be >= 0")
-	}
-	if so.seqLook < 0 || so.seqLook > 1 {
-		return pipeline.Config{}, fmt.Errorf("--seq-look must be in [0, 1]")
+	if err := validSeq(group.Options{Gap: so.seqGap, MaxLook: so.seqLook}); err != nil {
+		return pipeline.Config{}, err
 	}
 	saveInputs := ""
 	if so.saveInputs != "" {

@@ -14,10 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/pflag"
 
 	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/pipeline"
 	"github.com/jefflaplante/cull/internal/report"
@@ -1128,5 +1130,48 @@ func TestJudgeRefusesMaxCostForUnpricedEscalationModel(t *testing.T) {
 	_, err := run(t, "judge", "--escalate-backend", "anthropic", "--escalate-model", "claude-unknown-9", "--max-cost", "5", dir)
 	if err == nil || !strings.Contains(err.Error(), "no price") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// A stored --seq-look is reused unless typed again.
+func TestResolveSeqReusesStoredSettings(t *testing.T) {
+	fs := NewRootCmd().PersistentFlags()
+	fs.Parse(nil)
+	stored := &report.Sequences{GapSeconds: 60, Look: 0.12}
+	got, notes := resolveSeq(fs, group.Options{Gap: time.Minute, MaxLook: group.DefaultLook}, stored)
+	if got.MaxLook != 0.12 || got.Gap != time.Minute || len(notes) != 1 || notes[0] != "--seq-look 0.12" {
+		t.Fatalf("got %+v notes %v", got, notes)
+	}
+	fs.Parse([]string{"--seq-look", "0.05"})
+	if got, _ := resolveSeq(fs, group.Options{Gap: time.Minute, MaxLook: 0.05}, stored); got.MaxLook != 0.05 {
+		t.Fatalf("typed flag didn't win: %+v", got)
+	}
+}
+
+func TestDecideWithoutStoredSequencesUsesFlags(t *testing.T) {
+	fs := NewRootCmd().PersistentFlags()
+	fs.Parse(nil)
+	cur := group.Options{Gap: time.Minute, MaxLook: group.DefaultLook}
+	if got, notes := resolveSeq(fs, cur, nil); got != cur || len(notes) != 0 {
+		t.Fatalf("got %+v %v", got, notes)
+	}
+}
+
+func TestDecideNamesStoredSequenceSettings(t *testing.T) {
+	dir := t.TempDir()
+	rp := rankReportFixture(t, dir, "anthropic", "claude-sonnet-5", 2)
+	rep, err := report.Load(rp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.Seq = &report.Sequences{GapSeconds: 60, Look: 0.5}
+	rep.Save(rp)
+	out, err := run(t, "decide", dir)
+	if err != nil || !strings.Contains(out, "--seq-look 0.5") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	rep, _ = report.Load(rp)
+	if rep.Seq == nil || rep.Seq.Look != 0.5 {
+		t.Fatalf("stored grouping lost: %+v", rep.Seq)
 	}
 }

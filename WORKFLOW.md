@@ -101,7 +101,7 @@ cull decide --review-below-sharpness 7 ~/Pictures/2026-10-04
 - **`decide`** re-applies the policy with no model calls. The policy is **saved in the
   report**: later `decide`, `rank`, `calibrate` and `judge --resume` runs start from
   it, name the non-default settings they reuse, and let a flag you type override only
-  its own setting.
+  its own setting. The grouping (`--seq-gap`, `--seq-look`) is saved the same way.
 
 ## 6. Before importing into Capture One
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/jefflaplante/cull/internal/dng"
 	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/imageprep"
 	"github.com/jefflaplante/cull/internal/rawclip"
 )
@@ -73,6 +74,22 @@ type Set struct {
 	By      string     `json:"by"`
 	Usage   eval.Usage `json:"usage"`              // the set's rank calls, summed over re-rankings
 	CostUSD float64    `json:"cost_usd,omitempty"` // their list price; Report.RankCostUSD holds the total
+}
+
+// Sequences are the grouping settings a report's sets came from.
+type Sequences struct {
+	GapSeconds float64 `json:"gap_seconds"`
+	Look       float64 `json:"look"`
+}
+
+// Options converts back to grouping options.
+func (s Sequences) Options() group.Options {
+	return group.Options{Gap: time.Duration(s.GapSeconds * float64(time.Second)), MaxLook: s.Look}
+}
+
+// SequencesOf records grouping options.
+func SequencesOf(o group.Options) *Sequences {
+	return &Sequences{GapSeconds: o.Gap.Seconds(), Look: o.MaxLook}
 }
 
 // RankNote is the model's note on one ranked frame.
@@ -144,6 +161,10 @@ type Report struct {
 	// rank). decide, rank, calibrate and judge --resume start from it, so tuning
 	// survives a later run that doesn't repeat the flags; nil in older reports.
 	Policy *eval.Policy `json:"policy,omitempty"`
+	// Seq is the grouping the sets came from (--seq-gap, --seq-look); decide, rank
+	// and judge --resume regroup with it unless those flags are typed. Nil in older
+	// reports.
+	Seq *Sequences `json:"seq,omitempty"`
 	// RankCostUSD is the list price of every rank call made for this report. It only
 	// grows: a regrouping or re-rank can drop a Set, but not what was paid for it.
 	RankCostUSD float64 `json:"rank_cost_usd,omitempty"`

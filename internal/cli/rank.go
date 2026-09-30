@@ -88,7 +88,12 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 			if cfg.Policy, notes, err = o.policy.resolve(cmd.Flags(), rep.Policy); err != nil {
 				return err
 			}
-			noteStoredPolicy(cmd.ErrOrStderr(), notes)
+			var seqNotes []string
+			cfg.Seq, seqNotes = resolveSeq(cmd.Flags(), cfg.Seq, rep.Seq)
+			if err := validSeq(cfg.Seq); err != nil {
+				return fmt.Errorf("the report's stored grouping: %w", err)
+			}
+			noteStoredPolicy(cmd.ErrOrStderr(), append(notes, seqNotes...))
 
 			warning, err := o.applyBackendModel(&cfg, cmd.Flags().Changed("backend"), cmd.Flags().Changed("model"), rep)
 			if err != nil {

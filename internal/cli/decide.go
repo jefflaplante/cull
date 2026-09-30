@@ -40,14 +40,20 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 				return err
 			}
 			var saved *eval.Policy
+			var savedSeq *report.Sequences
 			if rep, err := report.Load(cfg.ReportPath); err == nil { // a missing report is Decide's error to report
-				saved = rep.Policy
+				saved, savedSeq = rep.Policy, rep.Seq
 			}
 			p, notes, err := pol.resolve(cmd.Flags(), saved)
 			if err != nil {
 				return err
 			}
-			noteStoredPolicy(cmd.ErrOrStderr(), notes)
+			var seqNotes []string
+			cfg.Seq, seqNotes = resolveSeq(cmd.Flags(), cfg.Seq, savedSeq)
+			if err := validSeq(cfg.Seq); err != nil {
+				return fmt.Errorf("the report's stored grouping: %w", err)
+			}
+			noteStoredPolicy(cmd.ErrOrStderr(), append(notes, seqNotes...))
 			if xmpDevelop && !writeXMP {
 				return fmt.Errorf("--xmp-develop requires --write-xmp")
 			}

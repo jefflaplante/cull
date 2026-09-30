@@ -414,6 +414,9 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 	done := map[string]bool{}
 	if cfg.Resume {
 		prev, err := report.Load(cfg.ReportPath)
+		if err == nil && prev.Rebase(cfg.Dir) {
+			fmt.Fprintf(cfg.Log, "the report's frames moved to %s (the folder was renamed): continuing with their new paths\n", cfg.Dir)
+		}
 		switch {
 		case err == nil:
 			// Mixing backends or models in one report would corrupt calibration comparisons.
@@ -465,6 +468,21 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 			todo = append(todo, f)
 		}
 	}
+	// A file changed since it was judged (new size or mtime) is in todo again: its
+	// old result goes, or the report would hold the frame twice.
+	again := make(map[string]bool, len(todo))
+	for _, f := range todo {
+		again[f] = true
+	}
+	kept := rep.Results[:0]
+	for _, r := range rep.Results {
+		if again[r.File] {
+			rep.DiscardedCostUSD += r.CostUSD
+			continue
+		}
+		kept = append(kept, r)
+	}
+	rep.Results = kept
 	fmt.Fprintf(cfg.Log, "%d DNGs found, %d already done, %d to process\n", len(files), len(files)-len(todo), len(todo))
 	return rep, todo, nil
 }
@@ -480,6 +498,7 @@ func guardOverwrite(cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("%s exists but can't be read (%v): move it aside, or use -o for a separate report", cfg.ReportPath, err)
 	}
+	prev.Rebase(cfg.Dir)          // in memory only: find its moved frames where they now are
 	for i := range prev.Results { // in memory only: count moves a crashed run never recorded
 		reconcileMove(&prev.Results[i])
 	}

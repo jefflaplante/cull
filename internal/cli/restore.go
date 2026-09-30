@@ -24,7 +24,7 @@ files back by hand instead.`,
 			if err != nil {
 				return err
 			}
-			n, err := pipeline.Restore(cfg.ReportPath, cmd.ErrOrStderr())
+			n, err := pipeline.Restore(cfg.ReportPath, cfg.Dir, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}

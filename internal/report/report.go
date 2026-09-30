@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jefflaplante/cull/internal/dng"
@@ -258,4 +260,38 @@ func (r Result) Facts() eval.Facts {
 		return eval.Facts{}
 	}
 	return eval.Facts{RawKnown: true, RawClipPct: r.RawClip.HighlightPct}
+}
+
+// Rebase moves every path under the report's Dir to dir: the shoot folder was
+// renamed or moved together with its report. Paths outside Dir are left alone.
+// Returns whether anything changed; the caller saves.
+func (r *Report) Rebase(dir string) bool {
+	if dir == "" || r.Dir == "" || r.Dir == dir {
+		return false
+	}
+	old := r.Dir + string(filepath.Separator)
+	re := func(p string) string {
+		if strings.HasPrefix(p, old) {
+			return filepath.Join(dir, p[len(old):])
+		}
+		return p
+	}
+	for i := range r.Results {
+		x := &r.Results[i]
+		x.File, x.MovedTo, x.XMP = re(x.File), re(x.MovedTo), re(x.XMP)
+	}
+	for i := range r.Sets {
+		s := &r.Sets[i]
+		for j := range s.Members {
+			s.Members[j] = re(s.Members[j])
+		}
+		for j := range s.Order {
+			s.Order[j] = re(s.Order[j])
+		}
+		for j := range s.Notes {
+			s.Notes[j].File = re(s.Notes[j].File)
+		}
+	}
+	r.Dir = dir
+	return true
 }

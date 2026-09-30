@@ -296,6 +296,7 @@ func rank(ctx context.Context, cfg Config, ex rankExec, force bool) (*report.Rep
 	if err != nil {
 		return nil, err
 	}
+	rep.Rebase(cfg.Dir) // a renamed shoot folder: the save below keeps the new paths
 	n, err := fillLooks(ctx, rep, log)
 	if n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
@@ -306,7 +307,7 @@ func rank(ctx context.Context, cfg Config, ex rankExec, force bool) (*report.Rep
 		}
 		return rep, err
 	}
-	o := DecideOptions{Policy: cfg.Policy, WriteXMP: cfg.WriteXMP, XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP,
+	o := DecideOptions{Dir: cfg.Dir, Policy: cfg.Policy, WriteXMP: cfg.WriteXMP, XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP,
 		MoveCulled: cfg.MoveCulled, Seq: cfg.Seq, Labels: cfg.Labels}
 	var rankErr error
 	var run rankRun

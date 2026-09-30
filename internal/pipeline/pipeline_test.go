@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jefflaplante/cull/internal/dng"
 	"github.com/jefflaplante/cull/internal/eval"
@@ -589,4 +590,41 @@ func (b *billedFailBackend) Call(ctx context.Context, req llm.Request) (*llm.Res
 		return &llm.Response{Usage: llm.Usage{InputTokens: 100}}, errors.New("model output does not match schema")
 	}
 	return (&fakeBackend{status: "sharp"}).Call(ctx, req)
+}
+
+func TestResumeAfterFolderRenameRejudgesNothing(t *testing.T) {
+	parent := t.TempDir()
+	old := filepath.Join(parent, "shoot")
+	os.Mkdir(old, 0o755)
+	minimalDNG(t, filepath.Join(old, "L1000001.DNG"))
+	if _, _, err := Run(context.Background(), cfg(old), &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatal(err)
+	}
+	renamed := filepath.Join(parent, "2026-10-04 shoot")
+	if err := os.Rename(old, renamed); err != nil {
+		t.Fatal(err)
+	}
+	c := cfg(renamed)
+	c.Resume = true
+	rep, usage, err := Run(context.Background(), c, &fakeBackend{status: "missed_focus"})
+	if err != nil || usage.InputTokens != 0 || len(rep.Results) != 1 || !strings.HasPrefix(rep.Results[0].File, renamed) {
+		t.Fatalf("err=%v usage=%+v results=%+v", err, usage, rep.Results)
+	}
+}
+
+// A file changed since it was judged is judged again, and replaces its old result.
+func TestResumeReplacesResultOfChangedFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "L1000001.DNG")
+	minimalDNG(t, p)
+	if _, _, err := Run(context.Background(), cfg(dir), &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatal(err)
+	}
+	os.Chtimes(p, time.Now(), time.Now().Add(time.Hour))
+	c := cfg(dir)
+	c.Resume = true
+	rep, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
+	if err != nil || len(rep.Results) != 1 {
+		t.Fatalf("err=%v results=%d", err, len(rep.Results))
+	}
 }

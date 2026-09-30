@@ -46,11 +46,12 @@ func moveCulled(rep *report.Report, lab map[string]labels.Entry, log io.Writer) 
 	return n
 }
 
-// Restore moves every frame recorded as moved back to its original path, with
+// Restore moves every frame recorded as moved back to its original path (under
+// dir, when the report was written for a folder since renamed), with
 // its sidecar, clears the record, saves the report, and removes culled folders
 // left empty. It never overwrites: a frame whose original path is taken again
 // stays in the culled folder and is reported.
-func Restore(reportPath string, log io.Writer) (int, error) {
+func Restore(reportPath, dir string, log io.Writer) (int, error) {
 	rep, err := report.Load(reportPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -58,6 +59,7 @@ func Restore(reportPath string, log io.Writer) (int, error) {
 		}
 		return 0, err
 	}
+	rep.Rebase(dir) // a renamed shoot folder: its culled/ moved with it
 	n := 0
 	dirs := map[string]bool{}
 	for i := range rep.Results {

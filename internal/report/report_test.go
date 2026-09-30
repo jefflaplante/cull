@@ -94,3 +94,24 @@ func TestLoadRefusesNewerSchema(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestRebaseMovesEveryPathUnderTheOldDir(t *testing.T) {
+	r := &Report{Dir: "/old", Results: []Result{{File: "/old/a/L1.DNG", MovedTo: "/old/a/culled/L1.DNG", XMP: "/old/a/culled/L1.xmp"}, {File: "/elsewhere/L2.DNG"}},
+		Sets: []Set{{Members: []string{"/old/a/L1.DNG"}, Order: []string{"/old/a/L1.DNG"}, Notes: []RankNote{{File: "/old/a/L1.DNG"}}}}}
+	if !r.Rebase("/new") {
+		t.Fatal("no change reported")
+	}
+	x := r.Results[0]
+	if r.Dir != "/new" || x.File != "/new/a/L1.DNG" || x.MovedTo != "/new/a/culled/L1.DNG" || x.XMP != "/new/a/culled/L1.xmp" ||
+		r.Results[1].File != "/elsewhere/L2.DNG" || r.Sets[0].Members[0] != "/new/a/L1.DNG" || r.Sets[0].Order[0] != "/new/a/L1.DNG" || r.Sets[0].Notes[0].File != "/new/a/L1.DNG" {
+		t.Fatalf("%+v %+v", r.Results, r.Sets)
+	}
+	if r.Rebase("/new") {
+		t.Fatal("rebasing to the same dir changed something")
+	}
+	sib := &Report{Dir: "/old/shoot", Results: []Result{{File: "/old/shoot2/L1.DNG"}}}
+	sib.Rebase("/new")
+	if sib.Results[0].File != "/old/shoot2/L1.DNG" {
+		t.Fatalf("a sibling folder sharing the prefix was rebased: %s", sib.Results[0].File)
+	}
+}

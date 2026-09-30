@@ -458,7 +458,7 @@ func TestMovedForeignSidecarStaysForeign(t *testing.T) {
 	if got, _ := os.ReadFile(moved); string(got) != "foreign" {
 		t.Fatalf("decide overwrote a foreign sidecar that travelled with its frame: %q", got)
 	}
-	if _, err := Restore(c.ReportPath, io.Discard); err != nil {
+	if _, err := Restore(c.ReportPath, "", io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Decide(context.Background(), c.ReportPath, opts, io.Discard); err != nil {
@@ -544,5 +544,25 @@ func TestDecideRecordsSequenceSettings(t *testing.T) {
 	decideAll(rep, c.Policy, group.Options{Gap: 90 * time.Second, MaxLook: 0.12})
 	if rep.Seq == nil || rep.Seq.GapSeconds != 90 || rep.Seq.Look != 0.12 {
 		t.Fatalf("seq %+v", rep.Seq)
+	}
+}
+
+func TestDecideAfterFolderRenameWritesInNewFolder(t *testing.T) {
+	parent := t.TempDir()
+	old := filepath.Join(parent, "shoot")
+	os.Mkdir(old, 0o755)
+	minimalDNG(t, filepath.Join(old, "L1000001.DNG"))
+	c := cfg(old)
+	c.WriteXMP = false
+	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatal(err)
+	}
+	renamed := filepath.Join(parent, "renamed")
+	os.Rename(old, renamed)
+	if _, err := Decide(context.Background(), filepath.Join(renamed, "r.json"), DecideOptions{Dir: renamed, WriteXMP: true, Policy: eval.Policy{MinCropArea: 0.6}}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(renamed, "L1000001.xmp")); err != nil {
+		t.Fatalf("sidecar not in the renamed folder: %v", err)
 	}
 }

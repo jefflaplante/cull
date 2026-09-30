@@ -18,6 +18,7 @@ import (
 
 // DecideOptions re-apply a policy to a report's stored assessments.
 type DecideOptions struct {
+	Dir          string // the shoot folder: a report written for another path (the folder was renamed) is rebased onto it
 	Policy       eval.Policy
 	WriteXMP     bool
 	XMPDevelop   bool
@@ -46,6 +47,9 @@ func Decide(ctx context.Context, reportPath string, o DecideOptions, log io.Writ
 	rep, err := report.Load(reportPath)
 	if err != nil {
 		return DecideSummary{Changed: map[string]int{}}, err
+	}
+	if rep.Rebase(o.Dir) {
+		fmt.Fprintf(log, "the report's frames moved to %s (the folder was renamed): using their new paths\n", o.Dir)
 	}
 	n, err := fillLooks(ctx, rep, log)
 	if n > 0 {

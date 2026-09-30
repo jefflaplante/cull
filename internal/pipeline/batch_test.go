@@ -314,3 +314,27 @@ func TestBatchRound2PrepareFailureKeepsLocateCost(t *testing.T) {
 		t.Fatalf("error=%q usage=%+v cost=%v", r.Error, r.Usage, r.CostUSD)
 	}
 }
+
+// The report was saved, but the judge state wasn't removed (a crash between the
+// two): the resume must not add the frames a second time.
+func TestBatchResumeAfterFinishCrashAddsNothingTwice(t *testing.T) {
+	_, c := batchShoot(t)
+	fb := &fakeBatch{locate: map[string]string{locatePrompt: `{"confident":true,"kind":"eye","subject":"eye","box":{"left":0.4,"top":0.3,"right":0.45,"bottom":0.35}}`}}
+	c.Rank = false
+	rep, _, err := RunBatch(context.Background(), c, fb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &batchState{Version: batchStateVersion, Backend: c.Backend, Model: c.Model, Frames: map[string]*batchFrame{}}
+	for _, r := range rep.Results { // what the state held when the crash hit
+		st.Frames[frameID(r.File)] = &batchFrame{Result: r, Stage: "done"}
+	}
+	if err := saveState(batchStatePath(c), st); err != nil {
+		t.Fatal(err)
+	}
+	c.Resume = true
+	rep2, _, err := RunBatch(context.Background(), c, fb)
+	if err != nil || len(rep2.Results) != 3 || rep2.Cost() != rep.Cost() {
+		t.Fatalf("err=%v results=%d cost %v→%v", err, len(rep2.Results), rep.Cost(), rep2.Cost())
+	}
+}

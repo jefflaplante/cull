@@ -183,9 +183,18 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	// A crash after the report save below but before the state's removal leaves
+	// both: the frames are then already in rep (resumed by startRun).
+	have := make(map[string]bool, len(rep.Results))
+	for _, r := range rep.Results {
+		have[r.Key()] = true
+	}
 	budget := &spend{} // the run's --max-cost covers the ranking too
 	for _, id := range ids {
 		f := st.Frames[id]
+		if have[f.Result.Key()] {
+			continue
+		}
 		if f.Stage != "done" && f.Stage != "error" {
 			f.Result.Error = "batch: incomplete (stage " + f.Stage + ")"
 		}
@@ -204,7 +213,9 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 	if err := rep.Save(cfg.ReportPath); err != nil {
 		return rep, total, err
 	}
-	os.Remove(statePath)
+	if err := os.Remove(statePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(cfg.Log, "warning: couldn't remove %s (%v); a later --resume skips the frames it holds\n", statePath, err)
+	}
 	if cfg.Rank && !cfg.DryRun {
 		cfg.rankWith = batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg), rerun: rerunJudgeBatch}
 	}

@@ -38,3 +38,14 @@ func TestEstimateRank(t *testing.T) {
 		t.Fatalf("batch rank estimate should be half: %v vs %v", usd2, usd)
 	}
 }
+
+func TestCurrentModelsArePriced(t *testing.T) {
+	for _, m := range []string{"claude-sonnet-5-5", "claude-sonnet-5", "claude-opus-5-5", "claude-haiku-4-5", "claude-haiku-4-5-20251001", "claude-fable-5-1"} {
+		if _, ok := PriceFor("anthropic", m); !ok {
+			t.Errorf("%s unpriced", m)
+		}
+	}
+	if p, _ := PriceFor("anthropic", "claude-sonnet-5-5"); p != (Price{2, 10}) {
+		t.Errorf("sonnet 5.5 = %+v", p)
+	}
+}

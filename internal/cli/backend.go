@@ -26,7 +26,7 @@ type backendFlags struct {
 
 func (o *backendFlags) register(f *pflag.FlagSet) {
 	f.StringVar(&o.backend, "backend", "anthropic", "model backend: anthropic, claude-code, or openai")
-	f.StringVarP(&o.model, "model", "m", "", "model (default claude-sonnet-5 for anthropic, sonnet for claude-code; required for openai)")
+	f.StringVarP(&o.model, "model", "m", "", "model (default claude-sonnet-5-5 for anthropic, sonnet for claude-code; required for openai)")
 	f.StringVar(&o.apiKeyFile, "api-key-file", "", "file containing the Anthropic API key")
 	f.StringVar(&o.baseURL, "base-url", "http://127.0.0.1:8000/v1", "OpenAI-compatible endpoint (openai backend)")
 	f.StringVar(&o.openaiKeyFile, "openai-key-file", "", "file containing a key for the openai backend (optional)")
@@ -106,9 +106,26 @@ type backendDefault struct {
 }
 
 var backendDefaults = map[string]backendDefault{
-	"anthropic":   {"claude-sonnet-5", 4, "API-billed"},
+	"anthropic":   {"claude-sonnet-5-5", 4, "API-billed"},
 	"claude-code": {"sonnet", 2, "subscription, not billed per token"},
 	"openai":      {"", 4, "OpenAI-compatible server"},
+}
+
+// checkPriced makes --max-cost fail closed: on the anthropic backend a model
+// missing from the price table would be counted at $0, so the limit would never
+// trip. Without --max-cost it only warns that costs won't be recorded.
+func checkPriced(cmd *cobra.Command, backend, model string, maxCost float64) error {
+	if backend != "anthropic" {
+		return nil
+	}
+	if _, ok := llm.PriceFor(backend, model); ok {
+		return nil
+	}
+	if maxCost > 0 {
+		return fmt.Errorf("model %q has no price in cull's table, so --max-cost can't be enforced: drop --max-cost, or use a priced model", model)
+	}
+	warn(cmd, []string{fmt.Sprintf("model %q has no price in cull's table: its cost is recorded as $0", model)})
+	return nil
 }
 
 func warn(cmd *cobra.Command, warnings []string) {

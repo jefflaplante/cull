@@ -125,6 +125,9 @@ Backends (--backend):
 			if o.model == "" {
 				o.model = backendDefaults[o.backend].model
 			}
+			if err := checkPriced(cmd, o.backend, o.model, o.maxCost); err != nil {
+				return err
+			}
 			price, priced := llm.PriceFor(o.backend, o.model)
 			if o.estimate || priced {
 				files, err := pipeline.Discover(cfg.Dir, cfg.Recursive)

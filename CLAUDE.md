@@ -148,6 +148,9 @@ make vet
   with `output_config.format` json_schema. 7.4k input / 1.2k output tokens (~$0.03),
   26 s. Locate boxed the eyes of a tilted face pigo missed; verdict matched the
   subscription run (acceptable 5.5, keep). Output stayed far under the 8192 cap.
+- **Default model is now `claude-sonnet-5-5`** (2026-09-30; same price as `claude-sonnet-5`).
+  Every live anthropic run above used `claude-sonnet-5`: treat 5.5 as a new model for
+  calibration. `--resume` on a 5.0 report needs `--model claude-sonnet-5`.
 
 ### Model access via a Claude subscription (checked 2026-09-26)
 

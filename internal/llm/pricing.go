@@ -6,18 +6,20 @@ import "errors"
 type Price struct{ In, Out float64 }
 
 // anthropicPrices are first-party list prices (claude-api skill, cached
-// 2026-06-24). Batches are billed at half. Update when prices change.
+// 2026-09-25). Batches are billed at half. Update when prices change.
 var anthropicPrices = map[string]Price{
-	"claude-fable-5-1":  {10, 50},
-	"claude-fable-5":    {10, 50},
-	"claude-opus-5-5":   {4, 20},
-	"claude-opus-5":     {5, 25},
-	"claude-opus-4-8":   {5, 25},
-	"claude-opus-4-7":   {5, 25},
-	"claude-opus-4-6":   {5, 25},
-	"claude-sonnet-5":   {2, 10},
-	"claude-sonnet-4-6": {3, 15},
-	"claude-haiku-4-5":  {1, 5},
+	"claude-fable-5-1":          {10, 50},
+	"claude-fable-5":            {10, 50},
+	"claude-opus-5-5":           {4, 20},
+	"claude-opus-5":             {5, 25},
+	"claude-opus-4-8":           {5, 25},
+	"claude-opus-4-7":           {5, 25},
+	"claude-opus-4-6":           {5, 25},
+	"claude-sonnet-5-5":         {2, 10},
+	"claude-sonnet-5":           {2, 10},
+	"claude-sonnet-4-6":         {3, 15},
+	"claude-haiku-4-5":          {1, 5},
+	"claude-haiku-4-5-20251001": {1, 5},
 }
 
 // PriceFor returns the per-token price when calls are billed per token: only the

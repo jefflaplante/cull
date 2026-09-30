@@ -881,7 +881,7 @@ func TestRankBatchWarnsAfterOverrideForClaudeCodeReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err=%v\n%s", err, out)
 	}
-	want := "warning: report was judged with claude-code/sonnet; ranking with anthropic/claude-sonnet-5"
+	want := "warning: report was judged with claude-code/sonnet; ranking with anthropic/claude-sonnet-5-5"
 	if !strings.Contains(out, want) {
 		t.Fatalf("no mismatch warning after the --batch override:\n%s", out)
 	}
@@ -902,10 +902,10 @@ func TestRankApplyBackendModelSetsCfgBackendAndModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Backend != "anthropic" || cfg.Model != "claude-sonnet-5" {
+	if cfg.Backend != "anthropic" || cfg.Model != "claude-sonnet-5-5" {
 		t.Fatalf("cfg not set to what rank actually uses: %+v", cfg)
 	}
-	want := "report was judged with claude-code/sonnet; ranking with anthropic/claude-sonnet-5"
+	want := "report was judged with claude-code/sonnet; ranking with anthropic/claude-sonnet-5-5"
 	if warning != want {
 		t.Fatalf("warning=%q, want %q", warning, want)
 	}
@@ -1097,5 +1097,28 @@ func TestScanRefusesJudgedReportUnlessFresh(t *testing.T) {
 	}
 	if out, err := run(t, "scan", "--fresh", dir); err != nil {
 		t.Fatalf("scan --fresh: %v\n%s", err, out)
+	}
+}
+
+func TestJudgeRefusesMaxCostForUnpricedModel(t *testing.T) {
+	dir := t.TempDir() // no DNGs or key needed: the refusal comes first
+	_, err := run(t, "judge", "--model", "claude-unknown-9", "--max-cost", "5", dir)
+	if err == nil || !strings.Contains(err.Error(), "no price") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRankRefusesMaxCostForUnpricedModel(t *testing.T) {
+	dir := t.TempDir()
+	rankReportFixture(t, dir, "anthropic", "claude-unknown-9", 2)
+	_, err := run(t, "rank", "--max-cost", "5", dir)
+	if err == nil || !strings.Contains(err.Error(), "no price") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestJudgeDefaultsToCurrentSonnet(t *testing.T) {
+	if got := backendDefaults["anthropic"].model; got != "claude-sonnet-5-5" {
+		t.Fatalf("default %q", got)
 	}
 }

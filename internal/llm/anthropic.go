@@ -16,7 +16,7 @@ import (
 const (
 	anthropicEndpoint = "https://api.anthropic.com/v1/messages"
 	anthropicVersion  = "2023-06-01"
-	// Sonnet 5 runs adaptive thinking by default; thinking shares max_tokens with
+	// Sonnet 5 and 5.5 run adaptive thinking by default; thinking shares max_tokens with
 	// the answer, so the floor is well above the answer's own size. Unused
 	// headroom costs nothing, while hitting the cap wastes the whole call.
 	anthropicMinTokens = 8192

@@ -123,7 +123,7 @@ func u8(f []float32) []uint8 {
 func TestLandedPicksLowContrastSharpOverHighContrastBlur(t *testing.T) {
 	luma, w, h, sharpPatch, oofPatch := scene(t)
 	// Premise: raw Laplacian variance (the old tile picker) prefers the blurred patch.
-	if fs, _ := fineCoarse(luma, w, sharpPatch); !(fineOf(luma, w, oofPatch) > fs) {
+	if fs, _, _ := fineCoarse(luma, w, sharpPatch); !(fineOf(luma, w, oofPatch) > fs) {
 		t.Fatalf("scene no longer reproduces the failure: raw variance sharp=%.1f oof=%.1f", fs, fineOf(luma, w, oofPatch))
 	}
 	cells, _ := Landed(luma, w, h, image.Rectangle{}, 2)
@@ -163,7 +163,7 @@ func TestLandedExcludesSubjectAndHandlesEdgeCases(t *testing.T) {
 }
 
 func fineOf(luma []uint8, w int, r image.Rectangle) float64 {
-	f, _ := fineCoarse(luma, w, r)
+	f, _, _ := fineCoarse(luma, w, r)
 	return f
 }
 
@@ -191,8 +191,8 @@ func TestLandedIgnoresNoisyBokeh(t *testing.T) {
 	luma, w, h, sharpPatch := bokehScene(t)
 	bokeh := image.Rect(0, 0, CellSize, CellSize)
 	// Premise: the ratio alone prefers the bokeh, and it clears a noise floor.
-	fb, cb := fineCoarse(luma, w, bokeh)
-	fs, cs := fineCoarse(luma, w, image.Rect(sharpPatch.Min.X, sharpPatch.Min.Y, sharpPatch.Min.X+CellSize, sharpPatch.Min.Y+CellSize))
+	fb, cb, _ := fineCoarse(luma, w, bokeh)
+	fs, cs, _ := fineCoarse(luma, w, image.Rect(sharpPatch.Min.X, sharpPatch.Min.Y, sharpPatch.Min.X+CellSize, sharpPatch.Min.Y+CellSize))
 	if !(fb/cb > fs/cs) || !(cb >= fb/4) {
 		t.Fatalf("scene no longer reproduces the failure: bokeh fine=%.1f coarse=%.1f, sharp fine=%.1f coarse=%.1f", fb, cb, fs, cs)
 	}
@@ -218,8 +218,35 @@ func TestRatioSubtractsNoise(t *testing.T) {
 	g := u8(gf)
 	r := image.Rect(0, 0, w, h)
 	raw := Ratio(g, w, r, 0)
-	fine, _ := fineCoarse(g, w, r)
+	fine, _, _ := fineCoarse(g, w, r)
 	if corrected := Ratio(g, w, r, fine); !(raw > 1) || corrected != 0 {
 		t.Fatalf("pure noise: raw ratio %.2f (want > 1), noise-corrected %.3f (want 0)", raw, corrected)
+	}
+}
+
+// Half the frame blown to white (flat, clipped): the noise estimate must come
+// from the half that has noise, not collapse to 0.
+func TestLandedNoiseIgnoresClippedCells(t *testing.T) {
+	w, h := CellSize*8, CellSize*4
+	luma := make([]uint8, w*h)
+	rng := rand.New(rand.NewSource(1))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if x < w/2 {
+				luma[y*w+x] = 255
+			} else {
+				luma[y*w+x] = uint8(128 + rng.Intn(9) - 4)
+			}
+		}
+	}
+	_, noise := Landed(luma, w, h, image.Rectangle{}, 0)
+	all := make([]uint8, w*h) // the same noise over the whole frame
+	rng = rand.New(rand.NewSource(1))
+	for i := range all {
+		all[i] = uint8(128 + rng.Intn(9) - 4)
+	}
+	_, want := Landed(all, w, h, image.Rectangle{}, 0)
+	if noise < want/2 {
+		t.Fatalf("noise %v on a half-clipped frame, %v without clipping", noise, want)
 	}
 }

@@ -24,7 +24,7 @@ type Cell struct {
 // contrast. Subtracting noise matters on real previews, where sensor noise would
 // otherwise make smooth bokeh look "detailed".
 func Ratio(luma []uint8, stride int, r image.Rectangle, noise float64) float64 {
-	fine, coarse := fineCoarse(luma, stride, r)
+	fine, coarse, _ := fineCoarse(luma, stride, r)
 	return ratio(fine, coarse, noise)
 }
 
@@ -34,7 +34,8 @@ func ratio(fine, coarse, noise float64) float64 {
 
 // Landed returns up to k cells with the highest Ratio among cells that have real
 // structure, skipping cells that overlap exclude (the subject crop), and the
-// frame's noise estimate (fine-scale variance of its flattest tenth of cells) so
+// frame's noise estimate (fine-scale variance of its flattest tenth of cells,
+// among those neither clipped nor flat) so
 // callers can score other regions on the same scale.
 //
 // Eligibility is the most structured quarter of the frame by coarse detail, and
@@ -47,23 +48,33 @@ func Landed(luma []uint8, w, h int, exclude image.Rectangle, k int) ([]Cell, flo
 		fine, coarse float64
 	}
 	var cells []cell
-	var fines []float64
+	var fines, measurable []float64
 	for y := 0; y+CellSize <= h; y += CellSize {
 		for x := 0; x+CellSize <= w; x += CellSize {
 			r := image.Rect(x, y, x+CellSize, y+CellSize)
-			f, c := fineCoarse(luma, w, r)
+			f, c, m := fineCoarse(luma, w, r)
 			cells = append(cells, cell{r, f, c})
 			fines = append(fines, f)
+			// Clipped highlights, crushed shadows and JPEG-flattened sky have no
+			// noise left to measure: counting them would pull the estimate to 0.
+			if f > 0 && m >= 16 && m <= 239 {
+				measurable = append(measurable, f)
+			}
 		}
 	}
 	if len(cells) == 0 {
 		return nil, 0
 	}
 	sort.Float64s(fines)
-	// Noise = fine variance of the flattest tenth of cells. On grids of ten cells
-	// or fewer that is the flattest cell itself, whose own ratio is then 0; real
-	// 60MP frames have ~400 cells, so this only shows on tiny previews and tests.
-	noise := fines[len(fines)/10]
+	if len(measurable) == 0 {
+		measurable = fines
+	}
+	sort.Float64s(measurable)
+	// Noise = fine variance of the flattest tenth of the cells where noise is
+	// measurable. On grids of ten cells or fewer that is the flattest such cell,
+	// whose own ratio is then 0; real 60MP frames have ~400 cells, so this only
+	// shows on tiny previews and tests.
+	noise := measurable[len(measurable)/10]
 	if k <= 0 {
 		return nil, noise
 	}
@@ -89,10 +100,11 @@ func Landed(luma []uint8, w, h int, exclude image.Rectangle, k int) ([]Cell, flo
 	return out, noise
 }
 
-func fineCoarse(luma []uint8, stride int, r image.Rectangle) (fine, coarse float64) {
+func fineCoarse(luma []uint8, stride int, r image.Rectangle) (fine, coarse, mean float64) {
 	fine = lapVar8(luma, stride, r.Min.X, r.Min.Y, r.Dx(), r.Dy())
 	cw, ch := r.Dx()/4, r.Dy()/4
 	down := make([]float32, cw*ch)
+	total := 0
 	for y := 0; y < ch; y++ {
 		for x := 0; x < cw; x++ {
 			s := 0
@@ -101,10 +113,14 @@ func fineCoarse(luma []uint8, stride int, r image.Rectangle) (fine, coarse float
 				s += int(row[0]) + int(row[1]) + int(row[2]) + int(row[3])
 			}
 			down[y*cw+x] = float32(s) / 16
+			total += s
 		}
 	}
 	coarse = lapVar(down, cw, 0, 0, cw, ch)
-	return fine, coarse
+	if cw*ch > 0 {
+		mean = float64(total) / float64(cw*ch*16)
+	}
+	return fine, coarse, mean
 }
 
 // lapVar8 is lapVar over 8-bit luma.

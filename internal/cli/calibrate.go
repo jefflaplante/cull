@@ -2,11 +2,15 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jefflaplante/cull/internal/calib"
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/pipeline"
 	"github.com/jefflaplante/cull/internal/report"
 )
 
@@ -50,15 +54,23 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 				if err != nil {
 					return err
 				}
-				// Each report's sweep starts from the policy its decisions came from.
+				if dups := labels.Duplicates(rep.Results); len(dups) > 0 {
+					return fmt.Errorf("%s: frames share a file name, so your labels can't tell them apart (rename them): %s", path, strings.Join(dups, "; "))
+				}
+				// Each report's sweep starts from the policy and grouping its decisions came from.
 				p, notes, err := pol.resolve(cmd.Flags(), rep.Policy)
 				if err != nil {
 					return fmt.Errorf("%s: %w", path, err)
 				}
-				noteStoredPolicy(cmd.ErrOrStderr(), notes)
+				seq, seqNotes := resolveSeq(cmd.Flags(), flagSeq(cmd), rep.Seq)
+				if err := validSeq(seq); err != nil {
+					return fmt.Errorf("%s: the report's stored grouping: %w", path, err)
+				}
+				noteStoredPolicy(cmd.ErrOrStderr(), append(notes, seqNotes...))
+				redecide := func(p eval.Policy) *report.Report { return pipeline.DecideCopy(rep, p, seq) }
 				calib.Format(w, path, rep, calib.Compare(rep, verdicts))
-				calib.FormatSweep(w, calib.Sweep(rep, verdicts, p, []float64{0, 3, 4, 5, 6, 7, 8}))
-				calib.FormatSets(w, calib.Sets(rep, verdicts, rep.KeepBest), calib.SweepKeepBest(rep, verdicts, []int{1, 2, 3, 4, 5}))
+				calib.FormatSweep(w, calib.Sweep(rep, verdicts, p, []float64{0, 3, 4, 5, 6, 7, 8}, redecide))
+				calib.FormatSets(w, calib.Sets(rep, verdicts, p.KeepBest), calib.SweepKeepBest(rep, verdicts, []int{1, 2, 3, 4, 5}))
 				fmt.Fprintln(w)
 			}
 			return nil
@@ -67,4 +79,12 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 	cmd.Flags().StringVar(&labelsPath, "labels", "", "labels log (default: cull-labels.jsonl beside the first report)")
 	pol.register(cmd.Flags())
 	return cmd
+}
+
+// flagSeq is the grouping the --seq-gap / --seq-look flags hold (typed or default);
+// calibrate takes a report path, not a shoot folder, so it doesn't build a Config.
+func flagSeq(cmd *cobra.Command) group.Options {
+	gap, _ := cmd.Flags().GetDuration("seq-gap")
+	look, _ := cmd.Flags().GetFloat64("seq-look")
+	return group.Options{Gap: gap, MaxLook: look}
 }

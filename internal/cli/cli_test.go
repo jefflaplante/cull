@@ -1175,3 +1175,16 @@ func TestDecideNamesStoredSequenceSettings(t *testing.T) {
 		t.Fatalf("stored grouping lost: %+v", rep.Seq)
 	}
 }
+
+func TestCalibrateRefusesDuplicateNamesWithLabels(t *testing.T) {
+	dir := t.TempDir()
+	rep := &report.Report{SchemaVersion: report.SchemaVersion, Backend: "anthropic", Model: "m", Results: []report.Result{
+		{File: filepath.Join(dir, "a", "L1.DNG"), Evaluation: &eval.Evaluation{}, Decision: eval.Keep},
+		{File: filepath.Join(dir, "b", "L1.DNG"), Evaluation: &eval.Evaluation{}, Decision: eval.Cull}}}
+	rp := filepath.Join(dir, "cull-report.json")
+	rep.Save(rp)
+	labels.Append(filepath.Join(dir, labels.FileName), labels.Entry{File: "L1.DNG", Label: "keep"})
+	if _, err := run(t, "calibrate", rp); err == nil || !strings.Contains(err.Error(), "share a file name") {
+		t.Fatalf("got %v", err)
+	}
+}

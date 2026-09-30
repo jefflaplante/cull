@@ -92,17 +92,25 @@ type SweepRow struct {
 }
 
 // Sweep re-decides every labeled frame from its stored assessment with
-// ReviewBelowSharpness set to each threshold (bursts are not re-grouped).
-func Sweep(rep *report.Report, labels map[string]string, base eval.Policy, thresholds []float64) []SweepRow {
+// ReviewBelowSharpness set to each threshold. decide, when set, returns the
+// whole report decided with a policy (the pipeline's decide: sets regrouped,
+// outranked frames demoted), so the sweep matches what decide would do and the
+// confusion matrix above it; nil re-decides each frame alone (no set demotion).
+func Sweep(rep *report.Report, labels map[string]string, base eval.Policy, thresholds []float64, decide func(eval.Policy) *report.Report) []SweepRow {
 	var rows []SweepRow
 	for _, t := range thresholds {
 		p := base
 		p.ReviewBelowSharpness = t
-		m := compare(rep, labels, func(r report.Result) string {
-			e := *r.Evaluation
-			d, _ := p.DecideFacts(&e, r.Facts())
-			return string(d)
-		})
+		var m Matrix
+		if decide != nil {
+			m = Compare(decide(p), labels)
+		} else {
+			m = compare(rep, labels, func(r report.Result) string {
+				e := *r.Evaluation
+				d, _ := p.DecideFacts(&e, r.Facts())
+				return string(d)
+			})
+		}
 		rows = append(rows, SweepRow{Threshold: t, Matrix: m})
 	}
 	return rows

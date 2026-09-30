@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 
+	"github.com/jefflaplante/cull/internal/eval"
+	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/report"
 )
 
@@ -83,4 +85,13 @@ func cloneForRankCalls(rep *report.Report) *report.Report {
 	cp.Results = append([]report.Result(nil), rep.Results...)
 	cp.Sets = append([]report.Set(nil), rep.Sets...)
 	return &cp
+}
+
+// DecideCopy returns rep decided with p and seq, sets and all, leaving rep's own
+// decisions and sets untouched: calibrate's sweep compares against exactly what
+// decide would do.
+func DecideCopy(rep *report.Report, p eval.Policy, seq group.Options) *report.Report {
+	cp := cloneForRankCalls(rep)
+	decideAll(cp, p, seq)
+	return cp
 }

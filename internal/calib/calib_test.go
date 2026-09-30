@@ -45,7 +45,7 @@ func TestCompareRatesAndMissing(t *testing.T) {
 
 func TestSweepReviewBelowSharpness(t *testing.T) {
 	labels := map[string]string{"A.DNG": "keep", "B.DNG": "keep", "C.DNG": "cull", "D.DNG": "review"}
-	rows := Sweep(testReport(), labels, eval.Policy{}, []float64{0, 5.5, 9.5})
+	rows := Sweep(testReport(), labels, eval.Policy{}, []float64{0, 5.5, 9.5}, nil)
 	if len(rows) != 3 {
 		t.Fatalf("rows %d", len(rows))
 	}
@@ -87,5 +87,27 @@ func TestSetsRankOnlyKeepBest0(t *testing.T) {
 	s := Sets(rep, labels, rep.KeepBest)
 	if s.Kept != 2 || s.KeptRankedOut != 1 {
 		t.Fatalf("%+v", s)
+	}
+}
+
+// With a decide function (the pipeline's, sets and all), the sweep reports what
+// it decided, not the per-frame policy alone.
+func TestSweepUsesTheDecideFunction(t *testing.T) {
+	rep := testReport()
+	var seen []float64
+	demoteAll := func(p eval.Policy) *report.Report {
+		seen = append(seen, p.ReviewBelowSharpness)
+		cp := *rep
+		cp.Results = append([]report.Result(nil), rep.Results...)
+		for i := range cp.Results {
+			if cp.Results[i].Evaluation != nil {
+				cp.Results[i].Decision = eval.Review
+			}
+		}
+		return &cp
+	}
+	rows := Sweep(rep, map[string]string{"A.DNG": "keep"}, eval.Policy{}, []float64{0, 7}, demoteAll)
+	if rows[0].Matrix.Counts["keep"]["review"] != 1 || len(seen) != 2 || seen[1] != 7 {
+		t.Fatalf("counts %+v thresholds seen %v", rows[0].Matrix.Counts, seen)
 	}
 }

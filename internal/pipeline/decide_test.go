@@ -566,3 +566,23 @@ func TestDecideAfterFolderRenameWritesInNewFolder(t *testing.T) {
 		t.Fatalf("sidecar not in the renamed folder: %v", err)
 	}
 }
+
+func TestDecideCopyLeavesTheReportAlone(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	decideAll(rep, c.Policy, c.Seq)
+	before := make([]eval.Decision, len(rep.Results))
+	for i, r := range rep.Results {
+		before[i] = r.Decision
+	}
+	strict := c.Policy
+	strict.ReviewBelowSharpness = 10 // every frame to review
+	cp := DecideCopy(rep, strict, c.Seq)
+	for i, r := range rep.Results {
+		if r.Decision != before[i] {
+			t.Fatalf("original changed: %s %s→%s", r.File, before[i], r.Decision)
+		}
+		if cp.Results[i].Decision != eval.Review {
+			t.Fatalf("copy not decided: %s %s", cp.Results[i].File, cp.Results[i].Decision)
+		}
+	}
+}

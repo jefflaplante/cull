@@ -530,13 +530,18 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 			writeDecidedSidecar(r, o)
 		}
 	}
+	rep.Generated = time.Now()
 	if cfg.MoveCulled && !cfg.DryRun {
+		// Save first: every result is on disk before any frame moves, so a crash
+		// mid-move leaves nothing reconcileMove can't find again.
+		if err := rep.Save(cfg.ReportPath); err != nil {
+			return used, err // the ranking's state stays: a re-run reuses what was paid for
+		}
 		// After a quota stop or Ctrl-C too: those decisions are final.
 		if n := moveCulled(rep, lab, cfg.Log); n > 0 {
 			fmt.Fprintf(cfg.Log, "moved %d culled frame(s) into %s/ (undo: cull restore %s)\n", n, CulledDir, cfg.Dir)
 		}
 	}
-	rep.Generated = time.Now()
 	if err := rep.Save(cfg.ReportPath); err != nil {
 		return used, err // the ranking's state stays: a re-run reuses what was paid for
 	}

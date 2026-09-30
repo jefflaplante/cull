@@ -101,6 +101,9 @@ func redecide(rep *report.Report, o DecideOptions, log io.Writer, between func()
 		}
 	}
 	rep.SchemaVersion = report.SchemaVersion
+	for i := range rep.Results {
+		reconcileMove(&rep.Results[i]) // files moved or restored by a run whose report was never saved
+	}
 
 	if o.MoveCulled { // restore first, so sidecars are then written where frames live
 		for i := range rep.Results {

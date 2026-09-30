@@ -3,7 +3,9 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,8 +53,6 @@ func moveCfg(dir string) Config {
 	c.detect = func(*imageprep.Frame) []focus.Face { return nil }
 	return c
 }
-
-func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 func result(t *testing.T, rep *report.Report, name string) report.Result {
 	t.Helper()
@@ -226,5 +226,111 @@ func TestFreshRefusedWhileFramesAreMoved(t *testing.T) {
 	_, _, err := Run(context.Background(), c, b)
 	if err == nil || !strings.Contains(err.Error(), "cull restore") {
 		t.Fatalf("want a refusal naming cull restore, got %v", err)
+	}
+}
+
+// A move whose report save never happened: the frame is in culled/, the report
+// says it isn't. restore must still bring it back.
+func TestRestoreAdoptsUnrecordedMove(t *testing.T) {
+	dir, b := shoot(t)
+	c := moveCfg(dir)
+	c.MoveCulled = false
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatal(err)
+	}
+	culled := filepath.Join(dir, "culled")
+	os.MkdirAll(culled, 0o755)
+	for _, n := range []string{"L1000001.DNG", "L1000001.xmp"} { // the move, without the save
+		if err := os.Rename(filepath.Join(dir, n), filepath.Join(culled, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := Restore(filepath.Join(dir, "r.json"), io.Discard)
+	if err != nil || n != 1 {
+		t.Fatalf("restored %d, err %v", n, err)
+	}
+	if !exists(filepath.Join(dir, "L1000001.DNG")) || !exists(filepath.Join(dir, "L1000001.xmp")) {
+		t.Fatal("frame or sidecar not restored")
+	}
+}
+
+func TestMoveCulledAdoptsUnrecordedMove(t *testing.T) {
+	dir, b := shoot(t)
+	c := moveCfg(dir)
+	c.MoveCulled = false
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatal(err)
+	}
+	culled := filepath.Join(dir, "culled")
+	os.MkdirAll(culled, 0o755)
+	os.Rename(filepath.Join(dir, "L1000001.DNG"), filepath.Join(culled, "L1000001.DNG"))
+	sum, err := Decide(context.Background(), filepath.Join(dir, "r.json"), DecideOptions{MoveCulled: true, Policy: eval.Policy{MinCropArea: 0.6}}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := report.Load(filepath.Join(dir, "r.json"))
+	r := result(t, rep, "L1000001.DNG")
+	if r.MovedTo != filepath.Join(culled, "L1000001.DNG") || len(r.Fixups) != 0 || sum.Moved != 0 {
+		t.Fatalf("moved_to=%q fixups=%v moved=%d", r.MovedTo, r.Fixups, sum.Moved)
+	}
+}
+
+// A restore whose report save never happened: the frame is back, the report
+// still says culled/. The next restore must not fail on it.
+func TestRestoreForgetsAlreadyRestoredMove(t *testing.T) {
+	dir, b := shoot(t)
+	if _, _, err := Run(context.Background(), moveCfg(dir), b); err != nil {
+		t.Fatal(err)
+	}
+	culled := filepath.Join(dir, "culled")
+	os.Rename(filepath.Join(culled, "L1000001.DNG"), filepath.Join(dir, "L1000001.DNG"))
+	os.Rename(filepath.Join(culled, "L1000001.xmp"), filepath.Join(dir, "L1000001.xmp"))
+	var log bytes.Buffer
+	if _, err := Restore(filepath.Join(dir, "r.json"), &log); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := report.Load(filepath.Join(dir, "r.json"))
+	if r := result(t, rep, "L1000001.DNG"); r.MovedTo != "" || r.XMP != filepath.Join(dir, "L1000001.xmp") || strings.Contains(log.String(), "not restored") {
+		t.Fatalf("moved_to=%q xmp=%q log=%s", r.MovedTo, r.XMP, log.String())
+	}
+}
+
+func TestRenameNoReplaceRefusesExistingDestination(t *testing.T) {
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	os.WriteFile(src, []byte("src"), 0o644)
+	os.WriteFile(dst, []byte("dst"), 0o644)
+	if err := renameNoReplace(src, dst); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("want ErrExist, got %v", err)
+	}
+	if got, _ := os.ReadFile(dst); string(got) != "dst" || !exists(src) {
+		t.Fatal("destination replaced or source lost")
+	}
+	os.Remove(dst)
+	if err := renameNoReplace(src, dst); err != nil || exists(src) || !exists(dst) {
+		t.Fatalf("plain move: err=%v", err)
+	}
+}
+
+func TestMoveFixupRecordedOnce(t *testing.T) {
+	dir, b := shoot(t)
+	culled := filepath.Join(dir, "culled")
+	os.MkdirAll(culled, 0o755)
+	os.WriteFile(filepath.Join(culled, "L1000001.DNG"), []byte("already here"), 0o644)
+	if _, _, err := Run(context.Background(), moveCfg(dir), b); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		Decide(context.Background(), filepath.Join(dir, "r.json"), DecideOptions{MoveCulled: true, Policy: eval.Policy{MinCropArea: 0.6}}, io.Discard)
+	}
+	rep, _ := report.Load(filepath.Join(dir, "r.json"))
+	n := 0
+	for _, f := range result(t, rep, "L1000001.DNG").Fixups {
+		if strings.HasPrefix(f, "move:") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d move fixups, want 1", n)
 	}
 }

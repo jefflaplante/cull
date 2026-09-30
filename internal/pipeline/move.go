@@ -28,13 +28,14 @@ func moveCulled(rep *report.Report, lab map[string]labels.Entry, log io.Writer) 
 	n := 0
 	for i := range rep.Results {
 		r := &rep.Results[i]
+		reconcileMove(r)
 		if d, _ := labels.Effective(*r, lab[filepath.Base(r.File)]); d != eval.Cull || r.Error != "" || r.MovedTo != "" {
 			continue
 		}
 		dst := filepath.Join(filepath.Dir(r.File), CulledDir, filepath.Base(r.File))
 		sidecar, err := relocate(r.File, dst)
 		if err != nil {
-			r.Fixups = append(r.Fixups, "move: "+err.Error())
+			addFixup(r, "move: "+err.Error())
 			fmt.Fprintf(log, "not moved %s: %v\n", filepath.Base(r.File), err)
 			continue
 		}
@@ -61,10 +62,18 @@ func Restore(reportPath string, log io.Writer) (int, error) {
 	dirs := map[string]bool{}
 	for i := range rep.Results {
 		r := &rep.Results[i]
+		if r.MovedTo != "" {
+			dirs[filepath.Dir(r.MovedTo)] = true
+		}
+		if wasMoved := r.MovedTo != ""; reconcileMove(r) {
+			if wasMoved { // restored before, but that report was never saved
+				continue
+			}
+			dirs[filepath.Dir(r.MovedTo)] = true // moved before, never recorded: restore it now
+		}
 		if r.MovedTo == "" {
 			continue
 		}
-		dirs[filepath.Dir(r.MovedTo)] = true
 		sidecar, err := relocate(r.MovedTo, r.File)
 		if err != nil {
 			fmt.Fprintf(log, "not restored %s: %v\n", filepath.Base(r.File), err)
@@ -79,6 +88,53 @@ func Restore(reportPath string, log io.Writer) (int, error) {
 	}
 	return n, rep.Save(reportPath)
 }
+
+// renameNoReplace moves src to dst and fails with fs.ErrExist if dst exists,
+// atomically where the filesystem has hard links: link(2) refuses an existing
+// name, while rename(2) silently replaces one. Filesystems without hard links
+// (exFAT cards) fall back to check-then-rename. Across disks both fail: this
+// never copies.
+func renameNoReplace(src, dst string) error {
+	err := os.Link(src, dst)
+	switch {
+	case err == nil:
+		return os.Remove(src)
+	case errors.Is(err, fs.ErrExist):
+		return fmt.Errorf("%s already exists, not moved: %w", dst, fs.ErrExist)
+	}
+	if _, serr := os.Lstat(dst); serr == nil {
+		return fmt.Errorf("%s already exists, not moved: %w", dst, fs.ErrExist)
+	}
+	return os.Rename(src, dst)
+}
+
+// reconcileMove repairs a result whose files moved without the report being
+// saved (a crash or a failed save between the renames and the save). A frame's
+// place in culled/ is fixed (CulledDir beside it), so where exactly one of the
+// two paths exists, that is where it is. Returns whether r changed.
+func reconcileMove(r *report.Result) bool {
+	if r.Error != "" {
+		return false
+	}
+	from, to := r.File, filepath.Join(filepath.Dir(r.File), CulledDir, filepath.Base(r.File)) // unrecorded move
+	if r.MovedTo != "" {
+		from, to = r.MovedTo, r.File // unrecorded restore
+	}
+	if exists(from) || !exists(to) {
+		return false
+	}
+	if r.XMP == xmp.Path(from) && !exists(xmp.Path(from)) && exists(xmp.Path(to)) {
+		r.XMP = xmp.Path(to)
+	}
+	if r.MovedTo == "" {
+		r.MovedTo = to
+	} else {
+		r.MovedTo = ""
+	}
+	return true
+}
+
+func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
 
 // relocate renames src to dst and, if src has an .xmp sidecar, that too. Both
 // destinations are checked first so the pair moves together or not at all, and
@@ -102,13 +158,13 @@ func relocate(src, dst string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", err
 	}
-	if err := os.Rename(src, dst); err != nil {
+	if err := renameNoReplace(src, dst); err != nil {
 		return "", err
 	}
 	if !hasXMP {
 		return "", nil
 	}
-	if err := os.Rename(srcXMP, dstXMP); err != nil {
+	if err := renameNoReplace(srcXMP, dstXMP); err != nil {
 		if rerr := os.Rename(dst, src); rerr != nil {
 			return "", fmt.Errorf("sidecar: %v; and could not move the frame back: %v", err, rerr)
 		}

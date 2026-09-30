@@ -43,7 +43,7 @@ func TestScriptColorsAndKeywordsWithoutLabels(t *testing.T) {
 			t.Errorf("%s: want color tag %s:\n%s", name, tag, b)
 		}
 	}
-	for _, want := range []string{`matchImages(doc, "L\"3\\.DNG", "L\"3\\")`, `"cull:cull"`, `"cull:keep"`} {
+	for _, want := range []string{`matchImages(doc, "/s/L\"3\\.DNG", "L\"3\\.DNG", "L\"3\\")`, `"cull:cull"`, `"cull:keep"`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("script lacks %s", want)
 		}
@@ -122,5 +122,43 @@ func TestRunPipesToOsascript(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "got.applescript")); !strings.Contains(string(b), "Capture One") {
 		t.Fatalf("osascript got %q", b)
+	}
+}
+
+func TestScriptNameCannotEscapeComment(t *testing.T) {
+	rep := &report.Report{Results: []report.Result{{File: "/s/x\ndo shell script \"say pwned\"\n\r¬.DNG", Decision: eval.Keep}}}
+	s := Script(rep, Options{Label: true})
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "do shell script") {
+			t.Fatalf("file name escaped into code: %q", line)
+		}
+	}
+	if strings.ContainsAny(s, "\r") {
+		t.Fatal("raw CR in script")
+	}
+}
+
+func TestScriptMatchesByPathAndListsAmbiguousNames(t *testing.T) {
+	rep := &report.Report{Results: []report.Result{
+		{File: "/s/L1.DNG", Decision: eval.Keep},
+		{File: "/s/L2.DNG", Decision: eval.Cull, MovedTo: "/s/culled/L2.DNG"},
+	}}
+	s := Script(rep, Options{Label: true})
+	if !strings.Contains(s, `matchImages(doc, "/s/L1.DNG", "L1.DNG", "L1")`) {
+		t.Errorf("L1 not matched by its path:\n%s", block(s, "L1.DNG"))
+	}
+	if !strings.Contains(s, `matchImages(doc, "/s/culled/L2.DNG", "L2.DNG", "L2")`) {
+		t.Errorf("moved L2 not matched where it lives now:\n%s", block(s, "L2.DNG"))
+	}
+	for _, want := range []string{"whose path is posixPath", "(count of found) is 1", "ambiguous"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("helpers lack %q", want)
+		}
+	}
+}
+
+func TestQuoteEscapesControlCharacters(t *testing.T) {
+	if got := quote("a\"b\\c\nd\re\tf"); got != `"a\"b\\c\nd\re\tf"` {
+		t.Fatalf("got %s", got)
 	}
 }

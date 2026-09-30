@@ -7,7 +7,9 @@
 // Verified against Capture One 16.7.2's CaptureOne.sdef: variant has rw
 // "rating", "color tag" (integer), "adjustments" (with "exposure"), "crop"
 // ({centerX, centerY, width, height}); image has "name", "path", "dimensions";
-// "apply keyword <existing keyword> to {variants}". NOT in the dictionary, and
+// "apply keyword <existing keyword> to {variants}". Images are matched by path
+// (where the frame lives now), and by name only when exactly one image has it,
+// since file numbers repeat across shoots. NOT in the dictionary, and
 // so hedged or checked with Probe first: the color-tag numbering, whether image
 // names include the extension, and the orientation "dimensions"/"crop" use.
 package c1
@@ -20,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/labels"
@@ -58,8 +61,12 @@ func Script(rep *report.Report, o Options) string {
 		if yours {
 			who = "yours"
 		}
-		fmt.Fprintf(&b, "\n\t-- %s: %s (%s)\n", name, d, who)
-		fmt.Fprintf(&b, "\tset imgs to my matchImages(doc, %s, %s)\n", quote(name), quote(stem))
+		where := r.File // where the frame lives now: Capture One imported it from there
+		if r.MovedTo != "" {
+			where = r.MovedTo
+		}
+		fmt.Fprintf(&b, "\n\t-- %s: %s (%s)\n", comment(name), d, who)
+		fmt.Fprintf(&b, "\tset imgs to my matchImages(doc, %s, %s, %s)\n", quote(where), quote(name), quote(stem))
 		fmt.Fprintf(&b, "\tif (count of imgs) is 0 then set end of notFound to %s\n", quote(name))
 		b.WriteString("\trepeat with img in imgs\n")
 		e := r.Evaluation
@@ -97,17 +104,28 @@ func Script(rep *report.Report, o Options) string {
 		}
 		b.WriteString("\t\tend repeat\n\tend repeat\n")
 	}
+	b.WriteString("\n\tif (count of my ambiguous) > 0 then return \"not applied: several images share these names and none is at the report's path (ambiguous): \" & my joinList(my ambiguous) & \"; not found: \" & my joinList(notFound)\n")
 	b.WriteString("\n\tif (count of notFound) is 0 then return \"done\"\n")
 	b.WriteString("\treturn \"done; not found in this document: \" & my joinList(notFound)\nend tell\n")
 	return b.String()
 }
 
 const helpers = `
-on matchImages(doc, fileName, stem)
+property ambiguous : {}
+
+on matchImages(doc, posixPath, fileName, stem)
 	tell application "Capture One"
+		try
+			set found to (every image of doc whose path is posixPath)
+			if (count of found) > 0 then return found
+		end try
+		-- By name only when exactly one image has it: file numbers repeat across
+		-- shoots and bodies, and a verdict must never land on another shoot's frame.
 		set found to (every image of doc whose name is fileName)
 		if (count of found) is 0 then set found to (every image of doc whose name is stem)
-		return found
+		if (count of found) is 1 then return found
+		if (count of found) > 1 then set end of my ambiguous to fileName
+		return {}
 	end tell
 end matchImages
 
@@ -170,7 +188,19 @@ func Run(osascript, script string) (string, error) {
 
 // quote makes an AppleScript string literal.
 func quote(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`).Replace(s) + `"`
+}
+
+// comment makes s safe inside an AppleScript "--" comment: any line break would
+// end the comment and run the rest as code, and ¬ would continue it onto the
+// next line. File names can contain both.
+func comment(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '¬' || r == '\u2028' || r == '\u2029' {
+			return '?'
+		}
+		return r
+	}, s)
 }
 
 func num(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }

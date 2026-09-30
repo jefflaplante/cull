@@ -55,7 +55,7 @@ cull judge --backend claude-code ~/Pictures/2026-10-04   # subscription quota
   - `--max-cost 5` stops at $5.
   - `--no-rank` skips ranking, so you can run `cull rank` later.
   - `--keep-best 1` keeps only each set's single best frame.
-  - `--quota-stop 0.9` (claude-code) stops before the 5-hour window runs out.
+  - `--quota-stop 0.9` (claude-code) stops before the 5-hour or 7-day window runs out.
 - **Interrupted (Ctrl-C, budget, quota):** rerun with `--resume`. With `--batch`, the
   rerun reconnects to batches you've already paid for.
 - **Re-running without `--resume`** is refused once the report holds assessments, so a

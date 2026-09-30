@@ -62,7 +62,7 @@ Backends (--backend):
                ~/.anthropic/api_key, ~/.config/anthropic/api_key, ~/.anthropic_api_key,
                ~/.anthropic. Billed per token.
   claude-code  runs 'claude -p' on your Claude subscription (never an API key).
-               Stops cleanly at --quota-stop of the 5-hour window; resume later.
+               Stops cleanly at --quota-stop of the 5-hour or 7-day window; resume later.
   openai       any OpenAI-compatible server at --base-url (default: a local server on 127.0.0.1:8000).
                --model is required; key optional (--openai-key-file, $OPENAI_API_KEY).`,
 		Example: `  cull judge ~/Pictures/2026-09-26

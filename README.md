@@ -262,7 +262,7 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
 | `--backend` | Default model | Auth and billing |
 |---|---|---|
 | `anthropic` (default) | `claude-sonnet-5-5` | API key, billed per token. Looked up in `--api-key-file`, `$ANTHROPIC_API_KEY`, `~/.anthropic/api_key`, `~/.config/anthropic/api_key`, `~/.anthropic_api_key` |
-| `claude-code` | `sonnet` | Your Claude subscription, via `claude -p`. Never uses an API key. Stops at `--quota-stop` (default 0.9 of the 5-hour window); continue later with `--resume` |
+| `claude-code` | `sonnet` | Your Claude subscription, via `claude -p`. Never uses an API key. Stops at `--quota-stop` (default 0.9 of the 5-hour or 7-day window); continue later with `--resume` |
 | `openai` | required (`--model`) | Any OpenAI-compatible server at `--base-url` (default `http://127.0.0.1:8000/v1`); key optional. Streams, and stops as soon as the JSON is complete |
 
 - A model missing from `cull`'s price table is refused with `--max-cost` (it would count as $0), and warned about otherwise.

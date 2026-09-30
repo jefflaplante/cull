@@ -32,7 +32,7 @@ func (o *backendFlags) register(f *pflag.FlagSet) {
 	f.StringVar(&o.openaiKeyFile, "openai-key-file", "", "file containing a key for the openai backend (optional)")
 	f.BoolVar(&o.openaiStream, "openai-stream", true, "stream and hang up once the JSON closes (openai backend)")
 	f.StringVar(&o.claudeBin, "claude-bin", "claude", "Claude Code executable (claude-code backend)")
-	f.Float64Var(&o.quotaStop, "quota-stop", 0.9, "stop when this fraction of the 5-hour subscription window is used (claude-code backend)")
+	f.Float64Var(&o.quotaStop, "quota-stop", 0.9, "stop when this fraction of the 5-hour or 7-day subscription window is used (claude-code backend)")
 }
 
 // validate checks the flags common to every backend. Callers with extra

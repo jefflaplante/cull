@@ -162,3 +162,25 @@ func TestClaudeCodeAllowedWarningIsNotAStop(t *testing.T) {
 		t.Fatalf("allowed_warning below the threshold must not stop the run: %v", err)
 	}
 }
+
+// A call claude rejects for quota is an error result: it must still stop the run
+// (with the resume hint), not fail every remaining frame one by one.
+func TestClaudeCodeQuotaOnErrorResultStops(t *testing.T) {
+	errResult := `{"type":"result","subtype":"error","is_error":true,"result":"usage limit reached","usage":{"input_tokens":0,"output_tokens":0}}`
+	bin, _ := setupFake(t, initEvent("none"), rateEvent("rejected", 1), errResult)
+	_, err := NewClaudeCode(bin, "sonnet", 0.9).Call(context.Background(), tinyRequest())
+	if !errors.Is(err, ErrQuotaStop) {
+		t.Fatalf("want ErrQuotaStop, got %v", err)
+	}
+}
+
+func TestClaudeCodeSevenDayWindowStops(t *testing.T) {
+	week, _ := json.Marshal(map[string]any{"type": "rate_limit_event", "rate_limit_info": map[string]any{
+		"status": "allowed", "unifiedWindows": map[string]any{
+			"five_hour": map[string]any{"utilization": 0.1}, "seven_day": map[string]any{"utilization": 0.95}}}})
+	bin, _ := setupFake(t, initEvent("none"), string(week), okResult)
+	resp, err := NewClaudeCode(bin, "sonnet", 0.9).Call(context.Background(), tinyRequest())
+	if !errors.Is(err, ErrQuotaStop) || resp == nil || !strings.Contains(err.Error(), "7-day") {
+		t.Fatalf("want ErrQuotaStop naming the 7-day window with the answer kept, got resp=%v err=%v", resp, err)
+	}
+}

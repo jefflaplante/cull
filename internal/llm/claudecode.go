@@ -101,6 +101,11 @@ func (c *ClaudeCode) run(ctx context.Context, args []string, stdin []byte) (*Res
 	werr := cmd.Wait()
 	switch {
 	case perr != nil:
+		if resp != nil {
+			if qerr := c.quotaErr(resp.Quota); qerr != nil { // a call rejected for quota stops the run, not just this frame
+				return resp, fmt.Errorf("%w (%v)", qerr, perr)
+			}
+		}
 		return resp, perr
 	case resp == nil && werr != nil:
 		return nil, fmt.Errorf("claude exited: %v: %s", werr, truncate(stderr.Bytes(), 300))
@@ -133,8 +138,11 @@ func (c *ClaudeCode) quotaErr(q *Quota) error {
 	}
 	// Any "allowed…" status (e.g. allowed_warning near the limit) still allows the
 	// call; --quota-stop is what decides when to stop.
-	if (q.Status != "" && !strings.HasPrefix(q.Status, "allowed")) || (c.QuotaStop > 0 && q.FiveHour >= c.QuotaStop) {
-		return fmt.Errorf("%w: status %s, 5-hour window %.0f%% used (stop at %.0f%%)", ErrQuotaStop, q.Status, 100*q.FiveHour, 100*c.QuotaStop)
+	// Either window running out ends the run: the weekly one lasts days.
+	over := c.QuotaStop > 0 && (q.FiveHour >= c.QuotaStop || q.SevenDay >= c.QuotaStop)
+	if (q.Status != "" && !strings.HasPrefix(q.Status, "allowed")) || over {
+		return fmt.Errorf("%w: status %s, 5-hour window %.0f%%, 7-day %.0f%% used (stop at %.0f%%)",
+			ErrQuotaStop, q.Status, 100*q.FiveHour, 100*q.SevenDay, 100*c.QuotaStop)
 	}
 	return nil
 }

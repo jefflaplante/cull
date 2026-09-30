@@ -14,6 +14,8 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,17 +40,67 @@ func Path(imagePath string) string {
 	return strings.TrimSuffix(imagePath, filepath.Ext(imagePath)) + ".xmp"
 }
 
-// Write renders and atomically writes the sidecar. Existing sidecars (possibly
-// holding someone's real edits) are never clobbered unless overwrite is set.
+// marker is the toolkit attribute Render writes: a sidecar still carrying it was
+// written by cull and not rewritten since (Capture One or Adobe would replace it).
+const marker = `x:xmptk="cull"`
+
+// Ours reports whether the sidecar at path was written by cull, so a sidecar whose
+// ownership record was lost (a crash before the report's checkpoint) is still
+// recognised, while one another tool has rewritten is not.
+func Ours(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	b := make([]byte, 4096) // the marker is in the packet's first lines
+	n, _ := io.ReadFull(f, b)
+	return bytes.Contains(b[:n], []byte(marker))
+}
+
+// Write renders and writes the sidecar atomically: a unique temp file beside it,
+// synced, then linked into place (link(2) fails if the name exists, so an existing
+// sidecar, possibly holding someone's real edits, is never replaced unless
+// overwrite, even by a concurrent writer) or renamed over it when overwriting.
+// Filesystems without hard links fall back to check-then-rename. The temp file
+// never outlives the call.
 func Write(path string, s Sidecar, overwrite bool) error {
 	if !overwrite {
-		if _, err := os.Stat(path); err == nil {
+		if _, err := os.Lstat(path); err == nil {
 			return ErrExists
 		}
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, Render(s), 0o644); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp) // after a link this drops the spare name; after a rename, nothing is left to remove
+	if _, err := f.Write(Render(s)); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0o644); err != nil { // CreateTemp makes 0600
+		return err
+	}
+	if overwrite {
+		return os.Rename(tmp, path)
+	}
+	switch err := os.Link(tmp, path); {
+	case err == nil:
+		return nil
+	case errors.Is(err, fs.ErrExist):
+		return ErrExists
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return ErrExists
 	}
 	return os.Rename(tmp, path)
 }

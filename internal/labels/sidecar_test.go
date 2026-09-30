@@ -95,3 +95,29 @@ func TestDuplicates(t *testing.T) {
 		t.Fatalf("%v", d)
 	}
 }
+
+// A crash between the sidecar write and the report's checkpoint leaves r.XMP
+// empty; the sidecar is still ours and must be rewritable.
+func TestWriteSidecarRewritesOwnUnrecordedSidecar(t *testing.T) {
+	dir := t.TempDir()
+	r := report.Result{File: filepath.Join(dir, "L1.DNG"), Decision: eval.Keep, Evaluation: &eval.Evaluation{}}
+	if err := WriteSidecar(&r, Entry{}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	r.XMP, r.Decision = "", eval.Cull
+	if err := WriteSidecar(&r, Entry{}, false, false); err != nil {
+		t.Fatalf("own sidecar treated as foreign: %v", err)
+	}
+	if b, _ := os.ReadFile(r.XMP); !strings.Contains(string(b), "cull:cull") {
+		t.Fatal("not rewritten")
+	}
+}
+
+func TestWriteSidecarLeavesForeignSidecar(t *testing.T) {
+	dir := t.TempDir()
+	r := report.Result{File: filepath.Join(dir, "L1.DNG"), Decision: eval.Keep, Evaluation: &eval.Evaluation{}}
+	os.WriteFile(filepath.Join(dir, "L1.xmp"), []byte(`<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Capture One"/>`), 0o644)
+	if err := WriteSidecar(&r, Entry{}, false, false); !errors.Is(err, xmp.ErrExists) {
+		t.Fatalf("want ErrExists, got %v", err)
+	}
+}

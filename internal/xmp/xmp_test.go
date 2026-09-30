@@ -2,6 +2,7 @@ package xmp
 
 import (
 	"encoding/xml"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,5 +62,42 @@ func TestFromDisplayRoundTrip(t *testing.T) {
 	}
 	if FromDisplay(0.1, 0.2, 0.3, 0.4, 1) != (Box{0.1, 0.2, 0.3, 0.4}) {
 		t.Fatal("identity failed")
+	}
+}
+
+func TestWriteLeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "L1.xmp")
+	if err := Write(p, Sidecar{Label: "Green"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(p, Sidecar{Label: "Red"}, false); !errors.Is(err, ErrExists) {
+		t.Fatalf("want ErrExists, got %v", err)
+	}
+	os.Mkdir(filepath.Join(dir, "L2.xmp"), 0o755) // a destination that can't be replaced
+	if err := Write(filepath.Join(dir, "L2.xmp"), Sidecar{}, true); err == nil {
+		t.Fatal("want an error writing over a directory")
+	}
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if strings.Contains(e.Name(), ".tmp") {
+			t.Fatalf("temp file left: %s", e.Name())
+		}
+	}
+	if b, _ := os.ReadFile(p); !strings.Contains(string(b), "Green") {
+		t.Fatal("existing sidecar replaced")
+	}
+	if st, _ := os.Stat(p); st.Mode().Perm() != 0o644 {
+		t.Fatalf("mode %v", st.Mode().Perm())
+	}
+}
+
+func TestOursRecognisesOnlyCullSidecars(t *testing.T) {
+	dir := t.TempDir()
+	mine, theirs := filepath.Join(dir, "a.xmp"), filepath.Join(dir, "b.xmp")
+	Write(mine, Sidecar{Label: "Green"}, false)
+	os.WriteFile(theirs, []byte(`<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Capture One"/>`), 0o644)
+	if !Ours(mine) || Ours(theirs) || Ours(filepath.Join(dir, "none.xmp")) {
+		t.Fatalf("mine=%v theirs=%v", Ours(mine), Ours(theirs))
 	}
 }

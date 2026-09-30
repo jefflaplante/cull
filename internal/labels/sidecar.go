@@ -53,7 +53,8 @@ func Sidecar(r report.Result, l Entry, orientation int, develop bool) xmp.Sideca
 }
 
 // WriteSidecar writes the frame's sidecar where the frame now lives (its culled/
-// path if moved). A sidecar the report records as ours is rewritten; any other
+// path if moved). A sidecar the report records as ours, or that still carries
+// cull's marker (xmp.Ours: its record was lost in a crash), is rewritten; any other
 // existing one is left alone (xmp.ErrExists) unless overwrite. On success the path
 // is recorded in r.XMP.
 func WriteSidecar(r *report.Result, l Entry, develop, overwrite bool) error {
@@ -66,7 +67,7 @@ func WriteSidecar(r *report.Result, l Entry, develop, overwrite bool) error {
 	if r.Preview != nil {
 		orientation = r.Preview.Orientation
 	}
-	if err := xmp.Write(p, Sidecar(*r, l, orientation, develop), r.XMP == p || overwrite); err != nil {
+	if err := xmp.Write(p, Sidecar(*r, l, orientation, develop), r.XMP == p || overwrite || xmp.Ours(p)); err != nil {
 		return err
 	}
 	r.XMP = p

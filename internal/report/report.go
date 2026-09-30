@@ -200,6 +200,10 @@ func Load(path string) (*Report, error) {
 	if err := json.Unmarshal(b, &r); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	if r.SchemaVersion > SchemaVersion {
+		// Saving it back would silently drop whatever the newer version added.
+		return nil, fmt.Errorf("%s is schema v%d, newer than this cull (v%d): upgrade cull", path, r.SchemaVersion, SchemaVersion)
+	}
 	if r.SchemaVersion < SchemaVersion {
 		// Groups from before sequence ranking (schema < 4) carried only a size and a
 		// stale "best" file name (see Group.UnmarshalJSON): no current rank. decide and

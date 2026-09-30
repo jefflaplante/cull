@@ -2,8 +2,10 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jefflaplante/cull/internal/eval"
@@ -82,5 +84,13 @@ func TestGroupUnmarshalAcceptsLegacyStringBest(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(`{"id": 1, "best": 3}`), &g); err == nil {
 		t.Fatal("best that is neither a bool nor a string must still fail")
+	}
+}
+
+func TestLoadRefusesNewerSchema(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "r.json")
+	os.WriteFile(p, []byte(fmt.Sprintf(`{"schema_version":%d,"results":[]}`, SchemaVersion+1)), 0o644)
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "newer") {
+		t.Fatalf("got %v", err)
 	}
 }

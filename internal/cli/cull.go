@@ -25,6 +25,7 @@ type cullOpts struct {
 	overwriteXMP bool
 	moveCulled   bool
 	noLabels     bool
+	labelsPath   string
 	rawClip      bool
 	batch        bool
 	batchPoll    time.Duration
@@ -176,7 +177,7 @@ Backends (--backend):
 			cfg.OverwriteXMP = o.overwriteXMP
 			cfg.MoveCulled = o.moveCulled
 			if o.moveCulled || o.writeXMP {
-				if cfg.Labels, err = userLabels(cmd.ErrOrStderr(), cfg.ReportPath, "", o.noLabels); err != nil {
+				if cfg.Labels, err = userLabels(cmd.ErrOrStderr(), cfg.ReportPath, o.labelsPath, o.noLabels); err != nil {
 					return err
 				}
 			}
@@ -238,6 +239,7 @@ Backends (--backend):
 	f.BoolVar(&o.writeXMP, "write-xmp", false, "write XMP sidecars (rating, label, keyword)")
 	f.BoolVar(&o.xmpDevelop, "xmp-develop", false, "also write Adobe crs exposure/crop (not applied by Capture One)")
 	f.BoolVar(&o.overwriteXMP, "overwrite-xmp", false, "overwrite existing sidecars (default: never clobber)")
+	f.StringVar(&o.labelsPath, "labels", "", "your labels log (default: cull-labels.jsonl beside the report, when it exists)")
 	f.BoolVar(&o.noLabels, "no-labels", false, "ignore your labels (cull-labels.jsonl beside the report): moves and sidecar rewrites follow the model's verdicts")
 	f.BoolVar(&o.moveCulled, "move-culled", false, "move frames decided cull (with their .xmp) into a culled/ folder beside them; undo with 'cull restore'. Use before importing into Capture One")
 	f.BoolVar(&o.second, "second-opinion", false, "ask the model again about soft-or-worse frames (one more evaluation each, typically a minority of frames); when the two disagree, review")

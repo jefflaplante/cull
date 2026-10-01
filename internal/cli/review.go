@@ -26,6 +26,7 @@ func newReviewCmd(so *sharedOpts) *cobra.Command {
 		jobs, port               int
 		force, static            bool
 		noOpen, noXMP, overwrite bool
+		labelsPath               string
 	)
 	cmd := &cobra.Command{
 		Use:   "review <dir>",
@@ -35,8 +36,8 @@ crop the model judged, the decision and its reasons), serves it on 127.0.0.1 and
 opens it in your browser. Label frames keep/review/cull (K/R/C, U clears) and rate
 them 1-5 stars (0 clears). Every change is saved at once to cull-labels.jsonl
 beside the report, and the frame's .xmp sidecar is rewritten (your stars, verdict
-colour and keyword), which Capture One reads on import; sidecars not written by cull
-write are never touched. Ctrl-C stops the server.
+colour and keyword), which Capture One reads on import; sidecars cull didn't write
+are never touched. Ctrl-C stops the server.
 
 --no-xmp saves only the labels log; --no-open doesn't launch the browser; --static
 writes an offline index.html instead of serving (labels then stay in the browser;
@@ -83,7 +84,7 @@ Works on scan reports too (labeling only).`,
 				return nil
 			}
 			return serveSheet(cmd, sheet, rep, review.ServeOptions{
-				ReportPath: cfg.ReportPath, LabelsPath: labels.DefaultPath(cfg.ReportPath),
+				ReportPath: cfg.ReportPath, LabelsPath: labelsOr(labelsPath, cfg.ReportPath),
 				WriteXMP: !noXMP, OverwriteXMP: overwrite,
 			}, port, fl.Changed("port"), !noOpen)
 		},
@@ -96,6 +97,7 @@ Works on scan reports too (labeling only).`,
 	f.BoolVar(&noOpen, "no-open", false, "don't open the browser; open the printed URL yourself")
 	f.BoolVar(&noXMP, "no-xmp", false, "don't write sidecars; save only the labels log")
 	f.BoolVar(&overwrite, "overwrite-xmp", false, "also overwrite sidecars not written by cull")
+	f.StringVar(&labelsPath, "labels", "", "the labels log to save to (default: cull-labels.jsonl beside the report)")
 	f.IntVar(&port, "port", 0, "port (default: fixed per report, so a restarted server keeps the page's origin and its queued changes; 0 = any free port)")
 	return cmd
 }
@@ -161,4 +163,12 @@ func defaultPort(reportPath string) int {
 	h := fnv.New32a()
 	h.Write([]byte(reportPath))
 	return 49152 + int(h.Sum32()%16384)
+}
+
+// labelsOr is path, or the default log beside the report.
+func labelsOr(path, reportPath string) string {
+	if path != "" {
+		return path
+	}
+	return labels.DefaultPath(reportPath)
 }

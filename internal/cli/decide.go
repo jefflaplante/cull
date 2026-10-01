@@ -35,6 +35,9 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
   cull decide --write-xmp --move-culled ~/Pictures/2026-09-26`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if overwrite && !writeXMP {
+				return fmt.Errorf("--overwrite-xmp requires --write-xmp")
+			}
 			cfg, err := so.base(args[0])
 			if err != nil {
 				return err

@@ -21,7 +21,7 @@ func newApplyC1Cmd(so *sharedOpts) *cobra.Command {
 		noLabels   bool
 	)
 	cmd := &cobra.Command{
-		Use:   "apply-c1 <dir>",
+		Use:   "apply-c1 [--probe | <dir>]",
 		Short: "Generate (and optionally run) AppleScript that applies the report in Capture One",
 		Long: `apply-c1 writes an AppleScript for the open Capture One document: a color tag
 (keep green, review yellow, cull red) and a cull:<verdict> keyword per frame,
@@ -37,8 +37,11 @@ things before anything is written.`,
 		Example: `  cull apply-c1 --probe ~/Pictures/2026-09-26 | osascript -
   cull apply-c1 ~/Pictures/2026-09-26 > apply.applescript   # review it
   cull apply-c1 --run ~/Pictures/2026-09-26`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.RangeArgs(0, 1), // --probe reads the open Capture One document, not a folder
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !probe && len(args) != 1 {
+				return fmt.Errorf("apply-c1 needs the shoot folder (only --probe works without one)")
+			}
 			var script string
 			if probe {
 				script = c1.Probe(5)

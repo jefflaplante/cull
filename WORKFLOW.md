@@ -85,7 +85,8 @@ an offline page instead of serving).
   Outranked**.
 - **Detail view:** shows the model's reasons. For a frame in a set, it also shows
   the frame's rank, why it won or lost, and a filmstrip of the set.
-- **Badges:** the model's verdict is outlined, top right; yours sits bottom right.
+- **Badges:** your label is the outlined badge, top right; the model's verdict is in
+  the card's bottom row.
 - **Your labels always win** over the model's for sidecars, moves and Capture One.
 
 ## 5. Check the tool against your labels, and tune it (free)

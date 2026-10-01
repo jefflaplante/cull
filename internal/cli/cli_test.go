@@ -249,6 +249,7 @@ func TestPolicyFlagValidation(t *testing.T) {
 		"cull-max-sharpness >10":    {"decide", "--cull-max-sharpness", "11", dir},
 		"second opinion with batch": {"judge", "--second-opinion", "--batch", dir},
 		"unknown effort":            {"judge", "--effort", "turbo", dir},
+		"decide overwrite alone":    {"decide", "--overwrite-xmp", dir},
 		"bad escalate backend":      {"judge", "--escalate-backend", "gpt", "--escalate-model", "x", dir},
 		"escalate needs model":      {"judge", "--escalate-backend", "anthropic", dir},
 		"bad escalate-on":           {"judge", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", "--escalate-on", "blurry", dir},
@@ -1283,5 +1284,29 @@ func TestRankRefusesADifferentEffort(t *testing.T) {
 func TestMaxEdgeDefault(t *testing.T) {
 	if f := NewRootCmd().PersistentFlags().Lookup("max-edge"); f == nil || f.DefValue != "1024" {
 		t.Fatalf("max-edge flag: %+v", f)
+	}
+}
+
+func TestLabelsFlagOnJudgeAndReview(t *testing.T) {
+	for _, c := range NewRootCmd().Commands() {
+		if (c.Name() == "judge" || c.Name() == "review") && c.Flags().Lookup("labels") == nil {
+			t.Errorf("%s has no --labels", c.Name())
+		}
+	}
+}
+
+func TestApplyC1ProbeNeedsNoDir(t *testing.T) {
+	out, err := run(t, "apply-c1", "--probe")
+	if err != nil || !strings.Contains(out, "tell application") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	if _, err := run(t, "apply-c1"); err == nil {
+		t.Fatal("apply-c1 without --probe needs a folder")
+	}
+}
+
+func TestDecideOverwriteNeedsWriteXMP(t *testing.T) {
+	if _, err := run(t, "decide", "--overwrite-xmp", t.TempDir()); err == nil || !strings.Contains(err.Error(), "--write-xmp") {
+		t.Fatalf("got %v", err)
 	}
 }

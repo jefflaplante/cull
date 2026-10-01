@@ -229,7 +229,7 @@ per-session token, then opens your browser.
 | ← → | previous / next frame |
 | ↑ ↓ | one grid row (one frame in the detail view) |
 | Enter / Esc | open the detail view / back to the grid |
-| K / R / C | label keep / review / cull, and advance |
+| K / R / C | label keep / review / cull (in the detail view, then advance) |
 | U | clear the label |
 | 1–5 / 0 | set stars / clear them |
 
@@ -241,7 +241,8 @@ per-session token, then opens your browser.
 For example, *Keep + Unrated* shows the keepers you haven't starred yet.
 
 **On each card and in the detail view:**
-- The model's verdict is outlined, top right; your label sits bottom right.
+- Your label is the outlined badge, top right; the model's verdict is in the card's
+  bottom row.
 - A frame in a set shows "set N · #rank/of", with a *best* marker on the best frames.
 - The detail view shows the model's reasons, the frame's rank with its strengths and
   weaknesses, and a filmstrip of its set.

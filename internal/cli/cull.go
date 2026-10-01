@@ -285,7 +285,7 @@ func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price
 		return
 	}
 	usd, in, out := llm.Estimate(n, p, batch)
-	fmt.Fprintf(w, "estimate: %d frames × ~7k in / ~1k out tokens ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", n, in, out, usd, rate(batch), model)
+	fmt.Fprintf(w, "estimate: %d frames × ~6k in / ~1k out tokens ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", n, in, out, usd, rate(batch), model)
 	if rank && n > 0 {
 		calls := (n + 7) / 8
 		if twice { // each 8-frame set is also ranked reversed

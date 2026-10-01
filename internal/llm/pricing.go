@@ -51,9 +51,10 @@ func (p Price) Cost(u Usage, batch bool) float64 {
 
 // Per-frame token use measured on real M11-P runs (2026-09): about 6k input and
 // 1k output for the evaluation (images dominate; Sonnet 5 thinks a little), plus a
-// share of locate calls for frames without a detected face.
+// share of locate calls for frames without a detected face: ~7k in at a 1568 px
+// full frame. The 1024 px default (2026-10-01) measured 16% less input.
 const (
-	estInPerFrame  = 7_000
+	estInPerFrame  = 6_000
 	estOutPerFrame = 1_000
 )
 

@@ -1277,3 +1277,11 @@ func TestRankRefusesADifferentEffort(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// 1024 px cut frame input tokens 16% with verdicts within run-to-run noise
+// (CLAUDE.md, 2026-10-01 cost A/B); the subject crop carries the sharpness call.
+func TestMaxEdgeDefault(t *testing.T) {
+	if f := NewRootCmd().PersistentFlags().Lookup("max-edge"); f == nil || f.DefValue != "1024" {
+		t.Fatalf("max-edge flag: %+v", f)
+	}
+}

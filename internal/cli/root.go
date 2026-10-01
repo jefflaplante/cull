@@ -49,7 +49,7 @@ then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.`,
 	pf := root.PersistentFlags()
 	pf.StringVarP(&so.report, "report", "o", "", "report path (default <dir>/cull-report.json)")
 	pf.BoolVarP(&so.recursive, "recursive", "r", false, "recurse into subdirectories")
-	pf.IntVar(&so.maxEdge, "max-edge", 1568, "long edge of the full-frame image sent to the model")
+	pf.IntVar(&so.maxEdge, "max-edge", 1024, "long edge of the full-frame image sent to the model (context only: sharpness is judged on the native-resolution crops)")
 	pf.IntVar(&so.tiles, "tiles", 1, "\"where focus landed\" tiles per image (native resolution)")
 	pf.IntVar(&so.minPreviewEdge, "min-preview-edge", 1500, "try exiftool / flag images whose embedded preview is smaller than this")
 	pf.Float64Var(&so.faceMinQ, "face-min-q", 80, "face detection score needed to trust a face as the focus target")

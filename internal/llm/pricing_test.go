@@ -23,7 +23,7 @@ func TestPricing(t *testing.T) {
 		}
 	}
 	usd, in, out := Estimate(100, p, false)
-	if in != 700_000 || out != 100_000 || math.Abs(usd-2.4) > 1e-9 {
+	if in != 600_000 || out != 100_000 || math.Abs(usd-2.2) > 1e-9 {
 		t.Fatalf("estimate: $%v in=%d out=%d", usd, in, out)
 	}
 }

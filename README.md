@@ -118,7 +118,7 @@ For each DNG:
    subject, centred on the eyes. With no confident face (`--face-min-q`, default 80),
    `judge` asks the model to locate the intended focus target (`--locate off` to skip).
 3. **Assessment.** The model receives:
-   - the full frame, downscaled to `--max-edge` (1568 px);
+   - the full frame, downscaled to `--max-edge` (1024 px; it is context only);
    - the subject cropped at native resolution;
    - when there's no subject crop, a "where focus landed" tile (`--tiles`).
 
@@ -310,11 +310,11 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
 
 ### Cost experiments
 
-Two levers can cut cost, but could also change verdicts, so measure before adopting either:
+Two levers can cut cost, but could also change verdicts, so they were measured first:
 - **`--effort low`** (or `medium`), with **`--locate-effort`** for the locate call. Output
   is about 40% of a frame's cost.
-- **`--max-edge 1024`**: the full frame is about 30% of input tokens and is only
-  context.
+- **`--max-edge`**: now 1024 by default, after this A/B (16% fewer input tokens,
+  verdicts within run-to-run noise on 17 frames). `--max-edge 1568` restores the old size.
 
 ```sh
 cull judge -o base.json ~/Pictures/shoot
@@ -365,7 +365,8 @@ its sidecar into a `culled/` folder beside it.
 
 **Global** (every command):
 - `-o/--report` sets the report path; `-r/--recursive` includes subfolders.
-- `--max-edge` (1568) sets the size of the full frame sent to the model.
+- `--max-edge` (1024) sets the size of the full frame sent to the model. It was
+  1568 before 2026-10-01: 1024 cut input tokens by 16% with verdicts unchanged.
 - `--min-preview-edge` (1500) sets the preview size below which a frame is flagged.
 - `--face-min-q` (80) is the face-detection confidence needed.
 - `--tiles` (1) sets how many "where focus landed" tiles to send. Add

@@ -175,7 +175,7 @@ make vet
   --setting-sources "" --system-prompt <prompt> --json-schema <schema>`
   - Context overhead ~525 tokens (no hooks/plugins/CLAUDE.md leak in).
   - Base64 `image` blocks in the stream-json user message work.
-  - One 1568px frame + three 768px tiles ≈ 5.4k input tokens (~$0.02 list-price
+  - One 1568px frame (the default until 2026-10-01) + three 768px tiles ≈ 5.4k input tokens (~$0.02 list-price
     equivalent, not billed on the subscription).
   - The init event's `apiKeySource` is `none` on subscription auth. If
     `ANTHROPIC_API_KEY` is set in the child env, claude would bill the API instead:
@@ -233,6 +233,26 @@ the 17 sample frames, compared with `calibrate --compare`:
 - Each run used about 140k input and 11k output tokens, roughly 5 min at `-j 2`.
 - **Limits:** one pair of runs on 17 mostly easy frames, with no labels. This shows
   stability, not correctness. Calibrate on a labelled sample before trusting culls.
+
+### Cost A/B on claude-code (2026-10-01, user-approved)
+
+`judge --backend claude-code` on the 17 sample frames: a fresh baseline, then one run
+per lever, each compared with `calibrate --compare`. The noise floor is 3 default runs,
+compared pairwise.
+
+| vs baseline | decisions | crossings | status flips | mean \|Δ score\| | frame input | frame output |
+|---|---|---|---|---|---|---|
+| noise floor | 17/17 | 0 | 1–3 | 0.25–0.36 | 132k–141k | 9.6k–10.4k |
+| `--effort low` | 17/17 | 0 | 5 | 0.42 | 146k | 10.5k |
+| `--max-edge 1024` | 17/17 | 0 | 3 | 0.30 | 110k (−16%) | 9.5k |
+
+- **`--max-edge` default is now 1024.** It is within noise and cuts input 16%. The cost
+  estimate is lowered to 6k input per frame to match.
+- **`--effort low` not adopted.** It saved no output tokens on claude-code, and flipped
+  statuses slightly more often.
+- **Limits:** 17 easy frames, one run each, no labels. claude-code token counts include
+  its own overhead. Re-check on hard, faceless frames, where the full frame carries
+  more of the judgement.
 
 ### Camera support (tested 2026-09-29 on 22 raw.pixls.us samples with `cull scan --raw-clip`)
 

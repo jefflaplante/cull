@@ -38,7 +38,10 @@ func TestEscalationReevaluatesOnlyMatchingFrames(t *testing.T) {
 		t.Fatalf("escalation calls=%d label=%q", esc.calls, rep.Escalation)
 	}
 	l1 := result(t, rep, "L1000001.DNG")
-	if l1.Decision != eval.Keep || l1.FirstPass == nil || l1.FirstPass.Evaluation.Sharpness.Status != "missed_focus" {
+	// The first pass said missed_focus, the escalation sharp: they disagree, so
+	// review rather than trusting either.
+	if l1.Decision != eval.Review || l1.FirstPass == nil || l1.FirstPass.Evaluation.Sharpness.Status != "missed_focus" ||
+		!strings.Contains(strings.Join(l1.Reasons, ";"), "disagree") {
 		t.Fatalf("L1: decision=%s first=%+v", l1.Decision, l1.FirstPass)
 	}
 	if l1.Usage.InputTokens != 200 || l1.CostUSD != 3 { // $1 first pass + $2 escalation

@@ -281,3 +281,29 @@ func TestOldStoredPolicyCullsOnStatusAlone(t *testing.T) {
 		t.Fatalf("got %s", d)
 	}
 }
+
+func TestDisagreeingAssessmentsGoToReview(t *testing.T) {
+	p := Policy{MinCropArea: 0.6}
+	keep := &Evaluation{Sharpness: Sharpness{Status: "sharp", Score: 8}}
+	if d, r := p.DecideFacts(keep, Facts{Others: []string{"missed_focus"}}); d != Review || !strings.Contains(strings.Join(r, ";"), "disagree") {
+		t.Fatalf("sharp vs missed_focus: %s %v", d, r)
+	}
+	cull := &Evaluation{Sharpness: Sharpness{Status: "missed_focus", Score: 1}}
+	if d, _ := p.DecideFacts(cull, Facts{Others: []string{"acceptable"}}); d != Review {
+		t.Fatalf("missed_focus vs acceptable: %s", d)
+	}
+	// A later rule configured to cull still culls: only the sharpness cull is doubted.
+	shut := &Evaluation{Sharpness: Sharpness{Status: "missed_focus", Score: 1}, People: People{Eyes: "closed"}}
+	p.EyesClosed = ActionCull
+	if d, _ := p.DecideFacts(shut, Facts{Others: []string{"sharp"}}); d != Cull {
+		t.Fatalf("eyes-closed cull lost: %s", d)
+	}
+}
+
+func TestAgreeingAssessmentsStillCull(t *testing.T) {
+	p := Policy{MinCropArea: 0.6}
+	cull := &Evaluation{Sharpness: Sharpness{Status: "missed_focus", Score: 1}}
+	if d, _ := p.DecideFacts(cull, Facts{Others: []string{"motion_blur"}}); d != Cull {
+		t.Fatalf("got %s", d)
+	}
+}

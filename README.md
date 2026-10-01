@@ -274,7 +274,9 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
 - `--resume` refuses a report written by a different backend or model. Use `-o` to
   keep one report per backend when comparing them.
 - `--escalate-backend` / `--escalate-model` re-assess doubtful frames on a stronger
-  model; `--escalate-on` picks the outcomes that escalate.
+  model; `--escalate-on` picks the outcomes that escalate. When the two models
+  disagree on whether a frame failed (one says sharp, the other missed focus), it goes
+  to review instead of trusting either.
 - Small local vision models judge focus poorly. Calibrate before trusting one.
 
 ## Cost control

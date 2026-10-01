@@ -112,7 +112,14 @@ type Policy struct {
 type Facts struct {
 	RawKnown   bool    // raw clipping was measured
 	RawClipPct float64 // percent of raw samples at the white level
+	// Others are the sharpness statuses of the frame's other assessments (an
+	// escalation's first pass, a second opinion): a cull needs them to agree.
+	Others []string
 }
+
+// cullish and keepish classify sharpness statuses; soft is neither.
+func cullish(s string) bool { return s == "missed_focus" || s == "motion_blur" }
+func keepish(s string) bool { return s == "sharp" || s == "acceptable" }
 
 // ApplyOutranked raises a frame ranked below KeepBest in its set by the Outranked
 // action (review by default) and always leaves the reason.
@@ -189,6 +196,19 @@ func (p Policy) DecideFacts(e *Evaluation, f Facts) (Decision, []string) {
 	default:
 		if p.ReviewBelowSharpness > 0 && e.Sharpness.Score < p.ReviewBelowSharpness {
 			raise(Review, fmt.Sprintf("sharpness %.1f below %.1f", e.Sharpness.Score, p.ReviewBelowSharpness))
+		}
+	}
+	for _, o := range f.Others {
+		if (cullish(e.Sharpness.Status) && !cullish(o)) || (keepish(e.Sharpness.Status) && cullish(o)) {
+			// One assessment says the frame failed and another says it didn't: the
+			// model is unsure, which is what review is for. Lowering a cull is safe
+			// only here, before any other rule: so far it came from the very
+			// sharpness status now contradicted.
+			if d == Cull {
+				d = Review
+			}
+			raise(Review, fmt.Sprintf("assessments disagree on sharpness: %s vs %s", e.Sharpness.Status, o))
+			break
 		}
 	}
 	// The preview is tone-mapped and overstates clipping; the raw decides when it

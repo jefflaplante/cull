@@ -256,10 +256,14 @@ func (r *Report) Save(path string) error {
 
 // Facts are the measurements the policy combines with a frame's assessment.
 func (r Result) Facts() eval.Facts {
-	if r.RawClip == nil {
-		return eval.Facts{}
+	var f eval.Facts
+	if r.RawClip != nil {
+		f.RawKnown, f.RawClipPct = true, r.RawClip.HighlightPct
 	}
-	return eval.Facts{RawKnown: true, RawClipPct: r.RawClip.HighlightPct}
+	if r.FirstPass != nil && r.FirstPass.Evaluation != nil {
+		f.Others = append(f.Others, r.FirstPass.Evaluation.Sharpness.Status)
+	}
+	return f
 }
 
 // Rebase moves every path under the report's Dir to dir: the shoot folder was

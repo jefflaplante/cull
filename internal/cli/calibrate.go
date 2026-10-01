@@ -50,7 +50,11 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 				if err != nil {
 					return err
 				}
-				calib.FormatRunDiff(cmd.OutOrStdout(), args[0], args[1], calib.CompareRuns(a, b))
+				d, err := calib.CompareRuns(a, b)
+				if err != nil {
+					return err
+				}
+				calib.FormatRunDiff(cmd.OutOrStdout(), args[0], args[1], d)
 				return nil
 			}
 			if _, err := pol.policy(); err != nil {

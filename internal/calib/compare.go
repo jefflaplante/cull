@@ -6,6 +6,7 @@ import (
 	"math"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/jefflaplante/cull/internal/report"
 )
@@ -23,18 +24,28 @@ type RunDiff struct {
 
 // CompareRuns matches frames by base name, as labels are, so two runs written to
 // different report paths (or over a moved folder) still line up.
-func CompareRuns(a, b *report.Report) RunDiff {
+// It refuses when frames share a base name in either report (a recursive shoot):
+// they couldn't be told apart.
+func CompareRuns(a, b *report.Report) (RunDiff, error) {
 	d := RunDiff{Flips: map[string]int{}}
+	var dups []string
 	assessed := func(rep *report.Report) map[string]report.Result {
 		m := map[string]report.Result{}
 		for _, r := range rep.Results {
 			if r.Evaluation != nil && r.Error == "" && r.Decision != "" {
-				m[filepath.Base(r.File)] = r
+				name := filepath.Base(r.File)
+				if prev, ok := m[name]; ok {
+					dups = append(dups, prev.File+" and "+r.File)
+				}
+				m[name] = r
 			}
 		}
 		return m
 	}
 	am, bm := assessed(a), assessed(b)
+	if len(dups) > 0 {
+		return d, fmt.Errorf("frames share a file name, so the two runs can't be matched frame by frame: %s", strings.Join(dups, "; "))
+	}
 	var sum float64
 	for name, ra := range am {
 		rb, ok := bm[name]
@@ -61,7 +72,7 @@ func CompareRuns(a, b *report.Report) RunDiff {
 	if d.N > 0 {
 		d.MeanAbsSharpDelta = sum / float64(d.N)
 	}
-	return d
+	return d, nil
 }
 
 // FormatRunDiff writes the comparison. Crossings (keep in one run, cull in the

@@ -680,7 +680,7 @@ func (a *alternatingBackend) Call(ctx context.Context, req llm.Request) (*llm.Re
 // is, not how important.
 func TestSubjectIsTheLargestConfidentFace(t *testing.T) {
 	small := focus.Face{Rect: image.Rect(10, 10, 60, 60), Q: 200}
-	large := focus.Face{Rect: image.Rect(300, 200, 600, 500), Q: 90}
+	large := focus.Face{Rect: image.Rect(300, 200, 600, 500), Q: 150}
 	c := cfg(t.TempDir())
 	c.FaceMinQ = 80
 	c.detect = func(*imageprep.Frame) []focus.Face { return []focus.Face{small, large} }
@@ -713,5 +713,19 @@ func TestScanRecordsEyeDetail(t *testing.T) {
 		if got := ft.EyeSharpness > 0 && ft.FaceSharpness > 0; got != c.want {
 			t.Errorf("%s: eye %v face %v", c.name, ft.EyeSharpness, ft.FaceSharpness)
 		}
+	}
+}
+
+// A larger face barely over --face-min-q (where false positives live) doesn't
+// displace a much more certain one.
+func TestLargeWeakFaceDoesNotWin(t *testing.T) {
+	sure := focus.Face{Rect: image.Rect(10, 10, 60, 60), Q: 400}
+	weak := focus.Face{Rect: image.Rect(300, 200, 600, 500), Q: 90}
+	c := cfg(t.TempDir())
+	c.FaceMinQ = 80
+	c.detect = func(*imageprep.Frame) []focus.Face { return []focus.Face{sure, weak} }
+	ft := &report.FocusTarget{}
+	if _, _ = faceTarget(c, &imageprep.Frame{W: 1600, H: 1067}, ft); ft.Box == nil || ft.Box.Left > 0.05 {
+		t.Fatalf("box %+v", ft.Box)
 	}
 }

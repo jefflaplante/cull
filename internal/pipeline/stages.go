@@ -71,7 +71,8 @@ func prepareFrame(cfg Config, path string) (*prepared, error) {
 
 func area(r image.Rectangle) int { return r.Dx() * r.Dy() }
 
-// faceTarget returns the largest confident face as the target, or reports whether
+// faceTarget returns the largest confident face (among those at least half as
+// certain as the best) as the target, or reports whether
 // the model should be asked to locate one.
 func faceTarget(cfg Config, frame *imageprep.Frame, ft *report.FocusTarget) (*focus.Target, bool) {
 	all := cfg.detect(frame)
@@ -82,10 +83,13 @@ func faceTarget(cfg Config, frame *imageprep.Frame, ft *report.FocusTarget) (*fo
 	ft.Faces = len(faces)
 	if len(faces) > 0 {
 		// The largest confident face is the subject: Q measures how frontal a face
-		// is, so a small frontal passer-by can outscore a turned main subject.
-		sub := faces[0]
+		// is, so a small frontal passer-by can outscore a turned main subject. But
+		// only among faces at least half as certain as the best: just above
+		// --face-min-q is where false positives (bokeh) live, and a large one must
+		// not displace a clear face.
+		sub := faces[0] // highest Q
 		for _, f := range faces[1:] {
-			if area(f.Rect) > area(sub.Rect) {
+			if f.Q >= faces[0].Q/2 && area(f.Rect) > area(sub.Rect) {
 				sub = f
 			}
 		}

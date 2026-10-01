@@ -23,7 +23,10 @@ func TestCompareRunsCountsFlips(t *testing.T) {
 	for i := range b.Results {
 		b.Results[i].File = "/y/" + names[i] // runs are matched by base name
 	}
-	d := CompareRuns(a, b)
+	d, err := CompareRuns(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if d.N != 3 || d.Same != 2 || d.Flips["cull→review"] != 1 || d.StatusFlips != 2 || d.Missing != 1 {
 		t.Fatalf("%+v", d)
 	}
@@ -43,8 +46,22 @@ func TestCompareRunsCallsOutCrossings(t *testing.T) {
 	a := &report.Report{Results: []report.Result{{File: "/x/A.DNG", Decision: eval.Keep, Evaluation: &eval.Evaluation{}}}}
 	b := &report.Report{Results: []report.Result{{File: "/x/A.DNG", Decision: eval.Cull, Evaluation: &eval.Evaluation{}}}}
 	var out bytes.Buffer
-	FormatRunDiff(&out, "a", "b", CompareRuns(a, b))
+	d, _ := CompareRuns(a, b)
+	FormatRunDiff(&out, "a", "b", d)
 	if !strings.Contains(out.String(), "keep↔cull crossings: 1") {
 		t.Fatalf("%s", out.String())
+	}
+}
+
+// Two frames sharing a base name (a recursive shoot) can't be matched by name:
+// refuse rather than count one of them twice or not at all.
+func TestCompareRunsRefusesDuplicateNames(t *testing.T) {
+	r := func(p string) report.Result {
+		return report.Result{File: p, Decision: eval.Keep, Evaluation: &eval.Evaluation{}}
+	}
+	a := &report.Report{Results: []report.Result{r("/s/a/L1.DNG"), r("/s/b/L1.DNG")}}
+	b := &report.Report{Results: []report.Result{r("/s/a/L1.DNG")}}
+	if _, err := CompareRuns(a, b); err == nil || !strings.Contains(err.Error(), "share a file name") {
+		t.Fatalf("got %v", err)
 	}
 }

@@ -1213,7 +1213,8 @@ func TestCalibrateCompareNeedsNoLabels(t *testing.T) {
 func TestCullMaxSharpnessDefault(t *testing.T) {
 	for _, c := range NewRootCmd().Commands() {
 		if c.Name() == "decide" {
-			if f := c.Flags().Lookup("cull-max-sharpness"); f == nil || f.DefValue != "3" {
+			// The prompt's missed_focus band ends at 2.9; a 3 is soft-band, so it must not cull.
+			if f := c.Flags().Lookup("cull-max-sharpness"); f == nil || f.DefValue != "2.9" {
 				t.Fatalf("flag: %+v", f)
 			}
 			return

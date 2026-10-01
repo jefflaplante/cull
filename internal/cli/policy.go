@@ -28,7 +28,7 @@ type policyFlags struct {
 func (pf *policyFlags) register(f *pflag.FlagSet) {
 	f.Float64Var(&pf.minCropArea, "min-crop-area", 0.6, "reject suggested crops retaining less than this fraction of the frame")
 	f.Float64Var(&pf.reviewBelowSharpness, "review-below-sharpness", 0, "send frames whose sharpness score is below this to review (0 = off)")
-	f.Float64Var(&pf.cullMaxSharpness, "cull-max-sharpness", 3, "cull missed_focus/motion_blur only when the sharpness score is at most this; above it, review (0 = the status alone culls)")
+	f.Float64Var(&pf.cullMaxSharpness, "cull-max-sharpness", 2.9, "cull missed_focus/motion_blur only when the sharpness score is at most this (the prompt's band for them ends at 2.9); above it, review (0 = the status alone culls)")
 	f.StringVar(&pf.eyesClosed, "eyes-closed", "review", "what to do with closed eyes: ignore, review, or cull")
 	f.StringVar(&pf.outranked, "outranked", "review", "what to do with frames ranked below --keep-best in their set: ignore, review, or cull")
 	f.StringVar(&pf.rawClipped, "raw-clipped", "review", "what to do when the raw's highlights are clipped: ignore, review, or cull")

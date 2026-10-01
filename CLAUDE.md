@@ -119,6 +119,11 @@ make vet
   detections were background bokeh — except one true tilted face at Q 29. ~2 s/frame
   including the 60MP decode.
 
+- pigo's pupil localizer (puploc) perturbs its search with `math/rand` (puploc.go:248),
+  so pupils, the subject crop's centre and `subject_sharpness` vary run to run: on
+  M1104119 main gave 0.107–0.117 over repeated scans (checked 2026-09-30). Compare
+  such numbers across runs only beyond that spread.
+
 ### Built pipeline on 17 real frames (2026-09-26, `scan --save-inputs`)
 
 - pigo in Go (`internal/focus`) found a confident face (Q ≥ 80) on 10/17; every face

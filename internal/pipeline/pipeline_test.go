@@ -675,3 +675,18 @@ func (a *alternatingBackend) Call(ctx context.Context, req llm.Request) (*llm.Re
 	a.mu.Unlock()
 	return (&fakeBackend{status: status}).Call(ctx, req)
 }
+
+// Of two confident faces, the larger is the subject: Q measures how frontal a face
+// is, not how important.
+func TestSubjectIsTheLargestConfidentFace(t *testing.T) {
+	small := focus.Face{Rect: image.Rect(10, 10, 60, 60), Q: 200}
+	large := focus.Face{Rect: image.Rect(300, 200, 600, 500), Q: 90}
+	c := cfg(t.TempDir())
+	c.FaceMinQ = 80
+	c.detect = func(*imageprep.Frame) []focus.Face { return []focus.Face{small, large} }
+	ft := &report.FocusTarget{}
+	frame := &imageprep.Frame{W: 1600, H: 1067}
+	if _, need := faceTarget(c, frame, ft); need || ft.Box == nil || ft.Box.Left < 0.18 || ft.FaceQ != 200 {
+		t.Fatalf("box %+v faceQ %v", ft.Box, ft.FaceQ)
+	}
+}

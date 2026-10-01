@@ -1,6 +1,9 @@
 package focus
 
 import (
+	pigo "github.com/esimov/pigo/core"
+
+	"github.com/jefflaplante/cull/internal/imageprep"
 	"image"
 	_ "image/jpeg"
 	"os"
@@ -63,6 +66,28 @@ func TestDetectFindsFaceInPigoSample(t *testing.T) {
 	if !faces[0].Rect.In(image.Rect(0, 0, w, h)) || faces[0].Rect.Dx() < 20 {
 		t.Fatalf("face rect %v not a plausible box inside %dx%d", faces[0].Rect, w, h)
 	}
+	if len(faces[0].Pupils) != 2 || faces[0].Eyes == nil { // both found before per-angle pupils: must stay so
+		t.Fatalf("pupils %v eyes %v", faces[0].Pupils, faces[0].Eyes)
+	}
+}
+
+func TestOnePupilStillAims(t *testing.T) {
+	if p := eyePoint([]image.Point{{100, 50}}); p == nil || *p != (image.Point{100, 50}) {
+		t.Fatalf("got %v", p)
+	}
+	if p := eyePoint([]image.Point{{100, 50}, {140, 54}}); p == nil || *p != (image.Point{120, 52}) {
+		t.Fatalf("got %v", p)
+	}
+	if eyePoint(nil) != nil {
+		t.Fatal("no pupils: no eye point")
+	}
+}
+
+func TestFaceTargetCarriesPupils(t *testing.T) {
+	f := Face{Rect: image.Rect(0, 0, 100, 100), Q: 120, Pupils: []image.Point{{30, 40}}, Eyes: &image.Point{30, 40}}
+	if tg := FaceTarget(f); len(tg.Pupils) != 1 || tg.Center != (image.Point{30, 40}) {
+		t.Fatalf("%+v", tg)
+	}
 }
 
 func TestDetectFlatFrameHasNoConfidentFace(t *testing.T) {
@@ -112,5 +137,29 @@ func TestConfidentAndTargets(t *testing.T) {
 	bt := BoxTarget(image.Rect(1000, 500, 1100, 550))
 	if bt.Center != image.Pt(1050, 525) || bt.Size != 120 || bt.Source != "model" {
 		t.Fatalf("box target: %+v", bt)
+	}
+}
+
+// Q is what --face-min-q was calibrated on: clustering across all angles at once
+// (pigo sums the Q of what it merges). Finding each face's angle must not change it.
+func TestDetectQMatchesAllAngleClustering(t *testing.T) {
+	d, err := NewDetector()
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, w, h := lumaOf(pigoSample(t))
+	g, dw, dh, _ := imageprep.DownLuma(l, w, h, detectEdge)
+	img := pigo.ImageParams{Pixels: g, Rows: dh, Cols: dw, Dim: dw}
+	cp := pigo.CascadeParams{MinSize: 24, MaxSize: min(dw, dh), ShiftFactor: 0.1, ScaleFactor: 1.1, ImageParams: img}
+	var raw []pigo.Detection
+	for _, a := range angles {
+		raw = append(raw, d.face.RunCascade(cp, a)...)
+	}
+	best := 0.0
+	for _, det := range d.face.ClusterDetections(raw, 0.2) {
+		best = max(best, float64(det.Q))
+	}
+	if faces := d.Detect(l, w, h); len(faces) == 0 || faces[0].Q != best {
+		t.Fatalf("top Q %v, all-angle clustering gives %v", faces, best)
 	}
 }

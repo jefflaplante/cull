@@ -28,9 +28,11 @@ var angles = []float64{0, 0.05, 0.95}
 
 // Face is a detection in display-oriented native pixels.
 type Face struct {
-	Rect image.Rectangle
-	Q    float64
-	Eyes *image.Point // midpoint between the pupils, when both were found
+	Rect   image.Rectangle
+	Q      float64
+	Angle  float64       // the cascade angle it was found at (fraction of a turn)
+	Pupils []image.Point // pupils found (0-2), native pixels
+	Eyes   *image.Point  // aim point: between both pupils, or the one found
 }
 
 // Detector holds the unpacked cascades. They are read-only after NewDetector,
@@ -63,23 +65,61 @@ func (d *Detector) Detect(luma []uint8, w, h int) (faces []Face) {
 	g, dw, dh, scale := imageprep.DownLuma(luma, w, h, detectEdge)
 	img := pigo.ImageParams{Pixels: g, Rows: dh, Cols: dw, Dim: dw}
 	cp := pigo.CascadeParams{MinSize: 24, MaxSize: min(dw, dh), ShiftFactor: 0.1, ScaleFactor: 1.1, ImageParams: img}
-	var dets []pigo.Detection
-	for _, a := range angles {
-		dets = append(dets, d.face.RunCascade(cp, a)...)
+	// Cluster across all angles at once, as --face-min-q was calibrated on (pigo
+	// sums the Q of what it merges). Each face's angle is the one whose raw
+	// detections contributed most to it: the pupil localizer must look at that
+	// angle too.
+	type angled struct {
+		det   pigo.Detection
+		angle float64
 	}
-	dets = d.face.ClusterDetections(dets, 0.2)
+	var raw []angled
+	var plain []pigo.Detection
+	for _, a := range angles {
+		for _, det := range d.face.RunCascade(cp, a) {
+			raw = append(raw, angled{det, a})
+			plain = append(plain, det)
+		}
+	}
+	var dets []angled
+	for _, det := range d.face.ClusterDetections(plain, 0.2) {
+		weight := map[float64]float32{}
+		for _, r := range raw {
+			if iou(r.det, det) > 0.2 {
+				weight[r.angle] += r.det.Q
+			}
+		}
+		best := angles[0]
+		for _, a := range angles {
+			if weight[a] > weight[best] {
+				best = a
+			}
+		}
+		dets = append(dets, angled{det, best})
+	}
 
-	for _, det := range dets {
+	for _, ad := range dets {
+		det := ad.det
 		half := float64(det.Scale) / 2
 		f := Face{
 			Rect: image.Rect(
 				int((float64(det.Col)-half)/scale), int((float64(det.Row)-half)/scale),
 				int((float64(det.Col)+half)/scale), int((float64(det.Row)+half)/scale),
 			).Intersect(image.Rect(0, 0, w, h)),
-			Q: float64(det.Q),
+			Q:     float64(det.Q),
+			Angle: ad.angle,
 		}
 		if det.Q >= minFaceQ {
-			f.Eyes = d.eyes(det, img, scale)
+			// Upright first, as before (on real frames its aim is well centred); a
+			// tilted face that showed fewer than both pupils gets a second look at
+			// its own angle.
+			f.Pupils = d.pupils(det, img, scale, 0)
+			if len(f.Pupils) < 2 && ad.angle != 0 {
+				if alt := d.pupils(det, img, scale, ad.angle); len(alt) > len(f.Pupils) {
+					f.Pupils = alt
+				}
+			}
+			f.Eyes = eyePoint(f.Pupils)
 		}
 		faces = append(faces, f)
 	}
@@ -87,25 +127,51 @@ func (d *Detector) Detect(luma []uint8, w, h int) (faces []Face) {
 	return faces
 }
 
-// eyes runs pigo's pupil localizer with its standard offsets from the face
-// centre and returns the midpoint when both pupils are found.
-func (d *Detector) eyes(det pigo.Detection, img pigo.ImageParams, scale float64) *image.Point {
+// pupils runs pigo's pupil localizer with its standard offsets from the face
+// centre, at the angle the face was found at, and returns the pupils it found
+// (0-2) in native pixels.
+func (d *Detector) pupils(det pigo.Detection, img pigo.ImageParams, scale, angle float64) []image.Point {
 	s := float32(det.Scale)
-	find := func(sign int) *pigo.Puploc {
+	var out []image.Point
+	for _, sign := range []int{-1, 1} {
 		p := d.pup.RunDetector(pigo.Puploc{
 			Row: det.Row - int(0.085*s), Col: det.Col + sign*int(0.185*s), Scale: s * 0.4, Perturbs: 63,
-		}, img, 0, false)
+		}, img, angle, false)
 		if p == nil || p.Row <= 0 || p.Col <= 0 {
-			return nil
+			continue
 		}
-		return p
+		out = append(out, image.Pt(int(float64(p.Col)/scale), int(float64(p.Row)/scale)))
 	}
-	l, r := find(-1), find(1)
-	if l == nil || r == nil {
+	return out
+}
+
+// eyePoint aims between both pupils, or at the one found: a turned or
+// half-shadowed face often shows one eye, and that eye is where focus belongs.
+func eyePoint(pupils []image.Point) *image.Point {
+	switch len(pupils) {
+	case 0:
 		return nil
+	case 1:
+		p := pupils[0]
+		return &p
 	}
-	mid := image.Pt(int(float64(l.Col+r.Col)/2/scale), int(float64(l.Row+r.Row)/2/scale))
+	mid := image.Pt((pupils[0].X+pupils[1].X)/2, (pupils[0].Y+pupils[1].Y)/2)
 	return &mid
+}
+
+// iou is the overlap of two detections' square boxes.
+func iou(a, b pigo.Detection) float64 {
+	box := func(d pigo.Detection) image.Rectangle {
+		h := d.Scale / 2
+		return image.Rect(d.Col-h, d.Row-h, d.Col+h, d.Row+h)
+	}
+	ra, rb := box(a), box(b)
+	in := ra.Intersect(rb)
+	if in.Empty() {
+		return 0
+	}
+	area := func(r image.Rectangle) float64 { return float64(r.Dx() * r.Dy()) }
+	return area(in) / (area(ra) + area(rb) - area(in))
 }
 
 // Confident keeps faces scoring at least minQ, preserving order.
@@ -127,7 +193,7 @@ func FaceTarget(f Face) Target {
 	if f.Eyes != nil {
 		c = *f.Eyes
 	}
-	return Target{Center: c, Size: side, Source: "face"}
+	return Target{Center: c, Size: side, Source: "face", Pupils: f.Pupils}
 }
 
 // BoxTarget covers a model-located box with 20% margin.

@@ -13,8 +13,9 @@ const (
 // Target is what should be sharp, in display-oriented native pixels.
 type Target struct {
 	Center image.Point
-	Size   int    // extent the crop should cover
-	Source string // "face" or "model"
+	Size   int           // extent the crop should cover
+	Source string        // "face" or "model"
+	Pupils []image.Point // a face's pupils found (0-2), native pixels
 }
 
 // SubjectRect is a square crop centred on the target, side clamped to

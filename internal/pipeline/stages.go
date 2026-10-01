@@ -69,7 +69,9 @@ func prepareFrame(cfg Config, path string) (*prepared, error) {
 	return p, nil
 }
 
-// faceTarget returns the most confident face as the target, or reports whether
+func area(r image.Rectangle) int { return r.Dx() * r.Dy() }
+
+// faceTarget returns the largest confident face as the target, or reports whether
 // the model should be asked to locate one.
 func faceTarget(cfg Config, frame *imageprep.Frame, ft *report.FocusTarget) (*focus.Target, bool) {
 	all := cfg.detect(frame)
@@ -79,8 +81,16 @@ func faceTarget(cfg Config, frame *imageprep.Frame, ft *report.FocusTarget) (*fo
 	faces := focus.Confident(all, cfg.FaceMinQ)
 	ft.Faces = len(faces)
 	if len(faces) > 0 {
-		t := focus.FaceTarget(faces[0])
-		ft.Source, ft.Box = "face", normBox(faces[0].Rect, frame.W, frame.H)
+		// The largest confident face is the subject: Q measures how frontal a face
+		// is, so a small frontal passer-by can outscore a turned main subject.
+		sub := faces[0]
+		for _, f := range faces[1:] {
+			if area(f.Rect) > area(sub.Rect) {
+				sub = f
+			}
+		}
+		t := focus.FaceTarget(sub)
+		ft.Source, ft.Box = "face", normBox(sub.Rect, frame.W, frame.H)
 		return &t, false
 	}
 	ft.Source = "none"

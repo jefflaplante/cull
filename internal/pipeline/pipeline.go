@@ -57,6 +57,7 @@ type Config struct {
 	Batch             bool          // priced at the batch rate
 	MaxCost           float64       // stop dispatch once the run's cost reaches this (USD); 0 = off
 	Escalate          *Escalation   // re-evaluate matching frames on a second model; nil = off
+	SecondOpinion     bool          // ask the same model again about soft-or-worse frames; disagreement goes to review
 	RawClip           bool          // measure highlight clipping in the raw data (~0.8 s/frame)
 	BatchPoll         time.Duration // batch mode: time between status checks
 	BatchChunkBytes   int           // batch mode: max request bytes per batch (0 = 180 MB)
@@ -282,8 +283,36 @@ func processOne(ctx context.Context, cfg Config, b llm.Backend, path string) (re
 			res.Fixups = append(res.Fixups, "escalation failed: "+err.Error())
 		}
 	}
+	if cfg.SecondOpinion && doubtful(e) && stopErr == nil {
+		// Same model, same inputs, asked again: its verdicts on borderline frames
+		// vary between runs, and a cull should survive a second look. Only the
+		// status is used (Facts.Others), so the answer isn't sanitized.
+		e2, u2, err := eval.Evaluate(ctx, b, in)
+		res.Usage.Add(u2)
+		switch {
+		case e2 != nil && (err == nil || errors.Is(err, llm.ErrQuotaStop)):
+			res.Second = &report.FirstPass{Backend: b.Name(), Model: cfg.Model, Evaluation: e2}
+			if err != nil {
+				stopErr = err
+			}
+		case errors.Is(err, llm.ErrAbortRun), errors.Is(err, llm.ErrQuotaStop):
+			res.Fixups = append(res.Fixups, "second opinion failed: "+err.Error())
+			stopErr = err
+		case err != nil:
+			res.Fixups = append(res.Fixups, "second opinion failed: "+err.Error())
+		}
+	}
 	finish(cfg, res, e, p.orientation)
 	return *res, escUsage, stopErr
+}
+
+// doubtful: an assessment a second opinion is worth asking for.
+func doubtful(e *eval.Evaluation) bool {
+	switch e.Sharpness.Status {
+	case "soft", "missed_focus", "motion_blur":
+		return true
+	}
+	return false
 }
 
 const (

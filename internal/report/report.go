@@ -133,6 +133,7 @@ type Result struct {
 	Group       *Group           `json:"group,omitempty"`
 	Evaluation  *eval.Evaluation `json:"evaluation,omitempty"`
 	FirstPass   *FirstPass       `json:"first_pass,omitempty"` // set when escalated
+	Second      *FirstPass       `json:"second,omitempty"`     // the same model asked again (--second-opinion)
 	Decision    eval.Decision    `json:"decision,omitempty"`
 	Reasons     []string         `json:"reasons,omitempty"`
 	Fixups      []string         `json:"fixups,omitempty"`
@@ -260,8 +261,10 @@ func (r Result) Facts() eval.Facts {
 	if r.RawClip != nil {
 		f.RawKnown, f.RawClipPct = true, r.RawClip.HighlightPct
 	}
-	if r.FirstPass != nil && r.FirstPass.Evaluation != nil {
-		f.Others = append(f.Others, r.FirstPass.Evaluation.Sharpness.Status)
+	for _, o := range []*FirstPass{r.FirstPass, r.Second} {
+		if o != nil && o.Evaluation != nil {
+			f.Others = append(f.Others, o.Evaluation.Sharpness.Status)
+		}
 	}
 	return f
 }

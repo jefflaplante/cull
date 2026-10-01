@@ -31,6 +31,7 @@ type cullOpts struct {
 	estimate     bool
 	maxCost      float64
 	noRank       bool
+	second       bool
 
 	escalateBackend string
 	escalateModel   string
@@ -93,6 +94,9 @@ Backends (--backend):
 			if o.batch && o.backend != "anthropic" {
 				return fmt.Errorf("--batch uses the Message Batches API: --backend anthropic only")
 			}
+			if o.batch && o.second {
+				return fmt.Errorf("--second-opinion needs a synchronous run: drop --batch")
+			}
 			if o.batch && o.escalateBackend != "" {
 				return fmt.Errorf("--batch can't be combined with --escalate-backend (escalate with a synchronous run afterwards)")
 			}
@@ -140,6 +144,9 @@ Backends (--backend):
 					return err
 				}
 				printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch, !o.noRank)
+				if o.second {
+					fmt.Fprintln(cmd.ErrOrStderr(), "second opinions: one more evaluation per soft-or-worse frame, on top of the estimate")
+				}
 				if o.estimate {
 					return nil
 				}
@@ -191,6 +198,7 @@ Backends (--backend):
 			}
 			cfg.CheckpointN = o.checkpoint
 			cfg.Rank = !o.noRank
+			cfg.SecondOpinion = o.second
 
 			var rep *report.Report
 			var usage eval.Usage
@@ -229,6 +237,7 @@ Backends (--backend):
 	f.BoolVar(&o.overwriteXMP, "overwrite-xmp", false, "overwrite existing sidecars (default: never clobber)")
 	f.BoolVar(&o.noLabels, "no-labels", false, "ignore your labels (cull-labels.jsonl beside the report): moves and sidecar rewrites follow the model's verdicts")
 	f.BoolVar(&o.moveCulled, "move-culled", false, "move frames decided cull (with their .xmp) into a culled/ folder beside them; undo with 'cull restore'. Use before importing into Capture One")
+	f.BoolVar(&o.second, "second-opinion", false, "ask the model again about soft-or-worse frames (one more evaluation each, typically a minority of frames); when the two disagree, review")
 	f.BoolVar(&o.noRank, "no-rank", false, "after judging, don't rank the sets that need it (run 'cull rank' separately later)")
 	o.policy.register(f)
 	f.IntVar(&o.checkpoint, "checkpoint", 25, "save the report every N results")

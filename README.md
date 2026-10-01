@@ -356,7 +356,9 @@ its sidecar into a `culled/` folder beside it.
   `--checkpoint`.
 - **Cost:** `--estimate`, `--max-cost`, `--batch`, `--quota-stop`.
 - **Ranking:** `--no-rank`.
-- **Other assessment options:** `--escalate-*`, `--raw-clip` (on by default).
+- **Other assessment options:** `--escalate-*`, `--raw-clip` (on by default),
+  `--second-opinion` (ask the model again about soft-or-worse frames; when the two
+  answers disagree on whether the frame failed, it goes to review; not with `--batch`).
 - **Output:** `--write-xmp`, `--xmp-develop`, `--overwrite-xmp`, `--move-culled`,
   `--no-labels`.
 

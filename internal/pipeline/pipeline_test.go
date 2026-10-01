@@ -628,3 +628,50 @@ func TestResumeReplacesResultOfChangedFile(t *testing.T) {
 		t.Fatalf("err=%v results=%d", err, len(rep.Results))
 	}
 }
+
+// A doubtful frame (soft or worse) is asked again; when the second answer says
+// sharp, the frame goes to review rather than trusting either. A sharp frame
+// is not asked twice.
+func TestSecondOpinionOnDoubtfulFrames(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	minimalDNG(t, filepath.Join(dir, "L1000002.DNG"))
+	c := cfg(dir)
+	c.WriteXMP, c.SecondOpinion = false, true
+	b := &alternatingBackend{first: map[string]string{"L1000001": "missed_focus", "L1000002": "sharp"}, then: "sharp"}
+	rep, _, err := Run(context.Background(), c, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r1, r2 := result(t, rep, "L1000001.DNG"), result(t, rep, "L1000002.DNG")
+	if r1.Second == nil || r1.Decision != eval.Review || r2.Second != nil {
+		t.Fatalf("r1 second=%v decision=%s; r2 second=%v", r1.Second, r1.Decision, r2.Second)
+	}
+	if r1.Usage.InputTokens != 2*r2.Usage.InputTokens {
+		t.Fatalf("second opinion's usage not counted: %d vs %d", r1.Usage.InputTokens, r2.Usage.InputTokens)
+	}
+}
+
+// alternatingBackend answers a file's first evaluation from first, later ones with then.
+type alternatingBackend struct {
+	mu    sync.Mutex
+	first map[string]string
+	then  string
+	seen  map[string]bool
+}
+
+func (a *alternatingBackend) Name() string { return "fake" }
+func (a *alternatingBackend) Call(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	a.mu.Lock()
+	if a.seen == nil {
+		a.seen = map[string]bool{}
+	}
+	status := a.then
+	for name, s := range a.first {
+		if strings.Contains(req.Parts[0].Text, name) && !a.seen[name] {
+			status, a.seen[name] = s, true
+		}
+	}
+	a.mu.Unlock()
+	return (&fakeBackend{status: status}).Call(ctx, req)
+}

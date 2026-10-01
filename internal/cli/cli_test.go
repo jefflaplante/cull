@@ -235,22 +235,23 @@ func TestPolicyFlagValidation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	for name, args := range map[string][]string{
-		"bad eyes action":        {"judge", "--eyes-closed", "delete", dir},
-		"bad outranked":          {"decide", "--outranked", "burn", dir},
-		"bad raw action":         {"judge", "--raw-clipped", "maybe", dir},
-		"batch needs anthropic":  {"judge", "--batch", "--backend", "openai", "--model", "m", dir},
-		"batch with escalation":  {"judge", "--batch", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", dir},
-		"bad raw threshold":      {"judge", "--raw-clip-threshold", "150", dir},
-		"negative seq gap":       {"scan", "--seq-gap", "-1s", dir},
-		"bad seq look, high":     {"scan", "--seq-look", "2", dir},
-		"bad seq look, low":      {"scan", "--seq-look", "-0.1", dir},
-		"negative keep-best":     {"judge", "--keep-best", "-1", dir},
-		"keep-best too high":     {"decide", "--keep-best", "6", dir},
-		"cull-max-sharpness >10": {"decide", "--cull-max-sharpness", "11", dir},
-		"bad escalate backend":   {"judge", "--escalate-backend", "gpt", "--escalate-model", "x", dir},
-		"escalate needs model":   {"judge", "--escalate-backend", "anthropic", dir},
-		"bad escalate-on":        {"judge", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", "--escalate-on", "blurry", dir},
-		"negative sharp floor":   {"judge", "--review-below-sharpness", "-1", dir},
+		"bad eyes action":           {"judge", "--eyes-closed", "delete", dir},
+		"bad outranked":             {"decide", "--outranked", "burn", dir},
+		"bad raw action":            {"judge", "--raw-clipped", "maybe", dir},
+		"batch needs anthropic":     {"judge", "--batch", "--backend", "openai", "--model", "m", dir},
+		"batch with escalation":     {"judge", "--batch", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", dir},
+		"bad raw threshold":         {"judge", "--raw-clip-threshold", "150", dir},
+		"negative seq gap":          {"scan", "--seq-gap", "-1s", dir},
+		"bad seq look, high":        {"scan", "--seq-look", "2", dir},
+		"bad seq look, low":         {"scan", "--seq-look", "-0.1", dir},
+		"negative keep-best":        {"judge", "--keep-best", "-1", dir},
+		"keep-best too high":        {"decide", "--keep-best", "6", dir},
+		"cull-max-sharpness >10":    {"decide", "--cull-max-sharpness", "11", dir},
+		"second opinion with batch": {"judge", "--second-opinion", "--batch", dir},
+		"bad escalate backend":      {"judge", "--escalate-backend", "gpt", "--escalate-model", "x", dir},
+		"escalate needs model":      {"judge", "--escalate-backend", "anthropic", dir},
+		"bad escalate-on":           {"judge", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", "--escalate-on", "blurry", dir},
+		"negative sharp floor":      {"judge", "--review-below-sharpness", "-1", dir},
 	} {
 		if _, err := run(t, args...); err == nil || strings.Contains(err.Error(), "unknown flag") || strings.Contains(err.Error(), "unknown command") {
 			t.Errorf("%s: want a validation error, got %v", name, err)
@@ -1219,4 +1220,11 @@ func TestCullMaxSharpnessDefault(t *testing.T) {
 		}
 	}
 	t.Fatal("no decide command")
+}
+
+func TestSecondOpinionRefusedWithBatch(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := run(t, "judge", "--second-opinion", "--batch", dir); err == nil || !strings.Contains(err.Error(), "synchronous") {
+		t.Fatalf("got %v", err)
+	}
 }

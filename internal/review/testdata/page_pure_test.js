@@ -4,8 +4,8 @@ const fs = require("fs");
 const page = fs.readFileSync(process.argv[2], "utf8");
 const m = page.match(/\/\*pure:start\*\/([\s\S]*?)\/\*pure:end\*\//);
 if (!m) { console.error("no pure block"); process.exit(1); }
-const { compareScale, rejectChange, groupOrder, keepLabels } =
-  new Function(m[1] + "; return { compareScale, rejectChange, groupOrder, keepLabels };")();
+const { compareScale, rejectChange, groupOrder, keepLabels, rowStep, groupNumbers } =
+  new Function(m[1] + "; return { compareScale, rejectChange, groupOrder, keepLabels, rowStep, groupNumbers };")();
 let failed = 0;
 const check = (cond, msg) => { if (!cond) { console.error("FAIL: " + msg); failed++; } };
 
@@ -65,5 +65,26 @@ const check = (cond, msg) => { if (!cond) { console.error("FAIL: " + msg); faile
   check(none.A === "cull" && none.B === "cull" && none.C === "cull", "keep 0 " + JSON.stringify(none));
   const all = keepLabels(members, 9);
   check(all.A === "keep" && all.B === "keep" && all.C === "keep", "keep all " + JSON.stringify(all));
+}
+// rowStep moves to the nearest card in the visual row below (dir 1) or above (-1):
+// a 5-wide row of loose cards, then a 2-frame set on its own row, then 5 more.
+{
+  const rects = [];
+  for (let c = 0; c < 5; c++) rects.push({ top: 0, left: c * 100, width: 90 });     // 0-4
+  for (let c = 0; c < 2; c++) rects.push({ top: 200, left: c * 100, width: 90 });   // 5-6: the set
+  for (let c = 0; c < 5; c++) rects.push({ top: 400, left: c * 100, width: 90 });   // 7-11
+  check(rowStep(rects, 3, 1) === 6, "down from the 4th card lands in the set (nearest), got " + rowStep(rects, 3, 1));
+  check(rowStep(rects, 0, 1) === 5, "down from the 1st card lands on the set's 1st frame");
+  check(rowStep(rects, 6, 1) === 8, "down from the set lands below it, nearest column, got " + rowStep(rects, 6, 1));
+  check(rowStep(rects, 9, -1) === 6, "up from the last row lands in the set, got " + rowStep(rects, 9, -1));
+  check(rowStep(rects, 2, -1) === 2, "up from the first row stays put");
+  check(rowStep(rects, 10, 1) === 10, "down from the last row stays put");
+}
+
+// groupNumbers numbers the sets of more than one frame 1, 2, ... in collection order.
+{
+  const g = (id, size) => ({ group: { id, size } });
+  const nums = groupNumbers([g(7, 2), {}, g(3, 1), g(12, 3), g(7, 2), g(12, 3), g(4, 2)]);
+  check(nums.get(7) === 1 && nums.get(12) === 2 && nums.get(4) === 3 && !nums.has(3), "groupNumbers " + JSON.stringify([...nums]));
 }
 process.exit(failed ? 1 : 0);

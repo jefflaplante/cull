@@ -51,7 +51,6 @@ main { padding: 16px; }
 .badge.set { background: var(--accent); }
 .label { position: absolute; top: 6px; right: 6px; }
 .label.badge { border: 1px solid var(--ink); } /* yours: set apart from the model's badge */
-.best { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border: 1px solid var(--ink); border-radius: 999px; padding: 1px 6px; background: var(--panel); color: var(--ink); }
 .strip { display: flex; gap: 6px; overflow-x: auto; margin-top: 6px; }
 .strip-thumb { flex: 0 0 auto; width: 64px; height: 44px; padding: 0; border: 2px solid transparent; border-radius: 4px; overflow: hidden; background: var(--bg); cursor: pointer; }
 .strip-thumb.current { border-color: var(--accent); }
@@ -155,6 +154,37 @@ function keepLabels(members, n) {
   for (const m of members) if (m.rank > 0) out[m.file] = m.rank <= n ? "keep" : "cull";
   return out;
 }
+// rowStep is the card to land on moving one visual row down (dir 1) or up (-1)
+// from card cur, given each card's on-screen box: the nearest card by horizontal
+// centre in the next row. Rows aren't uniform (each set is boxed on rows of its
+// own), so stepping a fixed count through the list would skip sets. With no row
+// that way it stays on cur.
+function rowStep(rects, cur, dir) {
+  const r = rects[cur];
+  let row = null;
+  for (const q of rects) {
+    if (dir > 0 ? q.top > r.top + 1 && (row === null || q.top < row) : q.top < r.top - 1 && (row === null || q.top > row)) row = q.top;
+  }
+  if (row === null) return cur;
+  const cx = r.left + r.width / 2;
+  let best = cur, dist = Infinity;
+  rects.forEach((q, i) => {
+    if (Math.abs(q.top - row) > 1) return;
+    const d = Math.abs(q.left + q.width / 2 - cx);
+    if (d < dist) { dist = d; best = i; }
+  });
+  return best;
+}
+// groupNumbers numbers the sets of more than one frame 1, 2, ... in the order
+// they first appear: set IDs skip numbers (single frames count as sets of one).
+function groupNumbers(cards) {
+  const nums = new Map();
+  for (const c of cards) {
+    const g = c.group;
+    if (g && g.size > 1 && !nums.has(g.id)) nums.set(g.id, nums.size + 1);
+  }
+  return nums;
+}
 /*pure:end*/
 (() => {
   const data = JSON.parse(document.getElementById("data").textContent);
@@ -180,11 +210,11 @@ function keepLabels(members, n) {
   let verdict = "all", progress = "all", setFilter = "all", sel = 0, detailOpen = false, pinned = -1;
   const verdicts = [["all", "All"], ["keep", "Keep"], ["review", "Review"], ["cull", "Cull"]];
   const progresses = [["all", "All"], ["unlabeled", "Unlabeled"], ["unrated", "Unrated"], ["disagree", "Disagreements"]];
-  const setFilters = [["all", "All"], ["best", "Best"], ["outranked", "Outranked"]];
+  const setFilters = [["all", "All"], ["keepers", "Keepers"], ["outranked", "Outranked"]];
   const matches = i => {
     const c = cards[i], l = get(c.file), g = c.group;
     if (verdict !== "all" && effective(c) !== verdict) return false;
-    if (setFilter === "best" && !(g && g.best)) return false;
+    if (setFilter === "keepers" && !(g && g.size > 1 && effective(c) === "keep")) return false;
     if (setFilter === "outranked" && !(g && g.rank > data.keep_best && data.keep_best > 0)) return false;
     switch (progress) {
       case "unlabeled": return !l.label && !c.error;
@@ -209,8 +239,9 @@ function keepLabels(members, n) {
   const modelBadge = d => badge(d, "", "model's verdict");
   const yourBadge = (d, extra = "") => badge(d, extra, "your label");
   const starText = n => n ? el("span", { cls: "stars", text: "★".repeat(n), title: n + " star" + (n > 1 ? "s" : "") }) : null;
-  const setBadge = g => g && g.size > 1 ? el("span", { cls: "badge set", text: `set ${g.id} · #${g.rank}/${g.of}`, title: "set" }) : null;
-  const bestPill = g => g && g.best ? el("span", { cls: "best", text: "best" }) : null;
+  const groupNo = groupNumbers(cards);
+  const groupName = g => "group_" + (groupNo.get(g.id) || g.id);
+  const setBadge = g => g && g.size > 1 ? el("span", { cls: "badge set", text: `${groupName(g)} · #${g.rank}/${g.of}`, title: "group of similar frames · the model's rank in it" }) : null;
   const setTint = g => g ? (g.id % 2 ? " set-odd" : " set-even") : "";
 
   document.getElementById("title").textContent = data.title + " · review";
@@ -274,8 +305,6 @@ function keepLabels(members, n) {
       img(c.thumb, c.file) || el("div", { cls: "empty", text: c.error || "no preview" }),
       el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), starText(l.stars), setBadge(c.group), modelBadge(c.decision)));
     if (l.label) card.appendChild(yourBadge(l.label, " label"));
-    const pill = bestPill(c.group);
-    if (pill) card.appendChild(pill);
     if (inSet && !c.error) {
       const t = el("button", { cls: "keeper-toggle", type: "button", "aria-pressed": String(keeper), title: "keeper: keep or cull this frame",
         text: keeper ? "✓ keeper" : "keeper?" });
@@ -307,7 +336,7 @@ function keepLabels(members, n) {
         plus.onclick = () => setKeepCount(id, setKeepers(id) + 1);
         const grid2 = el("div", { cls: "setgrid" });
         block = el("div", { cls: "setblock" + setTint(c.group) },
-          el("div", { cls: "sethead" }, el("strong", { text: `Set ${id}` }), el("span", { text: `${ms.length} frames · keepers ${setKeepers(id)}` }),
+          el("div", { cls: "sethead" }, el("strong", { text: groupName(c.group) }), el("span", { text: `${ms.length} frames · keepers ${setKeepers(id)}` }),
             minus, plus, el("span", { cls: "meta", text: `model kept ${modelKept} · ${ranked} ranked` })), grid2);
         block.grid = grid2;
         out.push(block);
@@ -346,7 +375,7 @@ function keepLabels(members, n) {
     if (c.first) row(info, "first pass", `${c.first.backend}/${c.first.model}: ${c.first.evaluation.sharpness.status} ${c.first.evaluation.sharpness.score}`);
     if (f) row(info, "subject", f.source === "none" ? "none: " + (f.reason || "") : f.source + (f.label ? ": " + f.label : "") + (f.face_q ? ` (face q ${f.face_q})` : ""));
     if (c.group) {
-      row(info, "set", `${c.group.id} · #${c.group.rank}/${c.group.of} by ${c.group.by} (${c.group.size} frames)`);
+      row(info, "group", `${groupName(c.group)} · #${c.group.rank}/${c.group.of} by ${c.group.by} (${c.group.size} frames)`);
       row(info, "strength", c.group.strength);
       row(info, "weakness", c.group.weakness);
       row(info, "set summary", c.set_summary);
@@ -438,17 +467,19 @@ function keepLabels(members, n) {
   const setLabel = v => update({ label: v }, !!v);
   const setStars = n => update({ stars: n }, n > 0 && progress === "unrated");
 
-  // columns counts the grid's cards in the first row as laid out now, so a row
-  // step follows the window width.
-  function columns() {
-    const cs = document.getElementById("grid").querySelectorAll(".card");
-    let n = 0;
-    for (const c of cs) { if (c.offsetTop !== cs[0].offsetTop) break; n++; }
-    return Math.max(1, n);
+  // moveRow moves one visual row down (dir 1) or up (-1) in the grid, to the
+  // nearest card by position (rowStep); cards render in visible() order, so a
+  // card's place in the grid is its place in the list.
+  function moveRow(dir) {
+    const els = [...document.getElementById("grid").querySelectorAll(".card")];
+    if (!els.length) return;
+    const rects = els.map(e => { const r = e.getBoundingClientRect(); return { top: r.top, left: r.left, width: r.width }; });
+    const cur = Math.min(sel, els.length - 1), t = rowStep(rects, cur, dir);
+    if (t !== cur) move(t - cur);
   }
 
   // move steps d places in the list as shown (a just-changed frame still in it;
-  // d = ±columns for a row), then re-applies the filter and lands on the frame
+  // a row step passes the distance moveRow found), then re-applies the filter and lands on the frame
   // that was d places away. Past the end it stays put, except that a row step
   // down from above a shorter last row lands on the last frame.
   function move(d) {
@@ -530,13 +561,13 @@ function keepLabels(members, n) {
       const t = el("div", { cls: "tile", title: m.file },
         im || el("p", { cls: "empty", text: m.error || "no preview" }),
         el("div", {}, el("span", { cls: "num", text: n < 9 ? String(n + 1) : "" }), el("span", { text: m.file + "  " }),
-          modelBadge(m.decision), el("span", { text: ` #${g.rank}/${g.of} ` }), g.best ? el("span", { cls: "best", text: "best", style: "position:static" }) : null,
+          modelBadge(m.decision), el("span", { text: ` #${g.rank}/${g.of} ` }),
           l.label ? yourBadge(l.label) : null));
       t.onclick = () => pickCompare(n, false);
       return t;
     });
     compare.replaceChildren(
-      el("p", { cls: "cap", text: `set ${c.group.id}: ${allSubjects ? "subject crops at one scale" : "frames (not every member has a subject crop)"} · 1–${Math.min(9, tiles.length)} keeps that frame · click opens it · S or Esc closes` }),
+      el("p", { cls: "cap", text: `${groupName(c.group)}: ${allSubjects ? "subject crops at one scale" : "frames (not every member has a subject crop)"} · 1–${Math.min(9, tiles.length)} keeps that frame · click opens it · S or Esc closes` }),
       el("div", { cls: "tiles" }, ...tiles));
     compare.className = "open";
     compareOpen = true;
@@ -677,8 +708,8 @@ function keepLabels(members, n) {
     if (k === "s") { openCompare(); ev.preventDefault(); return; }
     if (k === "arrowright") { move(1); ev.preventDefault(); }
     else if (k === "arrowleft") { move(-1); ev.preventDefault(); }
-    else if (k === "arrowdown") { move(detailOpen ? 1 : columns()); ev.preventDefault(); }
-    else if (k === "arrowup") { move(detailOpen ? -1 : -columns()); ev.preventDefault(); }
+    else if (k === "arrowdown") { if (detailOpen) move(1); else moveRow(1); ev.preventDefault(); }
+    else if (k === "arrowup") { if (detailOpen) move(-1); else moveRow(-1); ev.preventDefault(); }
     else if (k === "enter") { detailOpen = true; render(); }
     else if (k === "n") nextUnlabelled();
     else if (k === "]") nextSet(1);

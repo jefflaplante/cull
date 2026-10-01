@@ -243,7 +243,7 @@ per-session token, then opens your browser.
 **Filters** combine three rows:
 - **Verdict:** your label, else the model's.
 - **Progress:** unlabelled, unrated, and where you disagree with the model.
-- **Sets:** all, best, outranked.
+- **Sets:** all, keepers (frames in a group that you or the model keep), outranked.
 
 For example, *Keep + Unrated* shows the keepers you haven't starred yet.
 
@@ -258,7 +258,8 @@ Keepers have a green border.
 **On each card and in the detail view:**
 - Your label is the outlined badge, top right; the model's verdict is in the card's
   bottom row.
-- A frame in a set shows "set N · #rank/of", with a *best* marker on the best frames.
+- A frame in a group shows "group_N · #rank/of": groups are numbered 1, 2, … through
+  the shoot, and the rank is the model's.
 - The detail view shows the model's reasons, the frame's rank with its strengths and
   weaknesses, and a filmstrip of its set.
 

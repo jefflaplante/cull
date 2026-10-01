@@ -91,7 +91,7 @@ an offline page instead of serving).
   (or **-** / **=**) to keep the top N by the model's rank and cull the rest, or the
   **✓ keeper** toggle on a frame to flip just that frame. All of these are your labels.
 - **Filters:** by verdict (keep, review or cull), by what you haven't labelled or
-  rated yet, where you disagree with the model, and by **Sets: All / Best /
+  rated yet, where you disagree with the model, and by **Sets: All / Keepers /
   Outranked**.
 - **Detail view:** shows the model's reasons. For a frame in a set, it also shows
   the frame's rank, why it won or lost, and a filmstrip of the set.

@@ -279,3 +279,10 @@ func TestPageHasSetBlocksAndKeeperControls(t *testing.T) {
 		}
 	}
 }
+
+// Groups are named group_n in the page, and the model's "best" pill is gone.
+func TestPageNamesGroupsWithoutBestPill(t *testing.T) {
+	if !strings.Contains(pageTemplate, "group_") || strings.Contains(pageTemplate, "bestPill(") {
+		t.Fatal("page still shows the best pill or lacks group_n names")
+	}
+}

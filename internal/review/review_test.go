@@ -231,3 +231,12 @@ func TestBuildMovesLooseImagesIntoAssets(t *testing.T) {
 		}
 	}
 }
+
+// The page's own behaviour is checked in a browser; these pin that the handlers ship.
+func TestPageHasNavigationKeysAndRevert(t *testing.T) {
+	for _, want := range []string{`k === "n"`, `k === "]"`, `k === "["`, `prev:`, "N next unlabelled", "(reverted)"} {
+		if !strings.Contains(pageTemplate, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+}

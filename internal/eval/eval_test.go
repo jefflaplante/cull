@@ -262,3 +262,22 @@ func TestRankAsksForComparisonBeforeOrder(t *testing.T) {
 		t.Fatalf("summary must precede ranking: %s", s)
 	}
 }
+
+func TestCullNeedsAgreeingScore(t *testing.T) {
+	p := Policy{MinCropArea: 0.6, CullMaxSharpness: 3}
+	e := &Evaluation{Sharpness: Sharpness{Status: "missed_focus", Score: 5}}
+	if d, reasons := p.Decide(e); d != Review || !strings.Contains(strings.Join(reasons, ";"), "scored 5.0") {
+		t.Fatalf("contradicting score: %s %v", d, reasons)
+	}
+	e.Sharpness.Score = 2
+	if d, _ := p.Decide(e); d != Cull {
+		t.Fatalf("agreeing score: %s", d)
+	}
+}
+
+func TestOldStoredPolicyCullsOnStatusAlone(t *testing.T) {
+	p := Policy{MinCropArea: 0.6} // CullMaxSharpness absent: 0
+	if d, _ := p.Decide(&Evaluation{Sharpness: Sharpness{Status: "motion_blur", Score: 6}}); d != Cull {
+		t.Fatalf("got %s", d)
+	}
+}

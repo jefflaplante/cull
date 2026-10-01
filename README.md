@@ -125,7 +125,9 @@ For each DNG:
    It returns structured scores for sharpness, exposure, composition, and people
    (eyes, expression). Every answer is checked against a JSON Schema, with one retry.
 4. **Decision in Go** (`eval.Policy`). The model only assesses; these rules decide:
-   - `missed_focus` or `motion_blur` → **cull**; `soft` → **review**. Optionally,
+   - `missed_focus` or `motion_blur` → **cull**, when the sharpness score agrees (at
+     most `--cull-max-sharpness`, default 3; a higher score sends it to **review**);
+     `soft` → **review**. Optionally,
      sharpness below `--review-below-sharpness` → review.
    - Closed eyes → `--eyes-closed` (default review).
    - Raw highlight clipping at or above `--raw-clip-threshold` → `--raw-clipped`
@@ -340,6 +342,7 @@ its sidecar into a `culled/` folder beside it.
 
 **Policy** (`judge`, `rank`, `decide`, `calibrate`):
 - `--review-below-sharpness` (0 = off);
+- `--cull-max-sharpness` (3; 0 = the status alone culls);
 - `--eyes-closed`, `--raw-clipped` and `--outranked` (each `ignore`, `review` or
   `cull`; default `review`);
 - `--raw-clip-threshold` (0.5 % of raw samples);

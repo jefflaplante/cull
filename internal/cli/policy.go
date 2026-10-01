@@ -17,6 +17,7 @@ import (
 type policyFlags struct {
 	minCropArea          float64
 	reviewBelowSharpness float64
+	cullMaxSharpness     float64
 	eyesClosed           string
 	outranked            string
 	rawClipped           string
@@ -27,6 +28,7 @@ type policyFlags struct {
 func (pf *policyFlags) register(f *pflag.FlagSet) {
 	f.Float64Var(&pf.minCropArea, "min-crop-area", 0.6, "reject suggested crops retaining less than this fraction of the frame")
 	f.Float64Var(&pf.reviewBelowSharpness, "review-below-sharpness", 0, "send frames whose sharpness score is below this to review (0 = off)")
+	f.Float64Var(&pf.cullMaxSharpness, "cull-max-sharpness", 3, "cull missed_focus/motion_blur only when the sharpness score is at most this; above it, review (0 = the status alone culls)")
 	f.StringVar(&pf.eyesClosed, "eyes-closed", "review", "what to do with closed eyes: ignore, review, or cull")
 	f.StringVar(&pf.outranked, "outranked", "review", "what to do with frames ranked below --keep-best in their set: ignore, review, or cull")
 	f.StringVar(&pf.rawClipped, "raw-clipped", "review", "what to do when the raw's highlights are clipped: ignore, review, or cull")
@@ -48,7 +50,8 @@ func (pf *policyFlags) policy() (eval.Policy, error) {
 		return eval.Policy{}, fmt.Errorf("--raw-clipped %w", err)
 	}
 	p := eval.Policy{
-		MinCropArea: pf.minCropArea, ReviewBelowSharpness: pf.reviewBelowSharpness, EyesClosed: eyes, Outranked: outranked,
+		MinCropArea: pf.minCropArea, ReviewBelowSharpness: pf.reviewBelowSharpness, CullMaxSharpness: pf.cullMaxSharpness,
+		EyesClosed: eyes, Outranked: outranked,
 		RawClipped: raw, RawClipThreshold: pf.rawClipThreshold, KeepBest: pf.keepBest,
 	}
 	return p, validPolicy(p)
@@ -62,6 +65,9 @@ func validPolicy(p eval.Policy) error {
 	}
 	if p.ReviewBelowSharpness < 0 || p.ReviewBelowSharpness > 10 {
 		return fmt.Errorf("--review-below-sharpness must be in [0, 10]")
+	}
+	if p.CullMaxSharpness < 0 || p.CullMaxSharpness > 10 {
+		return fmt.Errorf("--cull-max-sharpness must be in [0, 10]")
 	}
 	for _, a := range []struct {
 		flag string
@@ -97,6 +103,7 @@ func (pf *policyFlags) resolve(fs *pflag.FlagSet, saved *eval.Policy) (eval.Poli
 	}{
 		{"min-crop-area", &p.MinCropArea, saved.MinCropArea},
 		{"review-below-sharpness", &p.ReviewBelowSharpness, saved.ReviewBelowSharpness},
+		{"cull-max-sharpness", &p.CullMaxSharpness, saved.CullMaxSharpness},
 		{"eyes-closed", &p.EyesClosed, saved.EyesClosed},
 		{"outranked", &p.Outranked, saved.Outranked},
 		{"raw-clipped", &p.RawClipped, saved.RawClipped},

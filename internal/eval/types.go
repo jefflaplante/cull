@@ -97,11 +97,15 @@ func (a Action) decision() (Decision, bool) {
 type Policy struct {
 	MinCropArea          float64 `json:"min_crop_area"`
 	ReviewBelowSharpness float64 `json:"review_below_sharpness"` // 0 = off; keep -> review when the sharpness score is lower
-	EyesClosed           Action  `json:"eyes_closed"`
-	RawClipped           Action  `json:"raw_clipped"`        // raw highlights clipped beyond RawClipThreshold
-	RawClipThreshold     float64 `json:"raw_clip_threshold"` // percent of raw samples at white level; 0 = default 0.5
-	KeepBest             int     `json:"keep_best"`          // per set, keep this many best-ranked frames; 0 = rank only
-	Outranked            Action  `json:"outranked"`          // frames ranked below KeepBest in their set
+	// CullMaxSharpness: a missed_focus/motion_blur frame culls only when its
+	// sharpness score is at most this; above it, review. 0 = off (the status alone
+	// culls), which is also how a policy stored before this field decides.
+	CullMaxSharpness float64 `json:"cull_max_sharpness"`
+	EyesClosed       Action  `json:"eyes_closed"`
+	RawClipped       Action  `json:"raw_clipped"`        // raw highlights clipped beyond RawClipThreshold
+	RawClipThreshold float64 `json:"raw_clip_threshold"` // percent of raw samples at white level; 0 = default 0.5
+	KeepBest         int     `json:"keep_best"`          // per set, keep this many best-ranked frames; 0 = rank only
+	Outranked        Action  `json:"outranked"`          // frames ranked below KeepBest in their set
 }
 
 // Facts are measurements the policy uses beside the model's assessment.
@@ -173,7 +177,13 @@ func (p Policy) DecideFacts(e *Evaluation, f Facts) (Decision, []string) {
 
 	switch e.Sharpness.Status {
 	case "missed_focus", "motion_blur":
-		raise(Cull, "sharpness: "+e.Sharpness.Status)
+		if p.CullMaxSharpness > 0 && e.Sharpness.Score > p.CullMaxSharpness {
+			// The status and the score disagree: the model's own score says it isn't
+			// that bad. A cull needs both, so this one is only doubtful.
+			raise(Review, fmt.Sprintf("sharpness: %s but scored %.1f (cull needs %.1f or less)", e.Sharpness.Status, e.Sharpness.Score, p.CullMaxSharpness))
+		} else {
+			raise(Cull, "sharpness: "+e.Sharpness.Status)
+		}
 	case "soft":
 		raise(Review, "sharpness: soft")
 	default:

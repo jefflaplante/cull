@@ -94,15 +94,37 @@ fixes in `7acee55`:
 
 ## 3. Verdict quality
 
-1. **Test–retest measure.** `calibrate --compare a.json b.json` reports verdict flips between runs and backends.
-2. **Cull only when two signals agree.** Give each sharpness status a score band in the prompt, and cull only when the status and a low score agree; send contradictions to review (`types.go:174`). Escalation should send disagreement to review rather than overwrite (`pipeline.go:266-273`).
-3. **Evidence before score.** Schemas are marshalled from maps, so keys go out alphabetically and sharpness comes last. Emit ordered JSON with sharpness first and the evidence fields before score and status (`anthropic.go:75`, `claudecode.go:44`).
-4. **Second opinion on culls and soft frames only.** Sample the same model again on those (~10–15% of frames) and send disagreement to review.
-5. **Rank position bias.** For sets of 8 or fewer, make a second call in reversed order and trust the top-k only where the two agree (`eval/rank.go:69`).
-6. **Local eye-level focus check** (advisory). Compare fine/coarse detail at the pupils with the ear, hairline and cheek of the same face. Also:
+**done** `8e07d95`: 1. **Test–retest measure.** `calibrate --compare a.json b.json` reports verdict flips between runs and backends.
+**done** `abb37eb`, `ed40dee`, `29501d6`: 2. **Cull only when two signals agree.** Give each sharpness status a score band in the prompt, and cull only when the status and a low score agree; send contradictions to review (`types.go:174`). Escalation should send disagreement to review rather than overwrite (`pipeline.go:266-273`).
+**done** `c833551`: 3. **Evidence before score.** Schemas are marshalled from maps, so keys go out alphabetically and sharpness comes last. Emit ordered JSON with sharpness first and the evidence fields before score and status (`anthropic.go:75`, `claudecode.go:44`).
+**done** `99a4d08` (opt-in `--second-opinion`): 4. **Second opinion on culls and soft frames only.** Sample the same model again on those (~10–15% of frames) and send disagreement to review.
+**done** `b343d2e` (opt-in `--rank-twice`): 5. **Rank position bias.** For sets of 8 or fewer, make a second call in reversed order and trust the top-k only where the two agree (`eval/rank.go:69`).
+**done** `2496c53`, `8dcc05f` (advisory; eye vs whole face): 6. **Local eye-level focus check** (advisory). Compare fine/coarse detail at the pupils with the ear, hairline and cheek of the same face. Also:
    - Puploc always runs at 0° (`detect.go:95`), so tilted faces get no pupils.
    - Use a single pupil when only one is found.
-7. **Subject face choice.** `faces[0]` is the most confident face, which can be a frontal passer-by; weight by area (`stages.go:82`).
+**done** `2496c53`, `29501d6`: 7. **Subject face choice.** `faces[0]` is the most confident face, which can be a frontal passer-by; weight by area (`stages.go:82`).
+
+Section 3 was implemented on branch `feat/verdict-quality` (2026-09-30). It is verified
+with synthetic fixtures and free `scan` runs only. No live `judge` run has been made, so
+the evidence-first ordering, the score bands, `--second-opinion` and `--rank-twice` are
+unmeasured until two runs are compared with `calibrate --compare` and labels.
+
+**Deferred minors from that review:**
+- Re-deciding an old escalated report now sends disagreeing frames to review. That is
+  intended, but it is the one exception to "old reports decide as before": document it.
+- With escalation on, the second opinion comes from the primary model re-judging the
+  escalated verdict. Either ask the escalation backend or document it.
+- A demoted cull keeps "sharpness: missed_focus" as a reason. Add "(not culled: disputed)".
+- The `--rank-twice` help should say that sets already ranked need `--force`.
+- The "reversed ranking failed" log line is misleading when re-attaching a state that was
+  recorded without `--rank-twice`.
+- No test covers a disputed place on a frame that is already review.
+- `marshalOrdered` descends `[]any` but not `[]map[string]any`. No current schema uses
+  the latter.
+- The pigo-sample pupil assertion may flake (puploc uses `math/rand`). If it does, loosen
+  it to `>= 1`.
+- New finding: pigo's puploc is nondeterministic, so `subject_sharpness` varies by about
+  ±5% between runs.
 
 ## 4. Cost (A/B each with `calibrate` before adopting)
 

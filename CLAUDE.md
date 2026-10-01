@@ -218,6 +218,22 @@ make vet
   (the pre-feature-batch sync run said 5.5 with a landed tile), M1103817 review 3.5
   "soft" (the subscription run called it missed_focus → cull; it is soft at 100%).
 
+### Run-to-run stability after the section-3 changes (2026-09-30, user-approved)
+
+Two `judge --backend claude-code` runs (Sonnet via subscription, ranking on, defaults) on
+the 17 sample frames, compared with `calibrate --compare`:
+- decisions agreed on 17/17 (14 keep, 2 review, 1 cull), with 0 keep↔cull crossings;
+- the sharpness status differed on 2 frames, both sharp↔acceptable (both keep);
+- mean |Δ sharpness score| was 0.32.
+- **Scores sat inside the prompt's bands** every time: sharp ≥ 8, acceptable 6.5–7,
+  soft 4.5–5 (M1104110), missed_focus 2.0–2.3 (M1103817). This suggests the bands and
+  the evidence-first order are being followed.
+- M1103817 was culled both times; before the section-3 changes it flipped between cull
+  and review. M1103821's review comes from raw clipping (deterministic), not the model.
+- Each run used about 140k input and 11k output tokens, roughly 5 min at `-j 2`.
+- **Limits:** one pair of runs on 17 mostly easy frames, with no labels. This shows
+  stability, not correctness. Calibrate on a labelled sample before trusting culls.
+
 ### Camera support (tested 2026-09-29 on 22 raw.pixls.us samples with `cull scan --raw-clip`)
 
 - `cull` judges only the embedded JPEG preview, so support depends on the camera's DNG

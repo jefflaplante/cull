@@ -1014,3 +1014,18 @@ func TestRankBatchRefusesEstimateOverBudgetBeforeSubmitting(t *testing.T) {
 		t.Fatalf("submitted %d batches, state %v", len(fb.submitted), exists(ex.statePath))
 	}
 }
+
+// The same for a recorded batch ranking: its answers are keyed by frame paths.
+func TestRankBatchStateFromRenamedFolderRefuses(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	fb := &fakeBatch{statusErr: errors.New("network down")}
+	ex := rankEx(fb, c)
+	if err := RankSets(context.Background(), rep, c, ex, false); err == nil {
+		t.Fatal("a status failure must surface")
+	}
+	moved := ex
+	moved.cfg.Dir = c.Dir + "-renamed"
+	if _, err := moved.open(moved.cfg); err == nil || !strings.Contains(err.Error(), "rename the folder back") {
+		t.Fatalf("got %v", err)
+	}
+}

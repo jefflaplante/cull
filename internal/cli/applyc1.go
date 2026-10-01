@@ -51,7 +51,7 @@ things before anything is written.`,
 				if err != nil {
 					return fmt.Errorf("no report: %w (run judge first, or pass -o)", err)
 				}
-				rep.Rebase(cfg.Dir) // a renamed shoot folder: match images at their new paths
+				rep.Relocate(cfg.ReportPath, cfg.Dir) // a renamed shoot folder: match images at their new paths
 				if o.Labels, err = userLabels(cmd.ErrOrStderr(), cfg.ReportPath, labelsPath, noLabels); err != nil {
 					return err
 				}

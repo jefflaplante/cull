@@ -66,7 +66,7 @@ Works on scan reports too (labeling only).`,
 			if err != nil {
 				return fmt.Errorf("no report: %w (run scan or judge first, or pass -o)", err)
 			}
-			if rep.Rebase(cfg.Dir) { // the folder was renamed: the server reloads the report, so save the new paths
+			if rep.Relocate(cfg.ReportPath, cfg.Dir) { // the folder was renamed: the server reloads the report, so save the new paths
 				if err := rep.Save(cfg.ReportPath); err != nil {
 					return err
 				}

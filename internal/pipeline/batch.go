@@ -90,6 +90,14 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 	case err != nil:
 		return nil, total, err
 	}
+	for _, f := range st.Frames {
+		// Frames are keyed by their paths: from a renamed folder every frame would
+		// look new, be sent (and billed) again, and land in the report twice.
+		if f.Result.File != "" && !strings.HasPrefix(f.Result.File, cfg.Dir+string(filepath.Separator)) {
+			return nil, total, fmt.Errorf("%s was recorded for frames under %s, not %s: rename the folder back to re-attach, "+
+				"or delete %s to start over (what it already cost is paid; its answers are lost)", statePath, filepath.Dir(f.Result.File), cfg.Dir, statePath)
+		}
+	}
 	for _, b := range st.Batches {
 		if b.Status == "submitting" {
 			return nil, total, fmt.Errorf("a batch submission was interrupted before its ID was recorded, so it may have been created: "+

@@ -296,7 +296,7 @@ func rank(ctx context.Context, cfg Config, ex rankExec, force bool) (*report.Rep
 	if err != nil {
 		return nil, err
 	}
-	rep.Rebase(cfg.Dir) // a renamed shoot folder: the save below keeps the new paths
+	rep.Relocate(cfg.ReportPath, cfg.Dir) // a renamed shoot folder: the save below keeps the new paths
 	n, err := fillLooks(ctx, rep, log)
 	if n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)

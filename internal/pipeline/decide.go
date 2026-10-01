@@ -48,7 +48,7 @@ func Decide(ctx context.Context, reportPath string, o DecideOptions, log io.Writ
 	if err != nil {
 		return DecideSummary{Changed: map[string]int{}}, err
 	}
-	if rep.Rebase(o.Dir) {
+	if rep.Relocate(reportPath, o.Dir) {
 		fmt.Fprintf(log, "the report's frames moved to %s (the folder was renamed): using their new paths\n", o.Dir)
 	}
 	n, err := fillLooks(ctx, rep, log)

@@ -80,6 +80,7 @@ type rankBatchState struct {
 	Version int                    `json:"version"`
 	Backend string                 `json:"backend"`
 	Model   string                 `json:"model"`
+	Dir     string                 `json:"dir,omitempty"`     // the shoot folder: answers are keyed by frame paths under it
 	Batches []*batchRecord         `json:"batches"`           // custom IDs from rankCustomID
 	Answers map[string]*rankAnswer `json:"answers,omitempty"` // by framesKey, once collected
 }
@@ -292,13 +293,19 @@ func (e batchExec) open(cfg Config) (*rankBatchState, error) {
 	st, err := loadRankBatchState(e.statePath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return &rankBatchState{Version: rankBatchStateVersion, Backend: cfg.Backend, Model: cfg.Model, Answers: map[string]*rankAnswer{}}, nil
+		return &rankBatchState{Version: rankBatchStateVersion, Backend: cfg.Backend, Model: cfg.Model, Dir: cfg.Dir, Answers: map[string]*rankAnswer{}}, nil
 	case err != nil:
 		return nil, fmt.Errorf("%w: %w", errBatchPending, err)
 	case st.Backend != cfg.Backend || st.Model != cfg.Model:
 		return nil, fmt.Errorf("%w: %s belongs to %s/%s, not %s/%s: rerun with that backend and model to re-attach, "+
 			"or delete %s to abandon it (what it already cost is paid; its answers are lost)",
 			errBatchPending, e.statePath, st.Backend, st.Model, cfg.Backend, cfg.Model, e.statePath)
+	case st.Dir != "" && st.Dir != cfg.Dir:
+		// Answers are keyed by frame paths: from a renamed folder none would match,
+		// and every set would be sent (and billed) again.
+		return nil, fmt.Errorf("%w: %s was recorded for %s, not %s: rename the folder back to re-attach, "+
+			"or delete %s to abandon it (what it already cost is paid; its answers are lost)",
+			errBatchPending, e.statePath, st.Dir, cfg.Dir, e.statePath)
 	}
 	for _, b := range st.Batches {
 		if b.Status == "submitting" {

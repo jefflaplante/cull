@@ -338,3 +338,24 @@ func TestBatchResumeAfterFinishCrashAddsNothingTwice(t *testing.T) {
 		t.Fatalf("err=%v results=%d cost %v→%v", err, len(rep2.Results), rep.Cost(), rep2.Cost())
 	}
 }
+
+// A judge batch recorded before the shoot folder was renamed holds frames by their
+// old paths: re-attaching from the new folder would resubmit (and re-bill) every
+// frame and report each twice, so it refuses.
+func TestBatchStateFromRenamedFolderRefuses(t *testing.T) {
+	dir, c := batchShoot(t)
+	fb := &fakeBatch{statusErr: errors.New("network down")}
+	if _, _, err := RunBatch(context.Background(), c, fb); err == nil {
+		t.Fatal("expected the first run to stop while polling")
+	}
+	renamed := dir + "-renamed"
+	if err := os.Rename(dir, renamed); err != nil {
+		t.Fatal(err)
+	}
+	c.Dir, c.ReportPath, c.Resume = renamed, filepath.Join(renamed, "r.json"), true
+	fb.statusErr = nil
+	_, _, err := RunBatch(context.Background(), c, fb)
+	if err == nil || !strings.Contains(err.Error(), "rename the folder back") || len(fb.submitted) != 1 {
+		t.Fatalf("err=%v submitted=%d", err, len(fb.submitted))
+	}
+}

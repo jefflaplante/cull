@@ -59,7 +59,7 @@ func Restore(reportPath, dir string, log io.Writer) (int, error) {
 		}
 		return 0, err
 	}
-	rep.Rebase(dir) // a renamed shoot folder: its culled/ moved with it
+	rep.Relocate(reportPath, dir) // a renamed shoot folder: its culled/ moved with it
 	n := 0
 	dirs := map[string]bool{}
 	for i := range rep.Results {

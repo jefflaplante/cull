@@ -87,9 +87,9 @@ func Write(path string, s Sidecar, overwrite bool) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmp, 0o644); err != nil { // CreateTemp makes 0600
-		return err
-	}
+	// CreateTemp makes 0600. Best effort: some network volumes refuse mode
+	// changes, and the mode is not worth failing a sidecar over.
+	_ = os.Chmod(tmp, 0o644)
 	if overwrite {
 		return os.Rename(tmp, path)
 	}

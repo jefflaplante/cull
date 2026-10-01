@@ -115,3 +115,34 @@ func TestRebaseMovesEveryPathUnderTheOldDir(t *testing.T) {
 		t.Fatalf("a sibling folder sharing the prefix was rebased: %s", sib.Results[0].File)
 	}
 }
+
+// A report run against another existing folder (a mistyped dir with -o) is not
+// rebased: its frames still live where it says.
+func TestRelocateOnlyWhenTheFolderMoved(t *testing.T) {
+	parent := t.TempDir()
+	a, b, reports := filepath.Join(parent, "a"), filepath.Join(parent, "b"), filepath.Join(parent, "reports")
+	for _, d := range []string{a, b, reports} {
+		os.Mkdir(d, 0o755)
+	}
+	mk := func() *Report { return &Report{Dir: a, Results: []Result{{File: filepath.Join(a, "L1.DNG")}}} }
+
+	if r := mk(); r.Relocate(filepath.Join(reports, "a.json"), b) || r.Results[0].File != filepath.Join(a, "L1.DNG") {
+		t.Fatalf("rebased onto a different existing folder: %+v", r.Results)
+	}
+	if r := mk(); !r.Relocate(filepath.Join(b, "cull-report.json"), b) { // a copy of the folder, its report inside
+		t.Fatal("a report inside the folder it is used with must follow it")
+	}
+	link := filepath.Join(parent, "alias")
+	os.Symlink(a, link)
+	if r := mk(); r.Relocate(filepath.Join(reports, "a.json"), link) && r.Results[0].File != filepath.Join(link, "L1.DNG") {
+		t.Fatal("same folder under another name: rebase or leave, but never mix")
+	}
+	gone := &Report{Dir: filepath.Join(parent, "gone"), Results: []Result{{File: filepath.Join(parent, "gone", "L1.DNG")}}}
+	if !gone.Relocate(filepath.Join(reports, "a.json"), b) {
+		t.Fatal("a folder that no longer exists was renamed: rebase")
+	}
+	none := &Report{Dir: filepath.Join(parent, "gone2"), Results: []Result{{File: "/elsewhere/L1.DNG"}}}
+	if none.Relocate(filepath.Join(reports, "x.json"), b) || none.Dir != filepath.Join(parent, "gone2") {
+		t.Fatal("nothing under the old folder: nothing to change, Dir kept")
+	}
+}

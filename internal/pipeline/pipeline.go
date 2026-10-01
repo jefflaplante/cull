@@ -414,7 +414,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 	done := map[string]bool{}
 	if cfg.Resume {
 		prev, err := report.Load(cfg.ReportPath)
-		if err == nil && prev.Rebase(cfg.Dir) {
+		if err == nil && prev.Relocate(cfg.ReportPath, cfg.Dir) {
 			fmt.Fprintf(cfg.Log, "the report's frames moved to %s (the folder was renamed): continuing with their new paths\n", cfg.Dir)
 		}
 		switch {
@@ -498,8 +498,8 @@ func guardOverwrite(cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("%s exists but can't be read (%v): move it aside, or use -o for a separate report", cfg.ReportPath, err)
 	}
-	prev.Rebase(cfg.Dir)          // in memory only: find its moved frames where they now are
-	for i := range prev.Results { // in memory only: count moves a crashed run never recorded
+	prev.Relocate(cfg.ReportPath, cfg.Dir) // in memory only: find its moved frames where they now are
+	for i := range prev.Results {          // in memory only: count moves a crashed run never recorded
 		reconcileMove(&prev.Results[i])
 	}
 	evaluated, moved := prev.PaidWork()

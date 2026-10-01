@@ -264,14 +264,17 @@ func (r Result) Facts() eval.Facts {
 
 // Rebase moves every path under the report's Dir to dir: the shoot folder was
 // renamed or moved together with its report. Paths outside Dir are left alone.
-// Returns whether anything changed; the caller saves.
+// Returns whether any path changed; the caller saves. Callers deciding whether
+// the folder moved at all use Relocate.
 func (r *Report) Rebase(dir string) bool {
 	if dir == "" || r.Dir == "" || r.Dir == dir {
 		return false
 	}
 	old := r.Dir + string(filepath.Separator)
+	changed := false
 	re := func(p string) string {
 		if strings.HasPrefix(p, old) {
+			changed = true
 			return filepath.Join(dir, p[len(old):])
 		}
 		return p
@@ -292,6 +295,37 @@ func (r *Report) Rebase(dir string) bool {
 			s.Notes[j].File = re(s.Notes[j].File)
 		}
 	}
-	r.Dir = dir
-	return true
+	if changed { // with nothing under the old folder, keep its name: nothing moved
+		r.Dir = dir
+	}
+	return changed
+}
+
+// Relocate rebases the report onto dir when its shoot folder really moved there:
+// the old folder is gone (renamed), it is dir under another name (a symlink), or
+// the report itself sits in dir and not in the old folder (the folder was copied
+// with its report). A report used against some other existing folder (a mistyped
+// dir with -o) is left alone: its frames still live where it says.
+func (r *Report) Relocate(reportPath, dir string) bool {
+	if dir == "" || r.Dir == "" || r.Dir == dir {
+		return false
+	}
+	oldSt, err := os.Stat(r.Dir)
+	moved := err != nil
+	if !moved {
+		if newSt, err := os.Stat(dir); err == nil && os.SameFile(oldSt, newSt) {
+			moved = true
+		}
+	}
+	if !moved {
+		if abs, err := filepath.Abs(reportPath); err == nil {
+			moved = within(dir, abs) && !within(r.Dir, abs)
+		}
+	}
+	return moved && r.Rebase(dir)
+}
+
+// within reports whether path is inside dir.
+func within(dir, path string) bool {
+	return strings.HasPrefix(path, dir+string(filepath.Separator))
 }

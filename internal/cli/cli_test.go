@@ -1265,3 +1265,15 @@ func TestEffortRefusedOnOpenAI(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// Rankings in one report can't mix efforts: rank uses the report's, and refuses another.
+func TestRankRefusesADifferentEffort(t *testing.T) {
+	dir := t.TempDir()
+	rankReportFixture(t, dir, "anthropic", "claude-sonnet-5", 2)
+	if _, err := run(t, "rank", "--estimate", "--effort", "low", dir); err == nil || !strings.Contains(err.Error(), "--effort") {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := run(t, "rank", "--estimate", "--locate-effort", "low", dir); err == nil || !strings.Contains(err.Error(), "locate") {
+		t.Fatalf("got %v", err)
+	}
+}

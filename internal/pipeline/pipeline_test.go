@@ -832,3 +832,66 @@ func TestRunRecordsAndPinsTheResolvedModel(t *testing.T) {
 		t.Fatalf("resume didn't pin: err=%v pinned=%q", err, b2.pinned)
 	}
 }
+
+// When an alias has moved on, the abort says to rerun with the model the report
+// resolved to: resume must accept exactly that.
+func TestResumeAcceptsTheResolvedModelName(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	c := cfg(dir)
+	c.Backend, c.Model = "claude-code", "sonnet"
+	b := &pinnedBackend{fakeBackend: fakeBackend{status: "sharp"}, resolves: "claude-sonnet-5"}
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatal(err)
+	}
+	c.Resume, c.Model = true, "claude-sonnet-5"
+	rep, _, err := Run(context.Background(), c, &pinnedBackend{fakeBackend: fakeBackend{status: "sharp"}, resolves: "claude-sonnet-5"})
+	if err != nil || rep.Model != "sonnet" {
+		t.Fatalf("err=%v model=%q", err, rep.Model)
+	}
+}
+
+// Batch requests carry the run's effort like sync calls do.
+func TestBatchRequestsCarryEffort(t *testing.T) {
+	_, c := batchShoot(t)
+	c.Effort, c.LocateEffort = "medium", "low"
+	fb := &fakeBatch{locate: map[string]string{locatePrompt: `{"confident":true,"kind":"eye","subject":"eye","box":{"left":0.4,"top":0.3,"right":0.45,"bottom":0.35}}`}}
+	if _, _, err := RunBatch(context.Background(), c, fb); err != nil {
+		t.Fatal(err)
+	}
+	for _, batch := range fb.submitted {
+		for _, r := range batch {
+			want := "medium"
+			if r.Req.SchemaName == "focus_target" {
+				want = "low"
+			}
+			if r.Req.Effort != want {
+				t.Fatalf("%s: effort %q, want %q", r.CustomID, r.Req.Effort, want)
+			}
+		}
+	}
+}
+
+// cull rank pins the alias to what the report was judged with.
+func TestRankPinsTheReportsResolvedModel(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	rep.ResolvedModel = "claude-sonnet-5"
+	if err := rep.Save(c.ReportPath); err != nil {
+		t.Fatal(err)
+	}
+	b := &pinnedRankBackend{rankBackend: rankBackend{order: reverse}}
+	if _, err := Rank(context.Background(), c, b, false); err != nil {
+		t.Fatal(err)
+	}
+	if b.pinned != "claude-sonnet-5" {
+		t.Fatalf("pinned %q", b.pinned)
+	}
+}
+
+type pinnedRankBackend struct {
+	rankBackend
+	pinned string
+}
+
+func (p *pinnedRankBackend) Resolved() string { return "claude-sonnet-5" }
+func (p *pinnedRankBackend) Pin(model string) { p.pinned = model }

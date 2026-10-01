@@ -85,6 +85,16 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 			if err != nil {
 				return err
 			}
+			// Rankings in one report use one effort: the report's (what its frames
+			// were judged with), as the backend and model default to the report's.
+			if o.locateEffort != "" {
+				return fmt.Errorf("--locate-effort: rank makes no locate calls")
+			}
+			if cmd.Flags().Changed("effort") && o.effort != rep.Effort {
+				return fmt.Errorf("--effort %q: this report was judged with --effort %q (\"\" = the model's default), and its rankings use the same; "+
+					"use -o for a separate report to try another", o.effort, rep.Effort)
+			}
+			o.effort = rep.Effort
 			var notes []string
 			if cfg.Policy, notes, err = o.policy.resolve(cmd.Flags(), rep.Policy); err != nil {
 				return err

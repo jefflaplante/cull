@@ -491,7 +491,14 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 		switch {
 		case err == nil:
 			// Mixing backends or models in one report would corrupt calibration comparisons.
-			if prev.SchemaVersion != report.SchemaVersion || prev.Backend != cfg.Backend || prev.Model != cfg.Model ||
+			// An alias report (claude-code "sonnet") also continues under the model ID
+			// the alias resolved to: that is what the pin's abort tells the user to
+			// pass once the alias has moved on. The report keeps its own name.
+			sameModel := prev.Model == cfg.Model || (prev.ResolvedModel != "" && cfg.Model == prev.ResolvedModel)
+			if sameModel {
+				rep.Model = prev.Model
+			}
+			if prev.SchemaVersion != report.SchemaVersion || prev.Backend != cfg.Backend || !sameModel ||
 				prev.Escalation != rep.Escalation {
 				scan := ""
 				if prev.Backend == "" {

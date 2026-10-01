@@ -223,7 +223,8 @@ per-session token, then opens your browser.
 - **Saving:** every change is saved at once, to `cull-labels.jsonl` beside the report
   and to the frame's XMP sidecar.
 - **Other modes:** `--no-xmp` saves only the labels log. `--static` writes an offline
-  page that keeps labels in the browser, with JSONL export and import.
+  page that keeps labels in the browser, with JSONL export and import. Bring exported
+  labels into the shoot's log with `cull import-labels <export.jsonl> <dir>`.
 
 | Key | Action |
 |---|---|

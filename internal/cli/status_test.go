@@ -79,3 +79,34 @@ func TestStatusNextKeepsReportPath(t *testing.T) {
 		t.Fatalf("%s", out)
 	}
 }
+
+func TestImportLabelsAppendsToTheLog(t *testing.T) {
+	dir := statusShoot(t) // L1 already labelled keep
+	export := filepath.Join(t.TempDir(), "cull-labels.jsonl")
+	os.WriteFile(export, []byte(`{"file":"L2.DNG","label":"cull","stars":0,"at":"2026-10-01T10:00:00Z"}
+{"file":"L3.DNG","label":"","stars":4,"at":"2026-10-01T10:00:01Z"}
+`), 0o644)
+	out, err := run(t, "import-labels", export, dir)
+	if err != nil || !strings.Contains(out, "imported 2") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	got, _ := labels.Read(filepath.Join(dir, labels.FileName))
+	if got["L1.DNG"].Label != "keep" || got["L2.DNG"].Label != "cull" || got["L3.DNG"].Stars != 4 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// Labels for frames the report doesn't hold come from another shoot's sheet.
+func TestImportLabelsRefusesStrangers(t *testing.T) {
+	dir := statusShoot(t)
+	export := filepath.Join(t.TempDir(), "x.jsonl")
+	os.WriteFile(export, []byte(`{"file":"L2.DNG","label":"cull","stars":0,"at":"2026-10-01T10:00:00Z"}
+{"file":"OTHER.DNG","label":"keep","stars":0,"at":"2026-10-01T10:00:00Z"}
+`), 0o644)
+	if _, err := run(t, "import-labels", export, dir); err == nil || !strings.Contains(err.Error(), "OTHER.DNG") {
+		t.Fatalf("got %v", err)
+	}
+	if got, _ := labels.Read(filepath.Join(dir, labels.FileName)); got["L2.DNG"].Label != "" {
+		t.Fatal("imported part of a refused export")
+	}
+}

@@ -41,7 +41,7 @@ are never touched. Ctrl-C stops the server.
 
 --no-xmp saves only the labels log; --no-open doesn't launch the browser; --static
 writes an offline index.html instead of serving (labels then stay in the browser;
-export them from the page). 'calibrate', 'decide' and 'apply-c1' read the log.
+export them from the page, then cull import-labels). 'calibrate', 'decide' and 'apply-c1' read the log.
 Works on scan reports too (labeling only).`,
 		Example: `  cull review ~/Pictures/2026-09-26
   cull review --no-xmp ~/Pictures/2026-09-26     # labels only, no sidecars

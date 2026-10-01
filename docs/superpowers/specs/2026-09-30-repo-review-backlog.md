@@ -128,11 +128,20 @@ unmeasured until two runs are compared with `calibrate --compare` and labels.
 
 ## 4. Cost (A/B each with `calibrate` before adopting)
 
-- `output_config.effort: "low"` for locate; A/B low or medium effort for evaluate. Output is ~40% of per-frame cost.
-- `--max-edge 1024`: the full frame is ~30% of input tokens and is "for context only".
-- Drop `straighten_degrees`: requested, never applied or clamped (`types.go:138`).
-- Prompt caching: only ~6% saved. If added, parse the cache token fields and price them.
-- `claude-code` backend: record the resolved model from the init event, and scrub `ANTHROPIC_MODEL` and `ANTHROPIC_DEFAULT_SONNET_MODEL`.
+- **done** as flags (`--effort`, `--locate-effort`), A/B pending: `output_config.effort: "low"` for locate; A/B low or medium effort for evaluate. Output is ~40% of per-frame cost.
+- **A/B pending** (flag exists): `--max-edge 1024`: the full frame is ~30% of input tokens and is "for context only".
+- **done**: Drop `straighten_degrees`: requested, never applied or clamped (`types.go:138`).
+- **done** (API, priced): Prompt caching: only ~6% saved. If added, parse the cache token fields and price them.
+- **done**: `claude-code` backend: record the resolved model from the init event, and scrub `ANTHROPIC_MODEL` and `ANTHROPIC_DEFAULT_SONNET_MODEL`.
+
+Section 4 was implemented on branch `feat/cost-levers` (2026-10-01).
+
+**Deferred minors from its review:**
+- The README says the system prompt is cached. That holds on the default model (512-token minimum), but on `claude-sonnet-5` (1024-token minimum) the ~800-token evaluate and locate prompts don't cache. Cache reads are 0.05× input on Opus 5.5 and 0.025× on Fable 5.1, not a tenth.
+- The env scrub misses `ANTHROPIC_DEFAULT_FABLE_MODEL` and `ANTHROPIC_DEFAULT_MODEL`.
+- Effort isn't checked against the model: Haiku 4.5 rejects effort, and `xhigh` returns a 400 on Opus and Sonnet 4.6.
+- There's no comment on why claude-code folds cache tokens into input.
+- `resolve()`'s message wording is off on a fresh run.
 
 ## 5. Workflow and UX
 

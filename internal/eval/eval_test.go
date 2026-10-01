@@ -14,7 +14,7 @@ const evalJSON = `{
  "sharpness":{"score":8.5,"status":"sharp","focus_target":"near eye"},
  "exposure":{"score":7,"status":"fixable","ev_adjust":0.7,"clipping":"none","reason":"under"},
  "composition":{"score":6,"status":"croppable","issues":["dead space left"],
-   "crop":{"apply":true,"left":0.12,"top":0,"right":1,"bottom":0.95},"straighten_degrees":0},
+   "crop":{"apply":true,"left":0.12,"top":0,"right":1,"bottom":0.95}},
  "notes":""}`
 
 // fakeBackend records requests and replies with canned JSON per schema name.
@@ -305,5 +305,20 @@ func TestAgreeingAssessmentsStillCull(t *testing.T) {
 	cull := &Evaluation{Sharpness: Sharpness{Status: "missed_focus", Score: 1}}
 	if d, _ := p.DecideFacts(cull, Facts{Others: []string{"motion_blur"}}); d != Cull {
 		t.Fatalf("got %s", d)
+	}
+}
+
+func TestSchemaHasNoStraighten(t *testing.T) {
+	b, _ := json.Marshal(llm.Portable(EvaluationSchema()))
+	if strings.Contains(string(b), "straighten") || strings.Contains(SystemPrompt(0.6, Camera{}), "straighten") {
+		t.Fatal("straighten_degrees is still asked for")
+	}
+}
+
+// Reports from before still hold the field: it is ignored, not an error.
+func TestOldEvaluationWithStraightenLoads(t *testing.T) {
+	e, err := DecodeEvaluation([]byte(`{"sharpness":{"score":8,"status":"sharp","focus_target":"eyes"},"composition":{"score":6,"status":"good","issues":[],"crop":{"apply":false},"straighten_degrees":3}}`))
+	if err != nil || e.Sharpness.Status != "sharp" {
+		t.Fatalf("e=%+v err=%v", e, err)
 	}
 }

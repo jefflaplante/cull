@@ -83,7 +83,7 @@ func (f *fakeBackend) Call(ctx context.Context, req llm.Request) (*llm.Response,
 	atomic.AddInt32(&f.calls, 1)
 	js := fmt.Sprintf(`{"sharpness":{"score":8,"status":%q,"focus_target":""},
  "exposure":{"score":7,"status":"fixable","ev_adjust":0.5,"clipping":"none","reason":""},
- "composition":{"score":6,"status":"croppable","issues":[],"crop":{"apply":true,"left":0.1,"top":0,"right":1,"bottom":1},"straighten_degrees":0},
+ "composition":{"score":6,"status":"croppable","issues":[],"crop":{"apply":true,"left":0.1,"top":0,"right":1,"bottom":1}},
  "notes":""}`, f.status)
 	return &llm.Response{JSON: json.RawMessage(js), Usage: llm.Usage{InputTokens: 100, OutputTokens: 10}}, nil
 }

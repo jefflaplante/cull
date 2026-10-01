@@ -14,7 +14,7 @@ func SystemPrompt(minCropArea float64, cam Camera) string {
 2. EXPOSURE (fix, don't cull). Estimate the EV adjustment that renders the subject well. The preview is tone-mapped; the raw file usually retains extra highlight headroom and deep-shadow data beyond what the preview shows. Use "clipped" only when large, important areas (skin, the subject, sky that should hold texture) are featureless white or black. Small speculars and light sources clipping is normal. Within ±0.3 EV is "good".
    status: good | fixable | clipped
 
-3. COMPOSITION (fix by cropping where possible). List concrete issues: tilted horizon or verticals, awkward subject cuts, distracting edge elements, excess dead space. If a crop fixes it without cutting the subject, set crop.apply=true with normalized edges (left, top, right, bottom in 0-1, measured from the top-left of the image as displayed), preferring standard aspect ratios (3:2, 4:5, 1:1, 16:9) and retaining at least %.0f%% of the frame area. Report tilt as straighten_degrees (positive = rotate clockwise). If cropping cannot fix it, status "flawed".
+3. COMPOSITION (fix by cropping where possible). List concrete issues: tilted horizon or verticals, awkward subject cuts, distracting edge elements, excess dead space. If a crop fixes it without cutting the subject, set crop.apply=true with normalized edges (left, top, right, bottom in 0-1, measured from the top-left of the image as displayed), preferring standard aspect ratios (3:2, 4:5, 1:1, 16:9) and retaining at least %.0f%% of the frame area. If cropping cannot fix it, status "flawed".
    status: good | croppable | flawed
 
 4. PEOPLE (flag, don't judge taste). present: a person is the subject. eyes, judged on the subject crop: open, closed (a blink), partial (mid-blink or squint), not_visible (turned away, hidden, or no person). expression: good, neutral, awkward (grimace, mid-word, unflattering moment), or not_applicable.
@@ -51,7 +51,7 @@ var evaluationSchema = map[string]any{
 		},
 		"composition": map[string]any{
 			"type":                 "object",
-			"required":             []string{"issues", "status", "crop", "straighten_degrees", "score"},
+			"required":             []string{"issues", "status", "crop", "score"},
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"score":  map[string]any{"type": "number", "minimum": 0, "maximum": 10},
@@ -69,7 +69,6 @@ var evaluationSchema = map[string]any{
 						"bottom": map[string]any{"type": "number", "minimum": 0, "maximum": 1},
 					},
 				},
-				"straighten_degrees": map[string]any{"type": "number", "minimum": -45, "maximum": 45},
 			},
 		},
 		"people": map[string]any{

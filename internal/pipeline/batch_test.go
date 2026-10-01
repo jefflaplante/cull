@@ -22,7 +22,7 @@ import (
 
 const evalOK = `{"sharpness":{"score":8,"status":"sharp","focus_target":""},
  "exposure":{"score":7,"status":"good","ev_adjust":0,"clipping":"none","reason":""},
- "composition":{"score":6,"status":"good","issues":[],"crop":{"apply":false,"left":0,"top":0,"right":1,"bottom":1},"straighten_degrees":0},
+ "composition":{"score":6,"status":"good","issues":[],"crop":{"apply":false,"left":0,"top":0,"right":1,"bottom":1}},
  "people":{"present":true,"eyes":"open","expression":"good"},"notes":""}`
 
 // fakeBatch is an in-memory Message Batches service.

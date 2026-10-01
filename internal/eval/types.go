@@ -33,11 +33,10 @@ type Exposure struct {
 }
 
 type Composition struct {
-	Score             float64  `json:"score"`
-	Status            string   `json:"status"` // good|croppable|flawed
-	Issues            []string `json:"issues"`
-	Crop              Crop     `json:"crop"`
-	StraightenDegrees float64  `json:"straighten_degrees"` // positive = rotate clockwise
+	Score  float64  `json:"score"`
+	Status string   `json:"status"` // good|croppable|flawed
+	Issues []string `json:"issues"`
+	Crop   Crop     `json:"crop"`
 }
 
 // Crop edges are normalized [0,1] from the top-left of the image AS DISPLAYED

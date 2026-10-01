@@ -39,6 +39,11 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
   cull calibrate --compare run1.json run2.json   # run-to-run stability; no labels needed`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			for _, f := range []string{"report", "recursive"} {
+				if cmd.Flags().Changed(f) {
+					return fmt.Errorf("--%s: calibrate takes its reports as arguments (a shoot folder or a report path each), e.g. cull calibrate run2.json", f)
+				}
+			}
 			for i, a := range args {
 				args[i] = reportArg(a)
 			}
@@ -115,7 +120,7 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 }
 
 // flagSeq is the grouping the --seq-gap / --seq-look flags hold (typed or default);
-// calibrate takes a report path, not a shoot folder, so it doesn't build a Config.
+// calibrate works from report paths, so it doesn't build a Config.
 func flagSeq(cmd *cobra.Command) group.Options {
 	gap, _ := cmd.Flags().GetDuration("seq-gap")
 	look, _ := cmd.Flags().GetFloat64("seq-look")

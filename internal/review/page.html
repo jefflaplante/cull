@@ -98,6 +98,28 @@ ul { margin: 4px 0 0; padding-left: 18px; }
 <div id="loupe" tabindex="-1"></div>
 <script id="data" type="application/json">/*__DATA__*/null</script>
 <script>
+/*pure:start*/
+// compareScale is the common scale for n images shown side by side in width w,
+// each tile adding pad px (padding and border) and gap px between tiles. Never
+// above 1: native pixels are not enlarged.
+function compareScale(w, n, maxNat, pad, gap) {
+  const col = (w - gap * (n - 1) - pad * n) / Math.max(1, n);
+  return Math.min(1, Math.max(0.15, col / maxNat));
+}
+// rejectChange drops pending[0], refused for good. A later queued change for the
+// same frame inherits its prev, so the last refusal in the chain restores what the
+// frame showed before any of them; otherwise prev is restored now. Entries queued
+// by an older page have no prev, and nothing is restored. It returns whether the
+// frame was reverted.
+function rejectChange(pending, labels) {
+  const p = pending.shift();
+  const later = pending.find(q => q.file === p.file);
+  if (later) { later.prev = p.prev; return false; }
+  if (!p.prev) return false;
+  if (!p.prev.label && !p.prev.stars) delete labels[p.file]; else labels[p.file] = p.prev;
+  return true;
+}
+/*pure:end*/
 (() => {
   const data = JSON.parse(document.getElementById("data").textContent);
   const cards = data.cards;
@@ -354,7 +376,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   }
   // The loupe shows the frame's whole preview at native size (1 image pixel per
   // screen pixel), opened on the subject; the server renders it on first use.
-  let loupeOpen = false, drag = null;
+  let loupeOpen = false, loupeIdx = -1, loupeName = "", drag = null;
   const loupe = document.getElementById("loupe");
   function currentCard() {
     const vis = visible();
@@ -365,6 +387,8 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     if (!c || !c.native) return;
     if (!serve) { note = "the 100% view needs the review server (it isn't available with --static)"; render(); return; }
     loupeOpen = true;
+    loupeIdx = cards.indexOf(c); // label keys act on this frame, whatever moves underneath
+    loupeName = c.file;
     const cap = el("p", { cls: "cap", text: "loading the native preview… (the first time takes a few seconds)" });
     const im = el("img", { src: "assets/" + encodeURIComponent(c.native), alt: c.file, draggable: "false" });
     im.onload = () => {
@@ -374,14 +398,24 @@ ul { margin: 4px 0 0; padding-left: 18px; }
       const cx = b ? (b.left + b.right) / 2 : 0.5, cy = b ? (b.top + b.bottom) / 2 : 0.5;
       loupe.scrollLeft = cx * w - loupe.clientWidth / 2;
       loupe.scrollTop = cy * h - loupe.clientHeight / 2;
-      cap.textContent = `${c.file} · 100% · drag or arrow keys to pan · Z or Esc closes`;
+      cap.dataset.ready = "1";
+      loupeCaption();
     };
     im.onerror = () => { cap.textContent = "couldn't load the native preview"; };
     loupe.replaceChildren(im, cap);
     loupe.className = "open";
     loupe.focus();
   }
-  function closeLoupe() { loupeOpen = false; loupe.className = ""; loupe.replaceChildren(); }
+  // loupeCaption names the frame and shows its label and stars, so labelling from
+  // the loupe isn't blind.
+  function loupeCaption() {
+    const cap = loupe.querySelector(".cap");
+    if (!cap || !cap.dataset.ready) return;
+    const l = get(loupeName);
+    cap.textContent = `${loupeName} · 100% · your label: ${l.label || "none"}${l.stars ? " " + "★".repeat(l.stars) : ""}` +
+      " · K R C U, 0–5 label this frame · drag or arrow keys to pan · Z or Esc closes";
+  }
+  function closeLoupe() { loupeOpen = false; loupeIdx = -1; loupe.className = ""; loupe.replaceChildren(); }
   loupe.addEventListener("mousedown", e => { drag = { x: e.clientX, y: e.clientY, l: loupe.scrollLeft, t: loupe.scrollTop }; e.preventDefault(); });
   window.addEventListener("mousemove", e => { if (drag) { loupe.scrollLeft = drag.l - (e.clientX - drag.x); loupe.scrollTop = drag.t - (e.clientY - drag.y); } });
   window.addEventListener("mouseup", () => { drag = null; });
@@ -417,8 +451,8 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     compare.focus();
     Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(r => { im.onload = im.onerror = r; }))).then(() => {
       const maxW = Math.max(...imgs.map(im => im.naturalWidth || 1));
-      const col = (compare.clientWidth - 32 - 12 * (imgs.length - 1)) / Math.max(1, imgs.length);
-      const k = Math.min(1, Math.max(0.15, col / maxW));
+      // 32: the overlay's padding; 18: a tile's padding and border; 12: the gap.
+      const k = compareScale(compare.clientWidth - 32, imgs.length, maxW, 18, 12);
       imgs.forEach(im => { im.style.width = (im.naturalWidth * k) + "px"; im.style.visibility = ""; });
     });
   }
@@ -494,15 +528,10 @@ ul { margin: 4px 0 0; padding-left: 18px; }
         }
         if (!res.ok) {
           const msg = (await res.text()).trim();
-          if (res.status === 400) {
-            // Refused for good: put back what the frame showed before, unless a later
-            // queued change for it is still on its way.
-            pending.shift(); store(qkey, pending);
-            if (p.prev && !pending.some(q => q.file === p.file)) {
-              if (!p.prev.label && !p.prev.stars) delete labels[p.file]; else labels[p.file] = p.prev;
-              store(key, labels);
-            }
-            status[p.file] = "rejected: " + msg + " (reverted)";
+          if (res.status === 400) { // refused for good: undo it on the page (see rejectChange)
+            const reverted = rejectChange(pending, labels);
+            store(qkey, pending); store(key, labels);
+            status[p.file] = "rejected: " + msg + (reverted ? " (reverted)" : "");
             continue;
           }
           status[p.file] = "not saved: " + msg;
@@ -540,7 +569,12 @@ ul { margin: 4px 0 0; padding-left: 18px; }
       const pan = { arrowleft: [-dx, 0], arrowright: [dx, 0], arrowup: [0, -dy], arrowdown: [0, dy] }[k];
       if (k === "z" || k === "escape") { closeLoupe(); ev.preventDefault(); return; }
       if (pan) { loupe.scrollBy(pan[0], pan[1]); ev.preventDefault(); return; }
-      if (!/^[krcu0-5]$/.test(k)) return;
+      // Label the frame in the loupe, never advance: the view underneath must not
+      // move on while this frame is still shown.
+      const change = { k: { label: "keep" }, r: { label: "review" }, c: { label: "cull" }, u: { label: "" } }[k] ||
+        (/^[0-5]$/.test(k) ? { stars: Number(k) } : null);
+      if (change && loupeIdx >= 0) { labelCard(loupeIdx, change); render(); loupeCaption(); ev.preventDefault(); }
+      return;
     }
     if (compareOpen) {
       if (k === "s" || k === "escape") { closeCompare(); ev.preventDefault(); }

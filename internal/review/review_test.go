@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -246,5 +247,26 @@ func TestPageHasSetCompare(t *testing.T) {
 		if !strings.Contains(pageTemplate, want) {
 			t.Errorf("page lacks %q", want)
 		}
+	}
+}
+
+// The page's pure functions run under node when it is installed.
+func TestPagePureFunctions(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	page := filepath.Join(t.TempDir(), "page.html")
+	os.WriteFile(page, []byte(pageTemplate), 0o644)
+	out, err := exec.Command(node, "testdata/page_pure_test.js", page).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+// Label keys in the loupe act on the frame it shows and never advance the view.
+func TestLoupeLabelsTheFrameItShows(t *testing.T) {
+	if !strings.Contains(pageTemplate, "labelCard(loupeIdx") {
+		t.Fatal("loupe label keys don't target the loupe's frame")
 	}
 }

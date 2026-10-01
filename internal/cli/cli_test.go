@@ -1413,3 +1413,13 @@ func TestNoPromptWithoutTerminal(t *testing.T) {
 		t.Fatalf("err=%v\n%s", err, out)
 	}
 }
+
+// calibrate takes its reports as arguments: -o or -r would be silently ignored.
+func TestCalibrateRefusesReportAndRecursiveFlags(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{{"calibrate", "-o", filepath.Join(dir, "run2.json"), dir}, {"calibrate", "-r", dir}} {
+		if _, err := run(t, args...); err == nil || !strings.Contains(err.Error(), "as arguments") {
+			t.Errorf("%v: got %v", args, err)
+		}
+	}
+}

@@ -61,20 +61,36 @@ review's fixes in `a471928`:
 
 | # | Finding | Where | Status |
 |---|---|---|---|
-| 2.1 | `--seq-gap` and `--seq-look` aren't stored with the policy. A later `decide` at the defaults regroups the sets, which can change which frames are best and drop paid rankings. Fix: store them in `Policy` and resolve them like the other settings. | `decide.go:60`, `cli/policy.go` | reported |
-| 2.2 | Resume keys on the absolute path, and nothing compares `prev.Dir` with `cfg.Dir`. After a folder rename, every frame is re-judged (and re-billed) and appears twice in the report, which switches off labels (`Duplicates`). | `pipeline.go:436-452` | reported |
-| 2.3 | Sidecars are written before the checkpoint. After a crash, `r.XMP` is empty on resume and the sidecar is treated as foreign from then on. Batch mode has the same gap. Fix: write in finishRun, or recognise our own sidecars by content. | `stages.go:184-199`, `batch.go:362,441` | reported |
-| 2.4 | A torn line in the labels log becomes permanent: `Append` doesn't add a missing `\n` first, so the torn line ends up mid-file and `Read` rejects the whole log. | `labels.go:63-67,92` | reported |
-| 2.5 | The calibrate sweep ignores set demotion (`DecideFacts` only), so it doesn't match the confusion matrix. Fix: run it through `decideAll` on a copy. | `calib.go:101-104` | reported |
-| 2.6 | calibrate passes `rep.KeepBest` instead of the resolved `p.KeepBest`, and it skips the `labels.Duplicates` check. | `cli/calibrate.go:61` | reported |
-| 2.7 | The claude-code backend ignores quota on error results and never checks the 7-day window. | `claudecode.go:96-104,136` | reported |
-| 2.8 | A report from a newer schema is loaded and saved back as v4, dropping unknown fields. Fix: refuse `SchemaVersion > current`. | `report.go:184`, `decide.go:103` | reported |
-| 2.9 | Batch finish: a crash between `rep.Save` and removing the state file duplicates results on resume. | `batch.go:200-204` | reported |
-| 2.10 | `moveCulled` uses `append`, not `addFixup`, so fixups pile up on each re-run. | `move.go:37` | verified |
-| 2.11 | `apply-c1 --exposure/--crop` overwrite edits made in Capture One. Fix: apply only when the current value is the default. | `c1.go:91,95` | reported |
-| 2.12 | Label changes in review drop the `crs:` develop settings from sidecars (`WriteSidecar(..., false, ...)`). | `serve.go:173` | reported |
-| 2.13 | xmp write: the no-clobber check is stat-then-rename, the `.tmp` name is fixed, there's no fsync, and the temp file is left behind if the rename fails. | `xmp.go:44-53` | reported |
-| 2.14 | The landed-tile noise floor (`fines[len/10]`) collapses to ~0 on blown skies and black backdrops, undoing the noise subtraction. Fix: exclude clipped cells, or estimate noise per luma bin. | `focus/landed.go:66` | verified |
+| 2.1 | `--seq-gap` and `--seq-look` aren't stored with the policy. A later `decide` at the defaults regroups the sets, which can change which frames are best and drop paid rankings. Fix: store them in `Policy` and resolve them like the other settings. | `decide.go:60`, `cli/policy.go` | **done** `a4cf159` |
+| 2.2 | Resume keys on the absolute path, and nothing compares `prev.Dir` with `cfg.Dir`. After a folder rename, every frame is re-judged (and re-billed) and appears twice in the report, which switches off labels (`Duplicates`). | `pipeline.go:436-452` | **done** `8ed79ee, 7acee55` |
+| 2.3 | Sidecars are written before the checkpoint. After a crash, `r.XMP` is empty on resume and the sidecar is treated as foreign from then on. Batch mode has the same gap. Fix: write in finishRun, or recognise our own sidecars by content. | `stages.go:184-199`, `batch.go:362,441` | **done** `58b1da2` |
+| 2.4 | A torn line in the labels log becomes permanent: `Append` doesn't add a missing `\n` first, so the torn line ends up mid-file and `Read` rejects the whole log. | `labels.go:63-67,92` | **done** `484973c` |
+| 2.5 | The calibrate sweep ignores set demotion (`DecideFacts` only), so it doesn't match the confusion matrix. Fix: run it through `decideAll` on a copy. | `calib.go:101-104` | **done** `b183cbf` |
+| 2.6 | calibrate passes `rep.KeepBest` instead of the resolved `p.KeepBest`, and it skips the `labels.Duplicates` check. | `cli/calibrate.go:61` | **done** `b183cbf` |
+| 2.7 | The claude-code backend ignores quota on error results and never checks the 7-day window. | `claudecode.go:96-104,136` | **done** `030c26a` |
+| 2.8 | A report from a newer schema is loaded and saved back as v4, dropping unknown fields. Fix: refuse `SchemaVersion > current`. | `report.go:184`, `decide.go:103` | **done** `2fa162e` |
+| 2.9 | Batch finish: a crash between `rep.Save` and removing the state file duplicates results on resume. | `batch.go:200-204` | **done** `7ebc9ba` |
+| 2.10 | `moveCulled` uses `append`, not `addFixup`, so fixups pile up on each re-run. | `move.go:37` | **done** `08911a4` |
+| 2.11 | `apply-c1 --exposure/--crop` overwrite edits made in Capture One. Fix: apply only when the current value is the default. | `c1.go:91,95` | **done** `103cb97` |
+| 2.12 | Label changes in review drop the `crs:` develop settings from sidecars (`WriteSidecar(..., false, ...)`). | `serve.go:173` | **done** `b8a63c8` |
+| 2.13 | xmp write: the no-clobber check is stat-then-rename, the `.tmp` name is fixed, there's no fsync, and the temp file is left behind if the rename fails. | `xmp.go:44-53` | **done** `58b1da2, 7acee55` |
+| 2.14 | The landed-tile noise floor (`fines[len/10]`) collapses to ~0 on blown skies and black backdrops, undoing the noise subtraction. Fix: exclude clipped cells, or estimate noise per luma bin. | `focus/landed.go:66` | **done** `8ef88ff` |
+
+Section 2 was closed on branch `fix/correctness` (2026-09-30), plus the final review's
+fixes in `7acee55`:
+- judge and rank batch states refuse a renamed folder instead of re-billing;
+- a report is rebased only when its folder really moved, not onto another existing folder;
+- sidecar `chmod` is best-effort.
+
+**Deferred minors from that review** (not yet done):
+- `healTail` races when two processes append to a log with a torn tail. Fix with `flock` if two review servers ever share a folder.
+- `xmp.Ours` lets any report rewrite any cull-written sidecar: a second `-o` report, or a cull sidecar edited by hand. Document this in the README.
+- `decide --write-xmp` without `--xmp-develop` strips the develop settings a previous decide wrote.
+- `apply-c1`'s `isFullFrame` uses a 1-px tolerance in an unverified pixel space. Use a relative tolerance, add the assumption to CLAUDE.md's unverified list, and have `--probe` print one crop/dimensions pair.
+- `calibrate` reports a typed bad `--seq-look` as "the report's stored grouping".
+- The 7-day stop shares `--quota-stop`. The message and README could say which window tripped.
+- The landed noise cutoff (mean ≥ 16) excludes dark-but-noisy backdrops. Consider ~8 once there's a clipped-backdrop sample.
+- `xmp.Write` leaves a unique hidden temp file per crash, never cleaned up.
 
 ## 3. Verdict quality
 

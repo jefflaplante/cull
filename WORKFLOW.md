@@ -92,7 +92,7 @@ an offline page instead of serving).
 ## 5. Check the tool against your labels, and tune it (free)
 
 ```sh
-cull calibrate ~/Pictures/2026-10-04/cull-report.json
+cull calibrate ~/Pictures/2026-10-04
 cull decide --review-below-sharpness 7 ~/Pictures/2026-10-04
 ```
 

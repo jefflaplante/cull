@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,7 +24,7 @@ func newCalibrateCmd() *cobra.Command {
 		compare    bool
 	)
 	cmd := &cobra.Command{
-		Use:   "calibrate [--labels cull-labels.jsonl] REPORT.json...",
+		Use:   "calibrate [--labels cull-labels.jsonl] <dir|REPORT.json>...",
 		Short: "Measure how well reports agree with your hand labels",
 		Long: `calibrate compares each report's decisions with your labels from the review
 sheet (cull-labels.jsonl beside the first report, unless --labels): a
@@ -37,6 +39,9 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
   cull calibrate --compare run1.json run2.json   # run-to-run stability; no labels needed`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			for i, a := range args {
+				args[i] = reportArg(a)
+			}
 			if compare {
 				// Two runs over the same frames: how often they disagree, which
 				// bounds how far any single run's verdicts can be trusted.
@@ -115,4 +120,13 @@ func flagSeq(cmd *cobra.Command) group.Options {
 	gap, _ := cmd.Flags().GetDuration("seq-gap")
 	look, _ := cmd.Flags().GetFloat64("seq-look")
 	return group.Options{Gap: gap, MaxLook: look}
+}
+
+// reportArg is the report a calibrate argument names: a shoot folder means the
+// cull-report.json inside it, so the labels log is found beside it too.
+func reportArg(p string) string {
+	if st, err := os.Stat(p); err == nil && st.IsDir() {
+		return filepath.Join(p, "cull-report.json")
+	}
+	return p
 }

@@ -261,7 +261,7 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
 
 **Calibrating.**
 1. Label a sample in `review`.
-2. Run `cull calibrate <dir>/cull-report.json`. It reports:
+2. Run `cull calibrate <dir>` (or a report path). It reports:
    - the false-cull rate (you kept, it culled) and missed-cull rate;
    - the review rate;
    - a `--review-below-sharpness` sweep;

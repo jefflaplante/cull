@@ -1346,3 +1346,19 @@ func TestFlagsOnlyWhereUsed(t *testing.T) {
 		t.Fatalf("restore --tiles: %v", err)
 	}
 }
+
+// A shoot folder works wherever a report path does.
+func TestCalibrateTakesAFolder(t *testing.T) {
+	dir := t.TempDir()
+	rep := &report.Report{SchemaVersion: report.SchemaVersion, Backend: "anthropic", Model: "m", Results: []report.Result{
+		{File: filepath.Join(dir, "L1.DNG"), Evaluation: &eval.Evaluation{}, Decision: eval.Keep}}}
+	rep.Save(filepath.Join(dir, "cull-report.json"))
+	labels.Append(filepath.Join(dir, labels.FileName), labels.Entry{File: "L1.DNG", Label: "keep"})
+	out, err := run(t, "calibrate", dir)
+	if err != nil || !strings.Contains(out, "false-cull rate") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	if out, err := run(t, "calibrate", "--compare", dir, dir); err != nil || !strings.Contains(out, "agree on 1/1") {
+		t.Fatalf("--compare with folders: err=%v\n%s", err, out)
+	}
+}

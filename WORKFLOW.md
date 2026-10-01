@@ -98,6 +98,9 @@ cull decide --review-below-sharpness 7 ~/Pictures/2026-10-04
 - **`calibrate`** reports false culls (you said keep, it culled), missed culls, and
   the review rate. It also sweeps `--review-below-sharpness`, and its sets section
   compares `--keep-best` values from the stored ranks.
+- **`calibrate --compare a.json b.json`** shows how often two runs over the same frames
+  disagree (judge twice with `-o run1.json` / `-o run2.json`; that spends twice). No
+  labels needed. Verdicts can't be more trustworthy than they are stable.
 - **`decide`** re-applies the policy with no model calls. The policy is **saved in the
   report**: later `decide`, `rank`, `calibrate` and `judge --resume` runs start from
   it, name the non-default settings they reuse, and let a flag you type override only

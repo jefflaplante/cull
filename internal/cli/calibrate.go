@@ -18,6 +18,7 @@ func newCalibrateCmd() *cobra.Command {
 	var (
 		labelsPath string
 		pol        policyFlags
+		compare    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "calibrate [--labels cull-labels.jsonl] REPORT.json...",
@@ -31,9 +32,27 @@ thresholds can be tuned without new model calls; apply the chosen ones with
 'cull decide'. Reports with multi-frame sets get a sets section: how often a
 labeled keep was ranked out of the keep-best cut, how often a labeled cull or
 review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
-		Example: "  cull calibrate sonnet.json local.json",
-		Args:    cobra.MinimumNArgs(1),
+		Example: `  cull calibrate sonnet.json local.json
+  cull calibrate --compare run1.json run2.json   # run-to-run stability; no labels needed`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if compare {
+				// Two runs over the same frames: how often they disagree, which
+				// bounds how far any single run's verdicts can be trusted.
+				if len(args) != 2 {
+					return fmt.Errorf("--compare takes exactly two reports, got %d", len(args))
+				}
+				a, err := report.Load(args[0])
+				if err != nil {
+					return err
+				}
+				b, err := report.Load(args[1])
+				if err != nil {
+					return err
+				}
+				calib.FormatRunDiff(cmd.OutOrStdout(), args[0], args[1], calib.CompareRuns(a, b))
+				return nil
+			}
 			if _, err := pol.policy(); err != nil {
 				return err
 			}
@@ -76,6 +95,7 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&compare, "compare", false, "compare two reports over the same frames (two runs, or two backends): how often their verdicts disagree; no labels needed")
 	cmd.Flags().StringVar(&labelsPath, "labels", "", "labels log (default: cull-labels.jsonl beside the first report)")
 	pol.register(cmd.Flags())
 	return cmd

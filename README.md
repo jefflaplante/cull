@@ -253,7 +253,10 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
    - the review rate;
    - a `--review-below-sharpness` sweep;
    - a `--keep-best` sweep for sets.
-3. Apply the settings you pick with `cull decide`. The report stores that policy, so
+3. For stability, judge the same frames twice (`-o run1.json`, `-o run2.json`) and run
+   `cull calibrate --compare run1.json run2.json`. It counts decision flips, keep↔cull
+   crossings and sharpness status changes, and needs no labels.
+4. Apply the settings you pick with `cull decide`. The report stores that policy, so
    later `decide`, `rank`, `calibrate` and `judge --resume` runs start from it. A flag
    you type overrides only its own setting.
 

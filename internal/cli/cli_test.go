@@ -1188,3 +1188,22 @@ func TestCalibrateRefusesDuplicateNamesWithLabels(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestCalibrateCompareNeedsNoLabels(t *testing.T) {
+	dir := t.TempDir()
+	mk := func(name string, d eval.Decision) string {
+		rep := &report.Report{SchemaVersion: report.SchemaVersion, Backend: "anthropic", Model: "m", Results: []report.Result{
+			{File: filepath.Join(dir, "L1.DNG"), Evaluation: &eval.Evaluation{}, Decision: d}}}
+		p := filepath.Join(dir, name)
+		rep.Save(p)
+		return p
+	}
+	a, b := mk("a.json", eval.Cull), mk("b.json", eval.Review)
+	out, err := run(t, "calibrate", "--compare", a, b)
+	if err != nil || !strings.Contains(out, "agree on 0/1") || !strings.Contains(out, "cull→review 1") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	if _, err := run(t, "calibrate", "--compare", a); err == nil {
+		t.Fatal("--compare with one report must fail")
+	}
+}

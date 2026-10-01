@@ -197,3 +197,38 @@ func TestClaudeCodePassesEffort(t *testing.T) {
 		t.Fatalf("args:\n%s", args)
 	}
 }
+
+// --model is the only thing that picks the model: an inherited alias override
+// would silently swap it.
+func TestClaudeCodeScrubsModelEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_MODEL", "claude-opus-5-5")
+	t.Setenv("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6")
+	bin, dir := setupFake(t, initEvent("none"), okResult)
+	if _, err := NewClaudeCode(bin, "sonnet", 0.9).Call(context.Background(), tinyRequest()); err != nil {
+		t.Fatal(err)
+	}
+	env, _ := os.ReadFile(filepath.Join(dir, "env.txt"))
+	for _, k := range []string{"ANTHROPIC_MODEL=", "ANTHROPIC_DEFAULT_SONNET_MODEL="} {
+		if strings.Contains(string(env), k) {
+			t.Errorf("%s reached claude", k)
+		}
+	}
+}
+
+func TestClaudeCodeRecordsResolvedModel(t *testing.T) {
+	bin, _ := setupFake(t, initEvent("none"), okResult) // init says claude-sonnet-5
+	c := NewClaudeCode(bin, "sonnet", 0.9)
+	if _, err := c.Call(context.Background(), tinyRequest()); err != nil || c.Resolved() != "claude-sonnet-5" {
+		t.Fatalf("resolved %q err %v", c.Resolved(), err)
+	}
+}
+
+func TestClaudeCodeStopsWhenAliasResolvesDifferently(t *testing.T) {
+	bin, _ := setupFake(t, initEvent("none"), okResult) // init says claude-sonnet-5
+	c := NewClaudeCode(bin, "sonnet", 0.9)
+	c.Pin("claude-sonnet-5-5")
+	_, err := c.Call(context.Background(), tinyRequest())
+	if !errors.Is(err, ErrAbortRun) || !strings.Contains(err.Error(), "claude-sonnet-5-5") || !strings.Contains(err.Error(), "claude-sonnet-5") {
+		t.Fatalf("got %v", err)
+	}
+}

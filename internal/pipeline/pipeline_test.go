@@ -807,3 +807,28 @@ func TestResumeRefusesDifferentEffort(t *testing.T) {
 		t.Fatalf("same (default) effort: %v", err)
 	}
 }
+
+// pinnedBackend is a fake whose model name is an alias resolved per call.
+type pinnedBackend struct {
+	fakeBackend
+	resolves, pinned string
+}
+
+func (p *pinnedBackend) Resolved() string { return p.resolves }
+func (p *pinnedBackend) Pin(model string) { p.pinned = model }
+
+func TestRunRecordsAndPinsTheResolvedModel(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	b := &pinnedBackend{fakeBackend: fakeBackend{status: "sharp"}, resolves: "claude-sonnet-5"}
+	rep, _, err := Run(context.Background(), cfg(dir), b)
+	if err != nil || rep.ResolvedModel != "claude-sonnet-5" || b.pinned != "" {
+		t.Fatalf("err=%v resolved=%q pinned=%q", err, rep.ResolvedModel, b.pinned)
+	}
+	c := cfg(dir)
+	c.Resume = true
+	b2 := &pinnedBackend{fakeBackend: fakeBackend{status: "sharp"}, resolves: "claude-sonnet-5"}
+	if _, _, err := Run(context.Background(), c, b2); err != nil || b2.pinned != "claude-sonnet-5" {
+		t.Fatalf("resume didn't pin: err=%v pinned=%q", err, b2.pinned)
+	}
+}

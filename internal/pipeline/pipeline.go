@@ -69,6 +69,7 @@ type Config struct {
 	LocateEffort      string        // the same for locate calls
 
 	rankWith    rankExec                            // set by Run (sync) or RunBatch (batch) when Rank: what finishRun ranks with; nil = no ranking
+	pinner      llm.ModelPinner                     // the backend, when its model is an alias: finishRun records what it resolved to
 	detect      func(*imageprep.Frame) []focus.Face // test hook; nil = pigo
 	CheckpointN int
 	Log         io.Writer
@@ -136,6 +137,12 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 	rep, todo, err := startRun(&cfg)
 	if err != nil {
 		return nil, total, err
+	}
+	if p, ok := b.(llm.ModelPinner); ok {
+		cfg.pinner = p
+		if rep.ResolvedModel != "" {
+			p.Pin(rep.ResolvedModel)
+		}
 	}
 	if b != nil {
 		b = withEffort(b, cfg)
@@ -518,6 +525,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 			// Paid rankings carry over: decideAll reuses a stored order while it still
 			// covers its set, and ranking spend never leaves the report.
 			rep.Sets, rep.RankCostUSD, rep.KeepBest, rep.Policy = prev.Sets, prev.RankCostUSD, prev.KeepBest, prev.Policy
+			rep.ResolvedModel = prev.ResolvedModel
 			rep.DiscardedCostUSD = prev.DiscardedCostUSD
 			for _, r := range prev.Results {
 				if r.Error == "" && (r.Evaluation != nil || cfg.DryRun) {
@@ -629,6 +637,11 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 				continue
 			}
 			writeDecidedSidecar(r, o)
+		}
+	}
+	if cfg.pinner != nil {
+		if m := cfg.pinner.Resolved(); m != "" {
+			rep.ResolvedModel = m
 		}
 	}
 	rep.Generated = time.Now()

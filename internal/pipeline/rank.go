@@ -268,6 +268,9 @@ func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.R
 	if err := RankBatchPending(cfg); err != nil {
 		return nil, err
 	}
+	if p, ok := b.(llm.ModelPinner); ok {
+		cfg.pinner = p
+	}
 	ex := syncExec{b: withEffort(b, cfg), concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
 	return rank(ctx, cfg, ex, force)
 }
@@ -297,6 +300,9 @@ func rank(ctx context.Context, cfg Config, ex rankExec, force bool) (*report.Rep
 		return nil, err
 	}
 	rep.Relocate(cfg.ReportPath, cfg.Dir) // a renamed shoot folder: the save below keeps the new paths
+	if cfg.pinner != nil && rep.ResolvedModel != "" {
+		cfg.pinner.Pin(rep.ResolvedModel) // rank with the model the frames were judged with
+	}
 	n, err := fillLooks(ctx, rep, log)
 	if n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
@@ -313,6 +319,9 @@ func rank(ctx context.Context, cfg Config, ex rankExec, force bool) (*report.Rep
 	var run rankRun
 	if _, err := redecide(rep, o, log, func() { _, run, rankErr = rankSets(ctx, rep, cfg, ex, force, &spend{}) }); err != nil {
 		return rep, err
+	}
+	if cfg.pinner != nil && rep.ResolvedModel == "" {
+		rep.ResolvedModel = cfg.pinner.Resolved() // a report judged before this was recorded
 	}
 	if err := rep.Save(cfg.ReportPath); err != nil {
 		return rep, err

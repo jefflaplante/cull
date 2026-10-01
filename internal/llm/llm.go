@@ -57,6 +57,14 @@ func (u Usage) Sub(o Usage) Usage {
 // TotalIn is every input token the call processed: uncached, written and read.
 func (u Usage) TotalIn() int { return u.InputTokens + u.CacheWriteTokens + u.CacheReadTokens }
 
+// ModelPinner is a backend whose model name is an alias resolved per call
+// (claude-code's "sonnet"): Resolved reports what it resolved to, and Pin makes a
+// different resolution an ErrAbortRun.
+type ModelPinner interface {
+	Resolved() string
+	Pin(model string)
+}
+
 // Quota is subscription utilization as reported by Claude Code (0..1 per window).
 type Quota struct {
 	Status             string

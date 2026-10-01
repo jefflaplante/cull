@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,9 @@ type ClaudeCode struct {
 	Model     string
 	QuotaStop float64 // stop the run once 5-hour utilization reaches this
 	Timeout   time.Duration
+
+	mu               sync.Mutex
+	resolved, pinned string // see Resolved and Pin
 }
 
 func NewClaudeCode(bin, model string, quotaStop float64) *ClaudeCode {
@@ -38,6 +42,9 @@ var scrubbedEnv = []string{
 	"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
 	"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
 	"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+	// --model is the only thing that picks the model: these would remap its alias.
+	"ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL",
 }
 
 func (c *ClaudeCode) Call(ctx context.Context, req Request) (*Response, error) {
@@ -163,6 +170,7 @@ func (c *ClaudeCode) parse(r io.Reader) (*Response, error) {
 			Type          string `json:"type"`
 			Subtype       string `json:"subtype"`
 			APIKeySource  string `json:"apiKeySource"`
+			Model         string `json:"model"`
 			RateLimitInfo *struct {
 				Status         string `json:"status"`
 				UnifiedWindows map[string]struct {
@@ -191,6 +199,9 @@ func (c *ClaudeCode) parse(r io.Reader) (*Response, error) {
 				return nil, fmt.Errorf("%w: claude reported apiKeySource=%q, not the subscription; refusing to bill an API account",
 					ErrAbortRun, ev.APIKeySource)
 			}
+			if err := c.resolve(ev.Model); err != nil {
+				return nil, err // before the call spends anything
+			}
 			sawInit = true
 		case "rate_limit_event":
 			if ev.RateLimitInfo != nil {
@@ -218,4 +229,42 @@ func (c *ClaudeCode) parse(r io.Reader) (*Response, error) {
 		}
 	}
 	return nil, sc.Err()
+}
+
+// Resolved is the model claude resolved the --model alias to, once a call ran.
+func (c *ClaudeCode) Resolved() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.resolved
+}
+
+// Pin requires the alias to resolve to model: a report continued later must not
+// mix models when the alias has moved on.
+func (c *ClaudeCode) Pin(model string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pinned = model
+}
+
+// resolve checks the model an init event names against the pinned one, or the
+// first one this run saw, and records it. A change is ErrAbortRun: one report,
+// one model, or calibration compares a mixture.
+func (c *ClaudeCode) resolve(model string) error {
+	if model == "" {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	want := c.pinned
+	if want == "" {
+		want = c.resolved
+	}
+	if want != "" && model != want {
+		return fmt.Errorf("%w: claude resolved --model %q to %s, but this report was judged with %s: "+
+			"rerun with --model %s to continue it, or -o for a separate report", ErrAbortRun, c.Model, model, want, want)
+	}
+	if c.resolved == "" {
+		c.resolved = model
+	}
+	return nil
 }

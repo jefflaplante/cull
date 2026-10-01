@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -243,5 +244,45 @@ func TestServerKeepsDevelopSettings(t *testing.T) {
 	sc, _ := os.ReadFile(filepath.Join(dir, "L2.xmp"))
 	if !strings.Contains(string(sc), "crs:Exposure2012") || !strings.Contains(string(sc), `xmp:Rating="3"`) {
 		t.Fatalf("develop settings dropped:\n%s", sc)
+	}
+}
+
+// Z's loupe: the frame's whole preview at native size, rendered on first request
+// and then served from the sheet's assets.
+func TestLoupeServesNativePreview(t *testing.T) {
+	dir, h, _ := serveFixture(t, false)
+	rec := call(h, "GET", "/assets/L1.native.jpg", "", nil)
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	cfg, err := jpeg.DecodeConfig(rec.Body)
+	if err != nil || cfg.Width != 1600 || cfg.Height != 1067 {
+		t.Fatalf("decoded %+v err %v", cfg, err)
+	}
+	p := filepath.Join(dir, "cull-review", AssetsDir, "L1.native.jpg")
+	st1, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("not cached: %v", err)
+	}
+	call(h, "GET", "/assets/L1.native.jpg", "", nil)
+	if st2, _ := os.Stat(p); !st2.ModTime().Equal(st1.ModTime()) {
+		t.Fatal("rendered again instead of served from disk")
+	}
+}
+
+func TestLoupeServesOnlyKnownFrames(t *testing.T) {
+	_, h, _ := serveFixture(t, false)
+	for _, path := range []string{"/assets/nope.native.jpg", "/assets/L1.DNG", "/assets/..%2Fx.native.jpg", "/assets/L1.native.png"} {
+		if rec := call(h, "GET", path, "", nil); rec.Code != 404 {
+			t.Errorf("%s: status %d", path, rec.Code)
+		}
+	}
+}
+
+func TestPageOffersTheLoupe(t *testing.T) {
+	_, h, _ := serveFixture(t, false)
+	body := call(h, "GET", "/", "", nil).Body.String()
+	if !strings.Contains(body, `"native":"L1.native.jpg"`) || !strings.Contains(pageTemplate, `k === "z"`) {
+		t.Fatal("page doesn't offer the loupe")
 	}
 }

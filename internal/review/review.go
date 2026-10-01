@@ -31,6 +31,9 @@ const (
 	placeholder = "/*__DATA__*/null"
 )
 
+// nativeSuffix names a frame's whole preview at native size, for the loupe.
+const nativeSuffix = ".native.jpg"
+
 // AssetsDir holds the sheet's images, beside index.html.
 const AssetsDir = "assets"
 
@@ -46,6 +49,7 @@ type card struct {
 	Path       string              `json:"path"`
 	Thumb      string              `json:"thumb,omitempty"`
 	Subject    string              `json:"subject,omitempty"`
+	Native     string              `json:"native,omitempty"` // the loupe's full preview, rendered by the server on first use
 	Decision   string              `json:"decision,omitempty"`
 	Reasons    []string            `json:"reasons,omitempty"`
 	Fixups     []string            `json:"fixups,omitempty"`
@@ -164,6 +168,7 @@ func makeCard(rep *report.Report, r report.Result, o Options, log io.Writer) car
 		src = r.MovedTo
 	}
 	base := baseName(rep.Dir, r.File)
+	c.Native = base + nativeSuffix
 	if name, err := image1(o, base+".thumb.jpg", func() ([]byte, error) { return thumb(src) }); err == nil {
 		c.Thumb = name
 	} else {

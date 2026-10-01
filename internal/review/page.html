@@ -63,6 +63,10 @@ ul { margin: 4px 0 0; padding-left: 18px; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .help { color: var(--muted); font-size: 12px; }
 .empty { color: var(--muted); padding: 40px; text-align: center; }
+#loupe { position: fixed; inset: 0; z-index: 10; background: #000; overflow: auto; display: none; cursor: grab; }
+#loupe.open { display: block; }
+#loupe img { display: block; max-width: none; }
+#loupe .cap { position: fixed; left: 12px; bottom: 12px; margin: 0; background: #000b; color: #fff; padding: 4px 8px; border-radius: 4px; }
 </style>
 </head>
 <body>
@@ -78,12 +82,13 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     <label class="file">Import labels<input type="file" id="import" accept=".jsonl,application/jsonl,application/x-ndjson,text/plain"></label>
   </div>
   <span class="save" id="save"></span>
-  <span class="help">← → ↑ ↓ move · N next unlabelled · [ ] sets · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid · badges: top right = you · bottom = model</span>
+  <span class="help">← → ↑ ↓ move · Z 100% · N next unlabelled · [ ] sets · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid · badges: top right = you · bottom = model</span>
 </header>
 <main>
   <div id="grid"></div>
   <div id="detail"></div>
 </main>
+<div id="loupe" tabindex="-1"></div>
 <script id="data" type="application/json">/*__DATA__*/null</script>
 <script>
 (() => {
@@ -248,6 +253,11 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     nav.children[0].onclick = () => move(-1);
     nav.children[1].onclick = () => { detailOpen = false; pinned = -1; render(); };
     nav.children[2].onclick = () => move(1);
+    if (serve && c.native) {
+      const z = el("button", { text: "100% (Z)" });
+      z.onclick = openLoupe;
+      nav.appendChild(z);
+    }
     const st = status[c.file];
 
     // Filmstrip: every card sharing this frame's set, regardless of the current
@@ -326,6 +336,40 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     sel = Math.max(0, k);
     render();
   }
+  // The loupe shows the frame's whole preview at native size (1 image pixel per
+  // screen pixel), opened on the subject; the server renders it on first use.
+  let loupeOpen = false, drag = null;
+  const loupe = document.getElementById("loupe");
+  function currentCard() {
+    const vis = visible();
+    return vis.length ? cards[vis[Math.min(sel, vis.length - 1)]] : null;
+  }
+  function openLoupe() {
+    const c = currentCard();
+    if (!c || !c.native) return;
+    if (!serve) { note = "the 100% view needs the review server (it isn't available with --static)"; render(); return; }
+    loupeOpen = true;
+    const cap = el("p", { cls: "cap", text: "loading the native preview… (the first time takes a few seconds)" });
+    const im = el("img", { src: "assets/" + encodeURIComponent(c.native), alt: c.file, draggable: "false" });
+    im.onload = () => {
+      const dpr = window.devicePixelRatio || 1, w = im.naturalWidth / dpr, h = im.naturalHeight / dpr;
+      im.style.width = w + "px";
+      const b = c.focus && c.focus.box;
+      const cx = b ? (b.left + b.right) / 2 : 0.5, cy = b ? (b.top + b.bottom) / 2 : 0.5;
+      loupe.scrollLeft = cx * w - loupe.clientWidth / 2;
+      loupe.scrollTop = cy * h - loupe.clientHeight / 2;
+      cap.textContent = `${c.file} · 100% · drag or arrow keys to pan · Z or Esc closes`;
+    };
+    im.onerror = () => { cap.textContent = "couldn't load the native preview"; };
+    loupe.replaceChildren(im, cap);
+    loupe.className = "open";
+    loupe.focus();
+  }
+  function closeLoupe() { loupeOpen = false; loupe.className = ""; loupe.replaceChildren(); }
+  loupe.addEventListener("mousedown", e => { drag = { x: e.clientX, y: e.clientY, l: loupe.scrollLeft, t: loupe.scrollTop }; e.preventDefault(); });
+  window.addEventListener("mousemove", e => { if (drag) { loupe.scrollLeft = drag.l - (e.clientX - drag.x); loupe.scrollTop = drag.t - (e.clientY - drag.y); } });
+  window.addEventListener("mouseup", () => { drag = null; });
+
   // jump moves to the next (dir 1) or previous (dir -1) shown frame matching pred,
   // wrapping once around the list; it reports whether one was found.
   function jump(pred, dir) {
@@ -427,6 +471,14 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   document.addEventListener("keydown", ev => {
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     const k = ev.key.toLowerCase();
+    if (loupeOpen) { // keys pan and label the frame shown; Z or Esc closes
+      const dx = loupe.clientWidth / 4, dy = loupe.clientHeight / 4;
+      const pan = { arrowleft: [-dx, 0], arrowright: [dx, 0], arrowup: [0, -dy], arrowdown: [0, dy] }[k];
+      if (k === "z" || k === "escape") { closeLoupe(); ev.preventDefault(); return; }
+      if (pan) { loupe.scrollBy(pan[0], pan[1]); ev.preventDefault(); return; }
+      if (!/^[krcu0-5]$/.test(k)) return;
+    }
+    if (k === "z") { openLoupe(); ev.preventDefault(); return; }
     if (k === "arrowright") { move(1); ev.preventDefault(); }
     else if (k === "arrowleft") { move(-1); ev.preventDefault(); }
     else if (k === "arrowdown") { move(detailOpen ? 1 : columns()); ev.preventDefault(); }

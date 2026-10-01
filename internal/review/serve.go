@@ -5,13 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jefflaplante/cull/internal/dng"
+	"github.com/jefflaplante/cull/internal/imageprep"
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/report"
 	"github.com/jefflaplante/cull/internal/xmp"
@@ -32,6 +36,9 @@ type Server struct {
 	o     ServeOptions
 	files map[string]string // base name → the frame's path in the report
 	mu    sync.Mutex        // one change at a time: log, sidecar, report
+
+	natives  map[string]string // loupe image name → where the frame lives now
+	renderMu sync.Mutex        // one native render at a time: each holds a full-resolution preview
 }
 
 // NewServer refuses a report where two frames share a base name: a label couldn't
@@ -43,11 +50,18 @@ func NewServer(s *Sheet, rep *report.Report, o ServeOptions) (*Server, error) {
 	if dups := labels.Duplicates(rep.Results); len(dups) > 0 {
 		return nil, fmt.Errorf("frames share a file name, so labels can't tell them apart: %s", strings.Join(dups, "; "))
 	}
-	files := map[string]string{}
+	files, natives := map[string]string{}, map[string]string{}
 	for _, r := range rep.Results {
 		files[filepath.Base(r.File)] = r.File
+		if r.Error == "" && r.Preview != nil {
+			src := r.File
+			if r.MovedTo != "" {
+				src = r.MovedTo
+			}
+			natives[baseName(rep.Dir, r.File)+nativeSuffix] = src
+		}
 	}
-	return &Server{sheet: s, o: o, files: files}, nil
+	return &Server{sheet: s, o: o, files: files, natives: natives}, nil
 }
 
 // Handler serves the sheet for a listener at addr (host:port): the page, its
@@ -92,14 +106,55 @@ func (s *Server) page(w http.ResponseWriter, _ *http.Request) {
 	w.Write(b)
 }
 
-// image serves the sheet's own JPEGs from its assets folder and nothing else.
+// image serves the sheet's own JPEGs from its assets folder and nothing else. A
+// loupe image (a frame's whole preview at native size) is rendered on its first
+// request, and only for a frame of this sheet.
 func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if !strings.HasSuffix(name, ".jpg") || name != filepath.Base(name) {
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeFile(w, r, filepath.Join(s.sheet.Dir, AssetsDir, name))
+	p := filepath.Join(s.sheet.Dir, AssetsDir, name)
+	if strings.HasSuffix(name, nativeSuffix) {
+		src, ok := s.natives[name]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if err := s.renderNative(src, p); err != nil {
+			http.Error(w, "loupe: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	http.ServeFile(w, r, p)
+}
+
+// renderNative writes the frame's largest preview, in display orientation, at p
+// unless it is there already.
+func (s *Server) renderNative(src, p string) error {
+	s.renderMu.Lock()
+	defer s.renderMu.Unlock()
+	if _, err := os.Stat(p); err == nil {
+		return nil
+	}
+	pv, err := dng.Extract(src)
+	if err != nil {
+		return err
+	}
+	f, err := imageprep.Decode(pv.Data, pv.Orientation)
+	if err != nil {
+		return err
+	}
+	b, err := f.Crop(image.Rect(0, 0, f.W, f.H), 90)
+	if err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
 }
 
 type state struct {

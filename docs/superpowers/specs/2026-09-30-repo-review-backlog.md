@@ -145,6 +145,8 @@ Section 4 was implemented on branch `feat/cost-levers` (2026-10-01).
 
 ## 5. Workflow and UX
 
+**Done** on branch `feat/workflow-ux` (2026-10-01): every item below.
+
 - **Review page:**
   - a native-resolution loupe (Z) that opens on the subject and pans;
   - a side-by-side set compare (S) at equal scale, with 1–9 to pick the best;
@@ -161,6 +163,24 @@ Section 4 was implemented on branch `feat/cost-levers` (2026-10-01).
   - Help text typo in `cli/review.go:38`.
 - **Docs:** README and WORKFLOW describe badge positions the wrong way round compared with `page.html:44-45`. K/R/C only advance in the detail view.
 - **Static-mode labels:** there's no way to get labels from `--static` mode into the log.
+
+The page script has no unit harness. Its pure parts run under node
+(`TestPagePureFunctions`), and the loupe endpoint was checked on a real frame. The UI
+itself hasn't been driven in a browser yet, because the Chrome extension wasn't connected.
+
+**Deferred minors from its review:**
+- The loupe test uses an orientation-1 fixture, so its display-orientation check proves nothing.
+- `renderNative` leaves a `.tmp` file behind on error, and keeps rendering for requests that were abandoned.
+- The loupe's list of frames goes stale if a frame moves to `culled/` while the server runs.
+- `jump()` skips one frame when wrapping backwards from a pinned frame past the end.
+- In compare, clicking a tile whose frame is hidden by the current filter does nothing, with no message. Enter on a tile isn't implemented.
+- `status`:
+  - says "at list price" for batch runs, which are priced at batch rates;
+  - doesn't cap its 30-label target at the shoot's size;
+  - gives errored frames no next step.
+- `import-labels` can override newer log entries with an older export.
+- The spend prompt uses the whole-folder estimate on `--resume`, and ignores `--max-cost`.
+- The README Commands table lacks `import-labels`; CLAUDE.md's layout lacks `status` and `import-labels`.
 
 ## 6. Hardening
 

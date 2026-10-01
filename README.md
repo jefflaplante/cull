@@ -104,6 +104,7 @@ undoes `--move-culled`.
 | `calibrate <report>...` | Compare a report's decisions with your labels; sweep thresholds | no |
 | `apply-c1 <dir>` | AppleScript that applies verdicts, stars and keywords in Capture One (dry run by default) | no |
 | `restore <dir>` | Move frames that `--move-culled` moved back where they were | no |
+| `status <dir>` | Where a shoot stands (judged, labelled, ranked, spent) and the next command to run | no |
 | `version`, `completion` | Build version; shell completion | no |
 
 Every command has `--help` with examples.

@@ -19,6 +19,8 @@ make install    # optional: $GOPATH/bin/cull, so `cull` is on your PATH
 - **Local model:** `--backend openai --model <name>` talks to an OpenAI-compatible
   server (free, but small models judge poorly).
 
+Lost along the way? `cull status <dir>` shows where the shoot stands and the next command.
+
 ## 1. Check the folder (free)
 
 ```sh

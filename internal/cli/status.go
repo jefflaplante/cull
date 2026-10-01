@@ -1,0 +1,169 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+
+	"github.com/spf13/cobra"
+
+	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/llm"
+	"github.com/jefflaplante/cull/internal/pipeline"
+	"github.com/jefflaplante/cull/internal/report"
+)
+
+// labelSampleTarget is how many labelled frames make calibrate worth reading.
+const labelSampleTarget = 30
+
+func newStatusCmd(so *sharedOpts) *cobra.Command {
+	var labelsPath string
+	cmd := &cobra.Command{
+		Use:   "status <dir>",
+		Short: "Where a shoot stands (judged, labelled, ranked, spent) and what to run next",
+		Long: `status reads the folder, its report and your labels log, and prints counts and
+the next command to run. It changes nothing and calls no model.`,
+		Example: "  cull status ~/Pictures/2026-09-26",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := so.base(args[0])
+			if err != nil {
+				return err
+			}
+			files, err := pipeline.Discover(cfg.Dir, cfg.Recursive)
+			if err != nil {
+				return err
+			}
+			rep, err := report.Load(cfg.ReportPath)
+			if errors.Is(err, fs.ErrNotExist) {
+				rep = nil
+			} else if err != nil {
+				return err
+			}
+			var lab map[string]labels.Entry
+			if rep != nil {
+				rep.Relocate(cfg.ReportPath, cfg.Dir)
+				if lab, err = labels.Read(labelsOr(labelsPath, cfg.ReportPath)); err != nil {
+					return err
+				}
+			}
+			writeStatus(cmd.OutOrStdout(), cfg, files, rep, lab)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&labelsPath, "labels", "", "your labels log (default: cull-labels.jsonl beside the report)")
+	return cmd
+}
+
+func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.Report, lab map[string]labels.Entry) {
+	dir := cfg.Dir
+	if cfg.ReportPath != filepath.Join(cfg.Dir, "cull-report.json") {
+		dir = "-o " + cfg.ReportPath + " " + cfg.Dir // suggested commands keep the same report
+	}
+	if rep == nil {
+		fmt.Fprintf(w, "%s: %d DNGs; no report at %s\n", cfg.Dir, len(files), cfg.ReportPath)
+		fmt.Fprintf(w, "next: cull scan %s   (free), or cull judge --estimate %s\n", dir, dir)
+		return
+	}
+	model := rep.Backend + "/" + rep.Model
+	if rep.ResolvedModel != "" && rep.ResolvedModel != rep.Model {
+		model += " → " + rep.ResolvedModel
+	}
+	if rep.Backend == "" {
+		model = "scan only"
+	}
+	effort := rep.Effort
+	if effort == "" {
+		effort = "default"
+	}
+	fmt.Fprintf(w, "%s: %d DNGs; report %s (%s, effort %s)\n", cfg.Dir, len(files), filepath.Base(cfg.ReportPath), model, effort)
+
+	inReport := map[string]bool{}
+	var assessed, errs, moved int
+	counts := map[string]int{}
+	var labelled, rated, disagree int
+	for _, r := range rep.Results {
+		inReport[r.File] = true
+		switch {
+		case r.Error != "":
+			errs++
+		case r.Evaluation != nil:
+			assessed++
+			counts[string(r.Decision)]++
+		}
+		if r.MovedTo != "" {
+			moved++
+		}
+		if e, ok := lab[filepath.Base(r.File)]; ok {
+			if e.Label != "" {
+				labelled++
+				if r.Decision != "" && string(r.Decision) != e.Label {
+					disagree++
+				}
+			}
+			if e.Stars > 0 {
+				rated++
+			}
+		}
+	}
+	unjudged := 0
+	for _, f := range files {
+		if !inReport[f] {
+			unjudged++
+		}
+	}
+	fmt.Fprintf(w, "  assessed %d · errors %d · not yet judged %d\n", assessed, errs, unjudged)
+	if assessed > 0 {
+		fmt.Fprintf(w, "  model: keep %d · review %d · cull %d · moved to culled/ %d\n", counts["keep"], counts["review"], counts["cull"], moved)
+	}
+	fmt.Fprintf(w, "  you: labelled %d/%d · rated %d · disagree with the model %d\n", labelled, len(rep.Results), rated, disagree)
+	byModel, byScores := 0, 0
+	for _, s := range rep.Sets {
+		if s.Of < 2 {
+			continue
+		}
+		if s.By == "model" {
+			byModel++
+		} else {
+			byScores++
+		}
+	}
+	fmt.Fprintf(w, "  sets: %d (ranked %d, by scores %d)\n", byModel+byScores, byModel, byScores)
+	if _, priced := llm.PriceFor(rep.Backend, rep.Model); priced {
+		fmt.Fprintf(w, "  spent: $%.2f at list price\n", rep.Cost())
+	} else if rep.Backend != "" {
+		fmt.Fprintf(w, "  spent: not billed per token (%s)\n", rep.Backend)
+	}
+	judgeBatch := exists(cfg.ReportPath + ".batch.json")
+	rankBatch := exists(cfg.ReportPath + ".rank-batch.json")
+	switch {
+	case judgeBatch:
+		fmt.Fprintf(w, "  pending: a judge batch (%s.batch.json)\n", filepath.Base(cfg.ReportPath))
+	case rankBatch:
+		fmt.Fprintf(w, "  pending: a ranking batch (%s.rank-batch.json)\n", filepath.Base(cfg.ReportPath))
+	}
+
+	var next string
+	switch {
+	case judgeBatch:
+		next = "cull judge --batch --resume " + dir + "   (re-attaches; already paid for)"
+	case rankBatch:
+		next = "cull rank --batch " + dir + "   (re-attaches; already paid for)"
+	case rep.Backend == "":
+		next = "cull judge --estimate " + dir + "   (then cull judge)"
+	case unjudged > 0:
+		next = "cull judge --resume " + dir
+	case byScores > 0:
+		next = "cull rank --estimate " + dir + "   (then cull rank)"
+	case labelled < labelSampleTarget:
+		next = fmt.Sprintf("label a sample in cull review %s (%d/%d so far), then cull calibrate %s", dir, labelled, labelSampleTarget, dir)
+	default:
+		next = "cull calibrate " + dir + ", then cull decide --write-xmp --move-culled " + dir
+	}
+	fmt.Fprintf(w, "next: %s\n", next)
+}
+
+func exists(p string) bool { _, err := os.Stat(p); return err == nil }

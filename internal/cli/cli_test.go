@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/jefflaplante/cull/internal/eval"
@@ -116,8 +117,7 @@ func TestSaveInputsRefusesShootDir(t *testing.T) {
 }
 
 func TestFaceMinQDefault(t *testing.T) {
-	root := NewRootCmd()
-	f := root.PersistentFlags().Lookup("face-min-q")
+	f := commandFlags("judge").Lookup("face-min-q")
 	if f == nil || f.DefValue != "80" {
 		t.Fatalf("face-min-q flag: %+v", f)
 	}
@@ -1139,7 +1139,7 @@ func TestJudgeRefusesMaxCostForUnpricedEscalationModel(t *testing.T) {
 
 // A stored --seq-look is reused unless typed again.
 func TestResolveSeqReusesStoredSettings(t *testing.T) {
-	fs := NewRootCmd().PersistentFlags()
+	fs := commandFlags("decide")
 	fs.Parse(nil)
 	stored := &report.Sequences{GapSeconds: 60, Look: 0.12}
 	got, notes := resolveSeq(fs, group.Options{Gap: time.Minute, MaxLook: group.DefaultLook}, stored)
@@ -1153,7 +1153,7 @@ func TestResolveSeqReusesStoredSettings(t *testing.T) {
 }
 
 func TestDecideWithoutStoredSequencesUsesFlags(t *testing.T) {
-	fs := NewRootCmd().PersistentFlags()
+	fs := commandFlags("decide")
 	fs.Parse(nil)
 	cur := group.Options{Gap: time.Minute, MaxLook: group.DefaultLook}
 	if got, notes := resolveSeq(fs, cur, nil); got != cur || len(notes) != 0 {
@@ -1282,7 +1282,7 @@ func TestRankRefusesADifferentEffort(t *testing.T) {
 // 1024 px cut frame input tokens 16% with verdicts within run-to-run noise
 // (CLAUDE.md, 2026-10-01 cost A/B); the subject crop carries the sharpness call.
 func TestMaxEdgeDefault(t *testing.T) {
-	if f := NewRootCmd().PersistentFlags().Lookup("max-edge"); f == nil || f.DefValue != "1024" {
+	if f := commandFlags("judge").Lookup("max-edge"); f == nil || f.DefValue != "1024" {
 		t.Fatalf("max-edge flag: %+v", f)
 	}
 }
@@ -1308,5 +1308,41 @@ func TestApplyC1ProbeNeedsNoDir(t *testing.T) {
 func TestDecideOverwriteNeedsWriteXMP(t *testing.T) {
 	if _, err := run(t, "decide", "--overwrite-xmp", t.TempDir()); err == nil || !strings.Contains(err.Error(), "--write-xmp") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// commandFlags is a fresh command's own flag set.
+func commandFlags(name string) *pflag.FlagSet {
+	for _, c := range NewRootCmd().Commands() {
+		if c.Name() == name {
+			return c.Flags()
+		}
+	}
+	return nil
+}
+
+func TestFlagsOnlyWhereUsed(t *testing.T) {
+	cmds := map[string]*cobra.Command{}
+	root := NewRootCmd()
+	for _, c := range root.Commands() {
+		cmds[c.Name()] = c
+	}
+	has := func(cmd, flag string) bool {
+		return cmds[cmd].Flags().Lookup(flag) != nil || root.PersistentFlags().Lookup(flag) != nil
+	}
+	for _, cmd := range []string{"review", "restore", "apply-c1"} {
+		for _, f := range []string{"max-edge", "tiles", "seq-gap", "save-inputs", "face-min-q"} {
+			if has(cmd, f) {
+				t.Errorf("%s accepts --%s, which it ignores", cmd, f)
+			}
+		}
+	}
+	for _, cf := range [][2]string{{"judge", "max-edge"}, {"scan", "tiles"}, {"decide", "seq-look"}, {"rank", "seq-gap"}, {"calibrate", "seq-look"}, {"review", "report"}, {"restore", "recursive"}} {
+		if !has(cf[0], cf[1]) {
+			t.Errorf("%s lacks --%s", cf[0], cf[1])
+		}
+	}
+	if _, err := run(t, "restore", "--tiles", "2", t.TempDir()); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("restore --tiles: %v", err)
 	}
 }

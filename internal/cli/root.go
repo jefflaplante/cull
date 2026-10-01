@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/imageprep"
@@ -46,20 +47,49 @@ then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.`,
 		SilenceErrors: true, // main prints the error once
 		Version:       version,
 	}
+	// Only the report path and recursion apply to every command; the image and
+	// grouping flags go on the commands that use them, so no command accepts a
+	// flag it would silently ignore. so starts at the defaults for commands
+	// without them (base reads every field).
+	so = sharedOpts{maxEdge: defaultMaxEdge, tiles: 1, minPreviewEdge: 1500, faceMinQ: 80, seqGap: defaultSeqGap, seqLook: group.DefaultLook}
 	pf := root.PersistentFlags()
 	pf.StringVarP(&so.report, "report", "o", "", "report path (default <dir>/cull-report.json)")
 	pf.BoolVarP(&so.recursive, "recursive", "r", false, "recurse into subdirectories")
-	pf.IntVar(&so.maxEdge, "max-edge", 1024, "long edge of the full-frame image sent to the model (context only: sharpness is judged on the native-resolution crops)")
-	pf.IntVar(&so.tiles, "tiles", 1, "\"where focus landed\" tiles per image (native resolution)")
-	pf.IntVar(&so.minPreviewEdge, "min-preview-edge", 1500, "try exiftool / flag images whose embedded preview is smaller than this")
-	pf.Float64Var(&so.faceMinQ, "face-min-q", 80, "face detection score needed to trust a face as the focus target")
-	pf.StringVar(&so.saveInputs, "save-inputs", "", "write exactly what the model sees (JPEGs + inputs.json) to this directory")
-	pf.BoolVar(&so.landedWithSubject, "landed-with-subject", false, "also send \"where focus landed\" tiles when a subject crop exists (can bias the model toward texture)")
-	pf.DurationVar(&so.seqGap, "seq-gap", 60*time.Second, "frames this close in capture time can link into a sequence (0 = no sequence grouping)")
-	pf.Float64Var(&so.seqLook, "seq-look", group.DefaultLook, "max look distance (0-1) to the previous frame for it to link into the same sequence")
 
-	root.AddCommand(newScanCmd(&so), newCullCmd(&so), newRankCmd(&so), newDecideCmd(&so), newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newVersionCmd())
+	scan, judge, rank, decide := newScanCmd(&so), newCullCmd(&so), newRankCmd(&so), newDecideCmd(&so)
+	for _, c := range []*cobra.Command{scan, judge} {
+		so.registerPrep(c.Flags())
+	}
+	for _, c := range []*cobra.Command{scan, judge, rank, decide} {
+		so.registerSeq(c.Flags())
+	}
+	root.AddCommand(scan, judge, rank, decide, newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newVersionCmd())
 	return root
+}
+
+const (
+	defaultMaxEdge = 1024 // 2026-10-01 A/B: 16% fewer input tokens than 1568, verdicts within noise
+	defaultSeqGap  = 60 * time.Second
+)
+
+// registerPrep adds the flags that shape what the model is sent (scan, judge).
+func (so *sharedOpts) registerPrep(f *pflag.FlagSet) {
+	f.IntVar(&so.maxEdge, "max-edge", defaultMaxEdge, "long edge of the full-frame image sent to the model (context only: sharpness is judged on the native-resolution crops)")
+	f.IntVar(&so.tiles, "tiles", 1, "\"where focus landed\" tiles per image (native resolution)")
+	f.IntVar(&so.minPreviewEdge, "min-preview-edge", 1500, "try exiftool / flag images whose embedded preview is smaller than this")
+	f.Float64Var(&so.faceMinQ, "face-min-q", 80, "face detection score needed to trust a face as the focus target")
+	f.StringVar(&so.saveInputs, "save-inputs", "", "write exactly what the model sees (JPEGs + inputs.json) to this directory")
+	f.BoolVar(&so.landedWithSubject, "landed-with-subject", false, "also send \"where focus landed\" tiles when a subject crop exists (can bias the model toward texture)")
+}
+
+// registerSeq adds the grouping flags (the commands that group frames into sets).
+func (so *sharedOpts) registerSeq(f *pflag.FlagSet) {
+	registerSeqVars(f, &so.seqGap, &so.seqLook)
+}
+
+func registerSeqVars(f *pflag.FlagSet, gap *time.Duration, look *float64) {
+	f.DurationVar(gap, "seq-gap", defaultSeqGap, "frames this close in capture time can link into a sequence (0 = no sequence grouping)")
+	f.Float64Var(look, "seq-look", group.DefaultLook, "max look distance (0-1) to the previous frame for it to link into the same sequence")
 }
 
 // base builds the pipeline config common to all subcommands from a dir argument.

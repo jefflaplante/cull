@@ -364,16 +364,20 @@ its sidecar into a `culled/` folder beside it.
 
 ## Flag reference
 
-**Global** (every command):
-- `-o/--report` sets the report path; `-r/--recursive` includes subfolders.
+**Global** (every command): `-o/--report` sets the report path; `-r/--recursive`
+includes subfolders.
+
+**Image** (`scan`, `judge`):
 - `--max-edge` (1024) sets the size of the full frame sent to the model. It was
   1568 before 2026-10-01: 1024 cut input tokens by 16% with verdicts unchanged.
 - `--min-preview-edge` (1500) sets the preview size below which a frame is flagged.
 - `--face-min-q` (80) is the face-detection confidence needed.
 - `--tiles` (1) sets how many "where focus landed" tiles to send. Add
   `--landed-with-subject` to send them even when there's a subject crop.
-- `--seq-gap` (60 s) and `--seq-look` (0.08) control grouping.
 - `--save-inputs <dir>` writes exactly what the model sees.
+
+**Grouping** (`scan`, `judge`, `rank`, `decide`, `calibrate`): `--seq-gap` (60 s) and
+`--seq-look` (0.08).
 
 **Policy** (`judge`, `rank`, `decide`, `calibrate`):
 - `--review-below-sharpness` (0 = off);

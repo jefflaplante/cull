@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -99,6 +100,9 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 			return nil
 		},
 	}
+	var seqGap time.Duration
+	var seqLook float64
+	registerSeqVars(cmd.Flags(), &seqGap, &seqLook) // flagSeq reads them
 	cmd.Flags().BoolVar(&compare, "compare", false, "compare two reports over the same frames (two runs, or two backends): how often their verdicts disagree; no labels needed")
 	cmd.Flags().StringVar(&labelsPath, "labels", "", "labels log (default: cull-labels.jsonl beside the first report)")
 	pol.register(cmd.Flags())

@@ -85,7 +85,11 @@ an offline page instead of serving).
 | S | compare the frame's set side by side at one scale; 1–9 keeps that frame |
 | N | next unlabelled frame |
 | [ / ] | previous / next set |
+| - / = | one keeper fewer / more in the frame's set (top N by the model's rank keep, the rest cull) |
 
+- **Sets:** each set is boxed, with its keeper count in the header. Use **−** / **+**
+  (or **-** / **=**) to keep the top N by the model's rank and cull the rest, or the
+  **✓ keeper** toggle on a frame to flip just that frame. All of these are your labels.
 - **Filters:** by verdict (keep, review or cull), by what you haven't labelled or
   rated yet, where you disagree with the model, and by **Sets: All / Best /
   Outranked**.

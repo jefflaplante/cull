@@ -270,3 +270,12 @@ func TestLoupeLabelsTheFrameItShows(t *testing.T) {
 		t.Fatal("loupe label keys don't target the loupe's frame")
 	}
 }
+
+// Sets render as boxed blocks with keeper controls; keys - and = change the count.
+func TestPageHasSetBlocksAndKeeperControls(t *testing.T) {
+	for _, want := range []string{"setblock", `k === "-"`, `k === "="`, "keeper-toggle", "- = keepers"} {
+		if !strings.Contains(pageTemplate, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+}

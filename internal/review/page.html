@@ -30,11 +30,19 @@ button:focus-visible { outline: 2px solid var(--accent); }
 .save.warn, .status.warn { color: var(--cull); }
 main { padding: 16px; }
 #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; padding: 3px 3px 0; }
+.card.keeper { border: 2px solid var(--keep); }
 .card.sel { outline: 3px solid var(--accent); }
 .card.set-odd { box-shadow: inset 0 0 0 2px var(--accent); }
 .card.set-even { box-shadow: inset 0 0 0 2px var(--muted); }
-.card img { width: 100%; aspect-ratio: 3 / 2; object-fit: contain; background: #0000000d; display: block; }
+.card img { width: 100%; aspect-ratio: 3 / 2; object-fit: contain; background: #0000000d; display: block; border-radius: 5px; }
+.setblock { grid-column: 1 / -1; border: 2px solid var(--muted); border-radius: 10px; padding: 8px; }
+.setblock.set-odd { border-color: var(--accent); }
+.sethead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; font-size: 13px; }
+.sethead button { padding: 0 8px; }
+.setgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.keeper-toggle { position: absolute; bottom: 34px; left: 8px; font-size: 11px; padding: 1px 6px; border-radius: 999px; }
+.keeper-toggle[aria-pressed="true"] { background: var(--keep); color: #fff; border-color: var(--keep); }
 .card .row { display: flex; justify-content: space-between; gap: 6px; padding: 6px 8px; align-items: center; }
 .name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stars { color: var(--review); letter-spacing: 1px; white-space: nowrap; }
@@ -88,7 +96,7 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     <label class="file">Import labels<input type="file" id="import" accept=".jsonl,application/jsonl,application/x-ndjson,text/plain"></label>
   </div>
   <span class="save" id="save"></span>
-  <span class="help">← → ↑ ↓ move · Z 100% · S compare set · N next unlabelled · [ ] sets · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid · badges: top right = you · bottom = model</span>
+  <span class="help">← → ↑ ↓ move · Z 100% · S compare set · - = keepers in set · N next unlabelled · [ ] sets · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid · badges: top right = you · bottom = model</span>
 </header>
 <main>
   <div id="grid"></div>
@@ -118,6 +126,34 @@ function rejectChange(pending, labels) {
   if (!p.prev) return false;
   if (!p.prev.label && !p.prev.stars) delete labels[p.file]; else labels[p.file] = p.prev;
   return true;
+}
+// groupOrder keeps the cards' order but pulls each set's shown members together at
+// the position of its first shown member, so a set renders (and navigates) as one
+// block. Frames in no set, or a set of one, stay where they are.
+function groupOrder(idxs, cards) {
+  const setOf = i => cards[i].group && cards[i].group.size > 1 ? cards[i].group.id : 0;
+  const members = new Map();
+  for (const i of idxs) {
+    const id = setOf(i);
+    if (id) { if (!members.has(id)) members.set(id, []); members.get(id).push(i); }
+  }
+  const out = [], done = new Set();
+  for (const i of idxs) {
+    const id = setOf(i);
+    if (!id) { out.push(i); continue; }
+    if (done.has(id)) continue;
+    done.add(id);
+    out.push(...members.get(id));
+  }
+  return out;
+}
+// keepLabels is the labels that make the top n of a set (by the model's rank) its
+// keepers and cull the rest it ranked. Members it didn't rank (rank 0: culled for
+// sharpness before ranking) get no entry and keep whatever they have.
+function keepLabels(members, n) {
+  const out = {};
+  for (const m of members) if (m.rank > 0) out[m.file] = m.rank <= n ? "keep" : "cull";
+  return out;
 }
 /*pure:end*/
 (() => {
@@ -158,7 +194,7 @@ function rejectChange(pending, labels) {
     }
   };
   // A frame changed while shown stays visible until the next navigation.
-  const visible = () => cards.map((c, i) => i).filter(i => i === pinned || matches(i));
+  const visible = () => groupOrder(cards.map((c, i) => i).filter(i => i === pinned || matches(i)), cards);
 
   const el = (tag, attrs = {}, ...kids) => {
     const n = document.createElement(tag);
@@ -208,21 +244,77 @@ function rejectChange(pending, labels) {
     s.className = "save" + (note || pending.length ? " warn" : "");
   }
 
+  // A set's members, its ranked keepers now (your label, else the model's), and
+  // how many it ranked.
+  function setMembers(id) { return cards.map((c, i) => i).filter(i => cards[i].group && cards[i].group.id === id); }
+  function setKeepers(id) { return setMembers(id).filter(i => effective(cards[i]) === "keep").length; }
+  // setKeepCount labels set id's top n (by the model's rank) keep and its other
+  // ranked frames cull, as your labels.
+  function setKeepCount(id, n) {
+    const ms = setMembers(id);
+    const ranked = ms.filter(i => cards[i].group.rank > 0).length;
+    n = Math.max(0, Math.min(n, ranked));
+    const labelsFor = keepLabels(ms.map(i => ({ file: cards[i].file, rank: cards[i].group.rank })), n);
+    for (const i of ms) {
+      const want = labelsFor[cards[i].file];
+      if (want && get(cards[i].file).label !== want) labelCard(i, { label: want });
+    }
+    render();
+  }
+  // toggleKeeper flips one frame between keep and cull.
+  function toggleKeeper(i) {
+    labelCard(i, { label: effective(cards[i]) === "keep" ? "cull" : "keep" });
+    render();
+  }
+
+  function renderCard(i, k) {
+    const c = cards[i], l = get(c.file), inSet = c.group && c.group.size > 1;
+    const keeper = inSet && effective(c) === "keep";
+    const card = el("div", { cls: "card" + (k === sel ? " sel" : "") + setTint(c.group) + (keeper ? " keeper" : ""), tabindex: "0" },
+      img(c.thumb, c.file) || el("div", { cls: "empty", text: c.error || "no preview" }),
+      el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), starText(l.stars), setBadge(c.group), modelBadge(c.decision)));
+    if (l.label) card.appendChild(yourBadge(l.label, " label"));
+    const pill = bestPill(c.group);
+    if (pill) card.appendChild(pill);
+    if (inSet && !c.error) {
+      const t = el("button", { cls: "keeper-toggle", type: "button", "aria-pressed": String(keeper), title: "keeper: keep or cull this frame",
+        text: keeper ? "✓ keeper" : "keeper?" });
+      t.onclick = ev => { ev.stopPropagation(); toggleKeeper(i); };
+      card.appendChild(t);
+    }
+    card.onclick = () => { sel = k; detailOpen = true; render(); };
+    return card;
+  }
+
   function renderGrid() {
     const grid = document.getElementById("grid");
     const vis = visible();
     if (!vis.length) { grid.replaceChildren(el("p", { cls: "empty", text: "No frames match this filter." })); return; }
-    grid.replaceChildren(...vis.map((i, k) => {
-      const c = cards[i], l = get(c.file);
-      const card = el("div", { cls: "card" + (k === sel ? " sel" : "") + setTint(c.group), tabindex: "0" },
-        img(c.thumb, c.file) || el("div", { cls: "empty", text: c.error || "no preview" }),
-        el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), starText(l.stars), setBadge(c.group), modelBadge(c.decision)));
-      if (l.label) card.appendChild(yourBadge(l.label, " label"));
-      const pill = bestPill(c.group);
-      if (pill) card.appendChild(pill);
-      card.onclick = () => { sel = k; detailOpen = true; render(); };
-      return card;
-    }));
+    // Frames of one set sit together (visible() groups them): each set is one boxed
+    // block with its keeper count; other frames are plain cards.
+    const out = [];
+    let block = null, blockId = 0;
+    vis.forEach((i, k) => {
+      const c = cards[i], id = c.group && c.group.size > 1 ? c.group.id : 0;
+      if (!id) { block = null; blockId = 0; out.push(renderCard(i, k)); return; }
+      if (id !== blockId) {
+        blockId = id;
+        const ms = setMembers(id), ranked = ms.filter(m => cards[m].group.rank > 0).length;
+        const modelKept = ms.filter(m => cards[m].decision === "keep").length;
+        const minus = el("button", { type: "button", text: "−", title: "one keeper fewer (-)" });
+        const plus = el("button", { type: "button", text: "+", title: "one keeper more (=)" });
+        minus.onclick = () => setKeepCount(id, setKeepers(id) - 1);
+        plus.onclick = () => setKeepCount(id, setKeepers(id) + 1);
+        const grid2 = el("div", { cls: "setgrid" });
+        block = el("div", { cls: "setblock" + setTint(c.group) },
+          el("div", { cls: "sethead" }, el("strong", { text: `Set ${id}` }), el("span", { text: `${ms.length} frames · keepers ${setKeepers(id)}` }),
+            minus, plus, el("span", { cls: "meta", text: `model kept ${modelKept} · ${ranked} ranked` })), grid2);
+        block.grid = grid2;
+        out.push(block);
+      }
+      block.grid.appendChild(renderCard(i, k));
+    });
+    grid.replaceChildren(...out);
     const s = grid.querySelector(".sel");
     if (s) s.scrollIntoView({ block: "nearest" });
   }
@@ -591,6 +683,10 @@ function rejectChange(pending, labels) {
     else if (k === "n") nextUnlabelled();
     else if (k === "]") nextSet(1);
     else if (k === "[") nextSet(-1);
+    else if (k === "-" || k === "=" || k === "+") { // one keeper fewer / more in the current frame's set
+      const c = currentCard();
+      if (c && c.group && c.group.size > 1) setKeepCount(c.group.id, setKeepers(c.group.id) + (k === "-" ? -1 : 1));
+    }
     else if (k === "escape") { detailOpen = false; pinned = -1; render(); }
     else if (k === "k") setLabel("keep");
     else if (k === "r") setLabel("review");

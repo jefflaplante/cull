@@ -238,6 +238,7 @@ per-session token, then opens your browser.
 | S | compare the frame's set side by side at one scale; 1–9 keeps that frame |
 | N | next unlabelled frame |
 | [ / ] | previous / next set |
+| - / = | one keeper fewer / more in the frame's set (top N by the model's rank keep, the rest cull) |
 
 **Filters** combine three rows:
 - **Verdict:** your label, else the model's.
@@ -245,6 +246,14 @@ per-session token, then opens your browser.
 - **Sets:** all, best, outranked.
 
 For example, *Keep + Unrated* shows the keepers you haven't starred yet.
+
+**Sets in the grid.** Each set is drawn as one box around its frames, with a header
+showing how many keepers it has, and **−** / **+** buttons (or **-** / **=**) to change
+that number. Changing it labels the set's top N frames, by the model's rank, as keep and
+the rest of its ranked frames as cull. These are your labels, so sidecars,
+`decide --move-culled`, `apply-c1` and `calibrate` all follow them. Each frame in a set
+also has a **✓ keeper** toggle that flips just that frame between keep and cull.
+Keepers have a green border.
 
 **On each card and in the detail view:**
 - Your label is the outlined badge, top right; the model's verdict is in the card's

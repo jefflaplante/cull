@@ -273,6 +273,10 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
 
 ## Unverified assumptions — check before building on them
 
+- Structured output is written in schema property order. The evidence-first schemas
+  (`llm.Schema` marshals properties in `required` order: focus_target, status, score)
+  rely on it; not yet checked on a live call.
+
 - Capture One runtime details not in its dictionary: color-tag numbering (code assumes
   1 red, 3 yellow, 4 green), whether image `name` includes the extension (script tries both),
   orientation of `dimensions`/`crop`, `make new keyword`. Run `apply-c1 --probe` first.

@@ -238,3 +238,27 @@ func TestPromptWarnsAboutTextureComparisons(t *testing.T) {
 		t.Fatal("prompt lacks the texture caveat")
 	}
 }
+
+func TestEvaluationAsksForEvidenceFirst(t *testing.T) {
+	b, _ := json.Marshal(llm.Portable(EvaluationSchema()))
+	s := string(b)
+	sh := s[strings.Index(s, `"sharpness"`):]
+	if !(strings.Index(s, `"sharpness":`) < strings.Index(s, `"exposure":`) &&
+		strings.Index(sh, `"focus_target"`) < strings.Index(sh, `"status"`) &&
+		strings.Index(sh, `"status"`) < strings.Index(sh, `"score"`)) {
+		t.Fatalf("sharpness evidence must come before its status and score: %s", s)
+	}
+	p := SystemPrompt(0.6, Camera{})
+	for _, band := range []string{"sharp 8-10", "acceptable 6-7.9", "soft 3-5.9", "missed_focus or motion_blur 0-2.9"} {
+		if !strings.Contains(p, band) {
+			t.Errorf("prompt lacks band %q", band)
+		}
+	}
+}
+
+func TestRankAsksForComparisonBeforeOrder(t *testing.T) {
+	b, _ := json.Marshal(llm.Portable(RankSchema()))
+	if s := string(b); strings.Index(s, `"summary":`) > strings.Index(s, `"ranking":`) {
+		t.Fatalf("summary must precede ranking: %s", s)
+	}
+}

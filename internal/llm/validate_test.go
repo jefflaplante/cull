@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -133,5 +134,23 @@ func TestValidatedKeepsUsageWhenBothAttemptsFail(t *testing.T) {
 	})
 	if err == nil || resp == nil || resp.Usage.InputTokens != 20 || resp.Usage.OutputTokens != 4 {
 		t.Fatalf("resp=%+v err=%v", resp, err)
+	}
+}
+
+func TestPortableKeepsRequiredOrder(t *testing.T) {
+	s := map[string]any{"type": "object", "required": []string{"zeta", "alpha", "mid"},
+		"properties": map[string]any{"alpha": map[string]any{"type": "string"}, "mid": map[string]any{"type": "string"}, "zeta": map[string]any{"type": "string"}}}
+	b, err := json.Marshal(Portable(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	z, a, m := bytes.Index(b, []byte(`"zeta":`)), bytes.Index(b, []byte(`"alpha":`)), bytes.Index(b, []byte(`"mid":`))
+	if !(z < a && a < m) {
+		t.Fatalf("properties not in required order: %s", b)
+	}
+	// Nested objects inside a wrapper map keep their order too (the request body).
+	body, _ := json.Marshal(map[string]any{"schema": Portable(s)})
+	if z, a := bytes.Index(body, []byte(`"zeta":`)), bytes.Index(body, []byte(`"alpha":`)); z > a {
+		t.Fatalf("order lost when nested: %s", body)
 	}
 }

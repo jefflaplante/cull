@@ -34,7 +34,7 @@ const rankPrompt = `You compare a sequence of similar frames of one scene (the s
 3. gesture and moment;
 4. composition and background (framing, horizon, distractions at the edges, cropped limbs);
 5. exposure only if it cannot be fixed; fixable exposure never counts against a frame.
-Return every frame exactly once, best first.`
+First write the summary: how the frames differ, and why the best one wins. Then return every frame exactly once, best first.`
 
 // RankSchema is the rank call's JSON Schema.
 func RankSchema() map[string]any {
@@ -44,7 +44,7 @@ func RankSchema() map[string]any {
 var rankSchema = map[string]any{
 	"type":                 "object",
 	"additionalProperties": false,
-	"required":             []string{"ranking", "summary"},
+	"required":             []string{"summary", "ranking"},
 	"properties": map[string]any{
 		"ranking": map[string]any{
 			"type": "array",

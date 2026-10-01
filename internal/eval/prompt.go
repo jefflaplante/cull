@@ -19,7 +19,7 @@ func SystemPrompt(minCropArea float64, cam Camera) string {
 
 4. PEOPLE (flag, don't judge taste). present: a person is the subject. eyes, judged on the subject crop: open, closed (a blink), partial (mid-blink or squint), not_visible (turned away, hidden, or no person). expression: good, neutral, awkward (grimace, mid-word, unflattering moment), or not_applicable.
 
-Scores are 0-10: 5 = usable, 7 = good, 9+ = exceptional. Do not inflate. Keep text fields terse.`, cam.Describe(), 100*minCropArea)
+Write each section's evidence first (sharpness: focus_target; exposure: reason and clipping; composition: issues), then its status, then a score that fits the status. Sharpness bands: sharp 8-10, acceptable 6-7.9, soft 3-5.9, missed_focus or motion_blur 0-2.9. Other scores are 0-10: 5 = usable, 7 = good, 9+ = exceptional. Do not inflate. Keep text fields terse.`, cam.Describe(), 100*minCropArea)
 }
 
 var evaluationSchema = map[string]any{
@@ -29,7 +29,7 @@ var evaluationSchema = map[string]any{
 	"properties": map[string]any{
 		"sharpness": map[string]any{
 			"type":                 "object",
-			"required":             []string{"score", "status", "focus_target"},
+			"required":             []string{"focus_target", "status", "score"},
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"score":        map[string]any{"type": "number", "minimum": 0, "maximum": 10},
@@ -39,7 +39,7 @@ var evaluationSchema = map[string]any{
 		},
 		"exposure": map[string]any{
 			"type":                 "object",
-			"required":             []string{"score", "status", "ev_adjust", "clipping", "reason"},
+			"required":             []string{"reason", "clipping", "status", "ev_adjust", "score"},
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"score":     map[string]any{"type": "number", "minimum": 0, "maximum": 10},
@@ -51,7 +51,7 @@ var evaluationSchema = map[string]any{
 		},
 		"composition": map[string]any{
 			"type":                 "object",
-			"required":             []string{"score", "status", "issues", "crop", "straighten_degrees"},
+			"required":             []string{"issues", "status", "crop", "straighten_degrees", "score"},
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"score":  map[string]any{"type": "number", "minimum": 0, "maximum": 10},

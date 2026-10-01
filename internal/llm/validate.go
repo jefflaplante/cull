@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -153,9 +154,118 @@ func join(path, key string) string {
 // (Anthropic) or ignore; ranges are enforced in Go (eval.Policy.Sanitize).
 var unportable = map[string]bool{"minimum": true, "maximum": true, "minLength": true, "maxLength": true}
 
-// Portable returns a deep copy of schema without unportable keywords.
-func Portable(schema map[string]any) map[string]any {
-	return strip(schema).(map[string]any)
+// Portable returns a deep copy of schema without unportable keywords, as a Schema
+// that marshals its properties in their required order.
+func Portable(schema map[string]any) Schema {
+	return Schema(strip(schema).(map[string]any))
+}
+
+// Schema is a JSON Schema that marshals each object's properties in the order of
+// its "required" list (the rest after them, sorted). Structured output is written
+// in schema order, so this is the order the model answers in: evidence fields
+// listed first are written before the verdict they support. A Go map would
+// otherwise marshal its keys alphabetically.
+type Schema map[string]any
+
+func (s Schema) MarshalJSON() ([]byte, error) { return marshalOrdered(map[string]any(s)) }
+
+func marshalOrdered(v any) ([]byte, error) {
+	switch x := v.(type) {
+	case Schema:
+		return marshalOrdered(map[string]any(x))
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		if props, ok := x["properties"].(map[string]any); ok {
+			return writeObject(keys, func(k string) ([]byte, error) {
+				if k == "properties" {
+					return writeObject(propertyOrder(props, requiredOf(x)), func(p string) ([]byte, error) { return marshalOrdered(props[p]) })
+				}
+				return marshalOrdered(x[k])
+			})
+		}
+		return writeObject(keys, func(k string) ([]byte, error) { return marshalOrdered(x[k]) })
+	case []any:
+		var b bytes.Buffer
+		b.WriteByte('[')
+		for i, e := range x {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			eb, err := marshalOrdered(e)
+			if err != nil {
+				return nil, err
+			}
+			b.Write(eb)
+		}
+		b.WriteByte(']')
+		return b.Bytes(), nil
+	}
+	return json.Marshal(v)
+}
+
+// writeObject writes a JSON object with keys in the given order.
+func writeObject(keys []string, value func(string) ([]byte, error)) ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteByte('{')
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		kb, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(kb)
+		b.WriteByte(':')
+		vb, err := value(k)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(vb)
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
+}
+
+// requiredOf reads an object schema's "required" names.
+func requiredOf(x map[string]any) []string {
+	switch r := x["required"].(type) {
+	case []string:
+		return r
+	case []any:
+		var out []string
+		for _, e := range r {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// propertyOrder is required's order for the properties it names, then the rest sorted.
+func propertyOrder(props map[string]any, required []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, k := range required {
+		if _, ok := props[k]; ok && !seen[k] {
+			out = append(out, k)
+			seen[k] = true
+		}
+	}
+	var rest []string
+	for k := range props {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
 }
 
 func strip(v any) any {

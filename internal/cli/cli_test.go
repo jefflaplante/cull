@@ -1362,3 +1362,54 @@ func TestCalibrateTakesAFolder(t *testing.T) {
 		t.Fatalf("--compare with folders: err=%v\n%s", err, out)
 	}
 }
+
+// manyDNGs makes n empty .DNG files: enough for an estimate, which only counts them.
+func manyDNGs(t *testing.T, n int) string {
+	t.Helper()
+	dir := t.TempDir()
+	for i := 0; i < n; i++ {
+		os.WriteFile(filepath.Join(dir, fmt.Sprintf("L%05d.DNG", i)), nil, 0o644)
+	}
+	return dir
+}
+
+func runWithInput(t *testing.T, in string, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewRootCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetIn(strings.NewReader(in))
+	cmd.SetArgs(args)
+	err := cmd.ExecuteContext(context.Background())
+	return buf.String(), err
+}
+
+func TestJudgeAsksBeforeSpending(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // no API key anywhere
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	defer func(f func(*os.File) bool) { isTerminal = f }(isTerminal)
+	isTerminal = func(*os.File) bool { return true }
+	dir := manyDNGs(t, 200) // ≈ $4.40 at Sonnet 5.5
+	out, err := runWithInput(t, "n\n", "judge", dir)
+	if err == nil || !strings.Contains(err.Error(), "not confirmed") || !strings.Contains(out, "Spend about $") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	if _, err := runWithInput(t, "y\n", "judge", dir); err == nil || strings.Contains(err.Error(), "not confirmed") {
+		t.Fatalf("a yes must get past the question (to the missing key), got %v", err)
+	}
+	if _, err := runWithInput(t, "", "judge", "--yes", dir); err == nil || strings.Contains(err.Error(), "not confirmed") {
+		t.Fatalf("--yes must skip the question, got %v", err)
+	}
+}
+
+func TestNoPromptWithoutTerminal(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	defer func(f func(*os.File) bool) { isTerminal = f }(isTerminal)
+	isTerminal = func(*os.File) bool { return false }
+	out, err := runWithInput(t, "", "judge", manyDNGs(t, 200))
+	if err == nil || strings.Contains(err.Error(), "not confirmed") || strings.Contains(out, "Spend about") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+}

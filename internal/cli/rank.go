@@ -20,6 +20,7 @@ type rankOpts struct {
 	maxCost     float64
 	force       bool
 	rankTwice   bool
+	yes         bool
 	batch       bool
 	batchPoll   time.Duration
 	policy      policyFlags
@@ -131,9 +132,12 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 				if cerr != nil {
 					return cerr
 				}
-				printRankEstimate(cmd, sets, calls, o.backend, o.model, price, priced, o.batch)
+				usd := printRankEstimate(cmd, sets, calls, o.backend, o.model, price, priced, o.batch)
 				if o.estimate {
 					return nil
+				}
+				if err := confirmSpend(cmd, usd, o.yes); err != nil {
+					return err
 				}
 			}
 			b, auth, err := o.newBackend(cmd)
@@ -171,6 +175,7 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 	f.BoolVar(&o.estimate, "estimate", false, "print the cost estimate and exit (no model calls, no key needed)")
 	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price, or batch price with --batch (0 = no limit)")
 	f.BoolVar(&o.rankTwice, "rank-twice", false, "rank each set of up to 8 frames a second time with its frames reversed; only places both orders agree on count (inside --keep-best in both: best; outside in both: outranked; else disputed, review). Doubles those calls")
+	f.BoolVar(&o.yes, "yes", false, "don't ask before spending (rank asks on a terminal when the estimate is over $1)")
 	f.BoolVar(&o.force, "force", false, "re-rank every set of two or more rankable frames, even one that already has a model order")
 	f.BoolVar(&o.batch, "batch", false, "use the Message Batches API (anthropic): half price, results within minutes to hours; Ctrl-C is safe, rerun re-attaches")
 	f.DurationVar(&o.batchPoll, "batch-poll", 30*time.Second, "how often --batch checks progress")
@@ -235,15 +240,16 @@ func (o *rankOpts) applyBackendModel(cfg *pipeline.Config, backendChanged, model
 
 // printRankEstimate projects list- or batch-price ranking cost from an exact
 // sets/calls count (pipeline.RankCalls), computed without calling any model.
-func printRankEstimate(cmd *cobra.Command, sets, calls int, backend, model string, p llm.Price, priced, batch bool) {
+func printRankEstimate(cmd *cobra.Command, sets, calls int, backend, model string, p llm.Price, priced, batch bool) float64 {
 	w := cmd.ErrOrStderr()
 	fmt.Fprintf(w, "estimate: %d set%s, %d call%s to rank", sets, plural(sets), calls, plural(calls))
 	if !priced {
 		fmt.Fprintf(w, ": no per-token cost (%s)\n", backendDefaults[backend].basis)
-		return
+		return 0
 	}
 	usd, in, out := llm.EstimateRank(calls, p, batch)
 	fmt.Fprintf(w, " ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", in, out, usd, rate(batch), model)
+	return usd
 }
 
 func plural(n int) string {

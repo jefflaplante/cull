@@ -34,6 +34,7 @@ type cullOpts struct {
 	noRank       bool
 	second       bool
 	rankTwice    bool
+	yes          bool
 
 	escalateBackend string
 	escalateModel   string
@@ -145,12 +146,15 @@ Backends (--backend):
 				if err != nil {
 					return err
 				}
-				printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch, !o.noRank, o.rankTwice)
+				usd := printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch, !o.noRank, o.rankTwice)
 				if o.second {
 					fmt.Fprintln(cmd.ErrOrStderr(), "second opinions: one more evaluation per soft-or-worse frame, on top of the estimate")
 				}
 				if o.estimate {
 					return nil
+				}
+				if err := confirmSpend(cmd, usd, o.yes); err != nil {
+					return err
 				}
 			}
 			b, auth, err := o.newBackend(cmd)
@@ -230,6 +234,7 @@ Backends (--backend):
 	f.BoolVar(&o.rawClip, "raw-clip", true, "measure highlight clipping in the raw data (~0.8 s/frame); the preview overstates it")
 	f.BoolVar(&o.batch, "batch", false, "use the Message Batches API (anthropic): half price, results within minutes to hours; Ctrl-C is safe, resume re-attaches")
 	f.DurationVar(&o.batchPoll, "batch-poll", 30*time.Second, "how often --batch checks progress")
+	f.BoolVar(&o.yes, "yes", false, "don't ask before spending (judge asks on a terminal when the estimate is over $1)")
 	f.BoolVar(&o.estimate, "estimate", false, "print the cost estimate and exit (no model calls, no key needed)")
 	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price, or batch price with --batch (0 = no limit); resume later")
 	f.StringVar(&o.locate, "locate", "model", "when no face is found, ask the model for the focus target: model or off")
@@ -273,18 +278,18 @@ func (o *cullOpts) escalation(cmd *cobra.Command) (*pipeline.Escalation, error) 
 	return e, nil
 }
 
-// printEstimate projects list- or batch-price cost from measured per-frame token
+// printEstimate prints and returns (the frames plus ranking) the list- or batch-price cost from measured per-frame token
 // use, and, when rank is set (judge without --no-rank) and the backend is priced,
 // a rough ranking cost: ⌈n/8⌉ calls, at 10k in / 1k out each. That's the call
 // count if every frame lands in a full 8-frame set — neither a bound nor exact,
 // since actual set sizes aren't known before judging: a pair still costs one
 // call (more per frame than a full set), and a frame that joins no set costs
 // nothing. It's a ballpark, not a gate.
-func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch, rank, twice bool) {
+func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch, rank, twice bool) float64 {
 	w := cmd.ErrOrStderr()
 	if !priced {
 		fmt.Fprintf(w, "estimate: %d frames on %s (%s): no per-token cost (%s)\n", n, backend, model, backendDefaults[backend].basis)
-		return
+		return 0
 	}
 	usd, in, out := llm.Estimate(n, p, batch)
 	fmt.Fprintf(w, "estimate: %d frames × ~6k in / ~1k out tokens ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", n, in, out, usd, rate(batch), model)
@@ -295,7 +300,9 @@ func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price
 		}
 		rusd, _, _ := llm.EstimateRank(calls, p, batch)
 		fmt.Fprintf(w, "ranking ≈ %d call(s), $%.2f at %s, if every frame lands in an 8-frame set (pairs cost more per frame; frames in no set cost nothing)\n", calls, rusd, rate(batch))
+		usd += rusd
 	}
+	return usd
 }
 
 // rate names the price basis that llm.Price.Cost applied.

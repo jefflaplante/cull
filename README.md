@@ -298,6 +298,8 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
   - `rank`'s figure is exact.
   - `judge`'s includes an approximate ranking cost that assumes 8-frame sets. It
     usually overestimates.
+- On a terminal, `judge` and `rank` ask before spending when the estimate is over $1.
+  `--yes` skips the question; scripts (no terminal) aren't asked.
 - `--max-cost USD` stops the run once it has spent that much. Continue with `--resume`.
 - A re-run without `--resume` refuses to replace a report that holds assessments:
   `--fresh` (on `judge` and `scan`) starts over, and `-o` writes a separate report.

@@ -240,3 +240,11 @@ func TestPageHasNavigationKeysAndRevert(t *testing.T) {
 		}
 	}
 }
+
+func TestPageHasSetCompare(t *testing.T) {
+	for _, want := range []string{`k === "s"`, `id="compare"`, "S compare set"} {
+		if !strings.Contains(pageTemplate, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+}

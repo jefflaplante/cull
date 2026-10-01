@@ -234,6 +234,10 @@ per-session token, then opens your browser.
 | K / R / C | label keep / review / cull (in the detail view, then advance) |
 | U | clear the label |
 | 1–5 / 0 | set stars / clear them |
+| Z | 100% view of the whole frame, opened on the subject; drag or arrow keys pan |
+| S | compare the frame's set side by side at one scale; 1–9 keeps that frame |
+| N | next unlabelled frame |
+| [ / ] | previous / next set |
 
 **Filters** combine three rows:
 - **Verdict:** your label, else the model's.

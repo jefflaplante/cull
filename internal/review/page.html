@@ -63,6 +63,12 @@ ul { margin: 4px 0 0; padding-left: 18px; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .help { color: var(--muted); font-size: 12px; }
 .empty { color: var(--muted); padding: 40px; text-align: center; }
+#compare { position: fixed; inset: 0; z-index: 9; background: var(--bg); overflow: auto; display: none; padding: 16px; }
+#compare.open { display: block; }
+#compare .tiles { display: flex; gap: 12px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+#compare .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; cursor: pointer; }
+#compare .tile img { display: block; margin: 0 auto 6px; }
+#compare .num { font-weight: 700; margin-right: 6px; }
 #loupe { position: fixed; inset: 0; z-index: 10; background: #000; overflow: auto; display: none; cursor: grab; }
 #loupe.open { display: block; }
 #loupe img { display: block; max-width: none; }
@@ -82,12 +88,13 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     <label class="file">Import labels<input type="file" id="import" accept=".jsonl,application/jsonl,application/x-ndjson,text/plain"></label>
   </div>
   <span class="save" id="save"></span>
-  <span class="help">← → ↑ ↓ move · Z 100% · N next unlabelled · [ ] sets · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid · badges: top right = you · bottom = model</span>
+  <span class="help">← → ↑ ↓ move · Z 100% · S compare set · N next unlabelled · [ ] sets · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid · badges: top right = you · bottom = model</span>
 </header>
 <main>
   <div id="grid"></div>
   <div id="detail"></div>
 </main>
+<div id="compare" tabindex="-1"></div>
 <div id="loupe" tabindex="-1"></div>
 <script id="data" type="application/json">/*__DATA__*/null</script>
 <script>
@@ -258,6 +265,11 @@ ul { margin: 4px 0 0; padding-left: 18px; }
       z.onclick = openLoupe;
       nav.appendChild(z);
     }
+    if (c.group && c.group.size > 1) {
+      const sb = el("button", { text: "Compare set (S)" });
+      sb.onclick = openCompare;
+      nav.appendChild(sb);
+    }
     const st = status[c.file];
 
     // Filmstrip: every card sharing this frame's set, regardless of the current
@@ -293,16 +305,20 @@ ul { margin: 4px 0 0; padding-left: 18px; }
         actions, starBtns, info, strip));
   }
 
-  function update(change, advance) {
-    const vis = visible();
-    if (!vis.length) return;
-    const i = vis[Math.min(sel, vis.length - 1)], c = cards[i];
+  // labelCard applies a change to card i and queues it for the server.
+  function labelCard(i, change) {
+    const c = cards[i];
     const prev = Object.assign({}, get(c.file)); // restored if the server rejects the change
     const next = Object.assign({}, prev, change);
     if (!next.label && !next.stars) delete labels[c.file]; else labels[c.file] = next;
     store(key, labels);
     pinned = i;
     if (serve) { pending.push({ file: c.file, label: next.label, stars: next.stars, prev: prev }); store(qkey, pending); flush(); }
+  }
+  function update(change, advance) {
+    const vis = visible();
+    if (!vis.length) return;
+    labelCard(vis[Math.min(sel, vis.length - 1)], change);
     if (detailOpen && advance) move(1); else render();
   }
   const setLabel = v => update({ label: v }, !!v);
@@ -369,6 +385,54 @@ ul { margin: 4px 0 0; padding-left: 18px; }
   loupe.addEventListener("mousedown", e => { drag = { x: e.clientX, y: e.clientY, l: loupe.scrollLeft, t: loupe.scrollTop }; e.preventDefault(); });
   window.addEventListener("mousemove", e => { if (drag) { loupe.scrollLeft = drag.l - (e.clientX - drag.x); loupe.scrollTop = drag.t - (e.clientY - drag.y); } });
   window.addEventListener("mouseup", () => { drag = null; });
+
+  // Set compare: every member of the current frame's set side by side, numbered in
+  // capture order, at one common scale (subject crops are native pixels, so equal
+  // scale means equal magnification); 1-9 keeps that member.
+  let compareOpen = false, compareMembers = [];
+  const compare = document.getElementById("compare");
+  function openCompare() {
+    const c = currentCard();
+    if (!c || !c.group || c.group.size < 2) { note = "this frame isn't in a set"; render(); return; }
+    compareMembers = cards.map((m, i) => i).filter(i => cards[i].group && cards[i].group.id === c.group.id);
+    const allSubjects = compareMembers.every(i => cards[i].subject);
+    const imgs = [];
+    const tiles = compareMembers.map((i, n) => {
+      const m = cards[i], l = get(m.file), g = m.group;
+      const im = img(allSubjects ? m.subject : m.thumb, m.file);
+      if (im) { im.loading = "eager"; im.style.visibility = "hidden"; imgs.push(im); }
+      const t = el("div", { cls: "tile", title: m.file },
+        im || el("p", { cls: "empty", text: m.error || "no preview" }),
+        el("div", {}, el("span", { cls: "num", text: n < 9 ? String(n + 1) : "" }), el("span", { text: m.file + "  " }),
+          modelBadge(m.decision), el("span", { text: ` #${g.rank}/${g.of} ` }), g.best ? el("span", { cls: "best", text: "best", style: "position:static" }) : null,
+          l.label ? yourBadge(l.label) : null));
+      t.onclick = () => pickCompare(n, false);
+      return t;
+    });
+    compare.replaceChildren(
+      el("p", { cls: "cap", text: `set ${c.group.id}: ${allSubjects ? "subject crops at one scale" : "frames (not every member has a subject crop)"} · 1–${Math.min(9, tiles.length)} keeps that frame · click opens it · S or Esc closes` }),
+      el("div", { cls: "tiles" }, ...tiles));
+    compare.className = "open";
+    compareOpen = true;
+    compare.focus();
+    Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(r => { im.onload = im.onerror = r; }))).then(() => {
+      const maxW = Math.max(...imgs.map(im => im.naturalWidth || 1));
+      const col = (compare.clientWidth - 32 - 12 * (imgs.length - 1)) / Math.max(1, imgs.length);
+      const k = Math.min(1, Math.max(0.15, col / maxW));
+      imgs.forEach(im => { im.style.width = (im.naturalWidth * k) + "px"; im.style.visibility = ""; });
+    });
+  }
+  function closeCompare() { compareOpen = false; compare.className = ""; compare.replaceChildren(); }
+  // pickCompare closes the compare view on member n and selects it; keep labels it keep.
+  function pickCompare(n, keep) {
+    const i = compareMembers[n];
+    if (i === undefined) return;
+    closeCompare();
+    if (keep) labelCard(i, { label: "keep" });
+    const vis = visible(), k = vis.indexOf(i);
+    if (k >= 0) { sel = k; detailOpen = true; }
+    render();
+  }
 
   // jump moves to the next (dir 1) or previous (dir -1) shown frame matching pred,
   // wrapping once around the list; it reports whether one was found.
@@ -478,7 +542,13 @@ ul { margin: 4px 0 0; padding-left: 18px; }
       if (pan) { loupe.scrollBy(pan[0], pan[1]); ev.preventDefault(); return; }
       if (!/^[krcu0-5]$/.test(k)) return;
     }
+    if (compareOpen) {
+      if (k === "s" || k === "escape") { closeCompare(); ev.preventDefault(); }
+      else if (/^[1-9]$/.test(k)) { pickCompare(Number(k) - 1, true); ev.preventDefault(); }
+      return;
+    }
     if (k === "z") { openLoupe(); ev.preventDefault(); return; }
+    if (k === "s") { openCompare(); ev.preventDefault(); return; }
     if (k === "arrowright") { move(1); ev.preventDefault(); }
     else if (k === "arrowleft") { move(-1); ev.preventDefault(); }
     else if (k === "arrowdown") { move(detailOpen ? 1 : columns()); ev.preventDefault(); }

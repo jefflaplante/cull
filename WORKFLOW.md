@@ -81,6 +81,10 @@ an offline page instead of serving).
 | Enter / Esc | open the detail view / back to the grid |
 | K / R / C / U | your verdict: keep, review, cull, clear |
 | 1–5, 0 | stars, or no stars |
+| Z | 100% view of the whole frame, opened on the subject; drag or arrow keys pan |
+| S | compare the frame's set side by side at one scale; 1–9 keeps that frame |
+| N | next unlabelled frame |
+| [ / ] | previous / next set |
 
 - **Filters:** by verdict (keep, review or cull), by what you haven't labelled or
   rated yet, where you disagree with the model, and by **Sets: All / Best /

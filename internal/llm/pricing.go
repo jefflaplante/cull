@@ -2,24 +2,26 @@ package llm
 
 import "errors"
 
-// Price is a model's list price in USD per million tokens.
-type Price struct{ In, Out float64 }
+// Price is a model's list price in USD per million tokens. Read is the cache-read
+// price (0 = a tenth of In, the usual rate); cache writes (5-minute TTL) cost
+// 1.25 × In.
+type Price struct{ In, Out, Read float64 }
 
-// anthropicPrices are first-party list prices (claude-api skill, cached
-// 2026-09-25). Batches are billed at half. Update when prices change.
+// anthropicPrices are first-party list prices: input, output, cache read (claude-api
+// skill, cached 2026-09-25). Batches are billed at half. Update when prices change.
 var anthropicPrices = map[string]Price{
-	"claude-fable-5-1":          {10, 50},
-	"claude-fable-5":            {10, 50},
-	"claude-opus-5-5":           {4, 20},
-	"claude-opus-5":             {5, 25},
-	"claude-opus-4-8":           {5, 25},
-	"claude-opus-4-7":           {5, 25},
-	"claude-opus-4-6":           {5, 25},
-	"claude-sonnet-5-5":         {2, 10},
-	"claude-sonnet-5":           {2, 10},
-	"claude-sonnet-4-6":         {3, 15},
-	"claude-haiku-4-5":          {1, 5},
-	"claude-haiku-4-5-20251001": {1, 5},
+	"claude-fable-5-1":          {10, 50, 0.25},
+	"claude-fable-5":            {10, 50, 1},
+	"claude-opus-5-5":           {4, 20, 0.2},
+	"claude-opus-5":             {5, 25, 0.5},
+	"claude-opus-4-8":           {5, 25, 0.5},
+	"claude-opus-4-7":           {5, 25, 0.5},
+	"claude-opus-4-6":           {5, 25, 0.5},
+	"claude-sonnet-5-5":         {2, 10, 0.2},
+	"claude-sonnet-5":           {2, 10, 0.2},
+	"claude-sonnet-4-6":         {3, 15, 0.3},
+	"claude-haiku-4-5":          {1, 5, 0.1},
+	"claude-haiku-4-5-20251001": {1, 5, 0.1},
 }
 
 // PriceFor returns the per-token price when calls are billed per token: only the
@@ -35,7 +37,12 @@ func PriceFor(backend, model string) (Price, bool) {
 
 // Cost prices one usage; batch halves it.
 func (p Price) Cost(u Usage, batch bool) float64 {
-	c := (float64(u.InputTokens)*p.In + float64(u.OutputTokens)*p.Out) / 1e6
+	read := p.Read
+	if read == 0 {
+		read = p.In / 10
+	}
+	c := (float64(u.InputTokens)*p.In + float64(u.CacheWriteTokens)*p.In*1.25 +
+		float64(u.CacheReadTokens)*read + float64(u.OutputTokens)*p.Out) / 1e6
 	if batch {
 		c /= 2
 	}

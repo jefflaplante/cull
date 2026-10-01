@@ -404,7 +404,7 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 		used[k] = true
 	}
 	u, err := ex.settle(ctx, used)
-	if c := rankPrice(cfg, u, ex.batch()); u.InputTokens+u.OutputTokens > 0 {
+	if c := rankPrice(cfg, u, ex.batch()); u.TotalIn()+u.OutputTokens > 0 {
 		rep.RankCostUSD += c
 		total.Add(u)
 		budget.add(c, 0)

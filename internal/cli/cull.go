@@ -332,7 +332,11 @@ func printSummary(cmd *cobra.Command, path string, rep *report.Report, usage eva
 		counts[k]++
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "\nreport: %s\nresults: %v\n", path, counts)
-	if usage.InputTokens > 0 {
-		fmt.Fprintf(cmd.ErrOrStderr(), "tokens this run: in=%d out=%d (%s)\n", usage.InputTokens, usage.OutputTokens, backendDefaults[backend].basis)
+	if usage.TotalIn() > 0 {
+		cached := ""
+		if usage.CacheReadTokens+usage.CacheWriteTokens > 0 {
+			cached = fmt.Sprintf(" (cache: %d written, %d read)", usage.CacheWriteTokens, usage.CacheReadTokens)
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(), "tokens this run: in=%d%s out=%d (%s)\n", usage.TotalIn(), cached, usage.OutputTokens, backendDefaults[backend].basis)
 	}
 }

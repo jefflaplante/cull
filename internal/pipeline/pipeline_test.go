@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -728,4 +729,31 @@ func TestLargeWeakFaceDoesNotWin(t *testing.T) {
 	if _, _ = faceTarget(c, &imageprep.Frame{W: 1600, H: 1067}, ft); ft.Box == nil || ft.Box.Left > 0.05 {
 		t.Fatalf("box %+v", ft.Box)
 	}
+}
+
+// Cache writes and reads are priced, not dropped, when a frame's cost is computed.
+func TestFrameCostIncludesCacheTokens(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	c := cfg(dir)
+	c.WriteXMP = false
+	c.Price = &llm.Price{In: 10_000, Out: 0, Read: 1_000} // $1 per 100 input; cache read $0.10 per 100
+	rep, _, err := Run(context.Background(), c, &cachedBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 100 uncached ($1) + 100 written (1.25 × $1) + 100 read ($0.10)
+	if got := rep.Results[0].CostUSD; math.Abs(got-2.35) > 1e-9 {
+		t.Fatalf("cost %v", got)
+	}
+}
+
+type cachedBackend struct{ fakeBackend }
+
+func (c *cachedBackend) Call(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	r, err := (&fakeBackend{status: "sharp"}).Call(ctx, req)
+	if r != nil {
+		r.Usage = llm.Usage{InputTokens: 100, CacheWriteTokens: 100, CacheReadTokens: 100}
+	}
+	return r, err
 }

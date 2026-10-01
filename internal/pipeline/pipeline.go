@@ -409,7 +409,7 @@ func (s *spend) add(cost, max float64) (bool, float64) {
 // cost prices a frame: the primary model for everything but the escalation
 // calls, which use the escalation model's price.
 func cost(cfg Config, total, esc llm.Usage) float64 {
-	primary := llm.Usage{InputTokens: total.InputTokens - esc.InputTokens, OutputTokens: total.OutputTokens - esc.OutputTokens}
+	primary := total.Sub(esc)
 	c := 0.0
 	if cfg.Price != nil {
 		c += cfg.Price.Cost(primary, cfg.Batch)

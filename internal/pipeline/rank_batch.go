@@ -350,7 +350,7 @@ func (e batchExec) settle(ctx context.Context, used map[string]bool) (llm.Usage,
 	}
 	if n > 0 {
 		fmt.Fprintf(cfg.Log, "%d rank answer(s) paid for in a batch but in no saved ranking (their sets changed or failed, or an earlier run's report wasn't saved): %d input / %d output tokens, counted in the ranking's cost\n",
-			n, u.InputTokens, u.OutputTokens)
+			n, u.TotalIn(), u.OutputTokens)
 	}
 	return u, nil
 }

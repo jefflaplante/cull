@@ -69,8 +69,12 @@ func (a *Anthropic) params(req Request) map[string]any {
 	return map[string]any{
 		"model":      a.Model,
 		"max_tokens": max(req.MaxTokens, anthropicMinTokens),
-		"system":     req.System,
-		"messages":   []any{map[string]any{"role": "user", "content": content}},
+		// The system prompt (and the output format after it) is the same for every
+		// frame of a run: cached, the frames after the first read it at a tenth of
+		// the input price. Below the model's minimum (512-1024 tokens) it silently
+		// isn't cached, which costs nothing.
+		"system":   []any{map[string]any{"type": "text", "text": req.System, "cache_control": map[string]any{"type": "ephemeral"}}},
+		"messages": []any{map[string]any{"role": "user", "content": content}},
 		"output_config": map[string]any{
 			"format": map[string]any{"type": "json_schema", "schema": Portable(req.Schema)},
 		},

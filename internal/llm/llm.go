@@ -30,12 +30,31 @@ type Request struct {
 	MaxTokens  int            // 0 = backend default
 }
 
+// Usage is a call's tokens. InputTokens is the uncached remainder only (the
+// Messages API's input_tokens); cache writes and reads are counted apart because
+// they are priced apart. Backends that don't report caching leave them 0.
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens      int `json:"input_tokens"`
+	OutputTokens     int `json:"output_tokens"`
+	CacheWriteTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadTokens  int `json:"cache_read_input_tokens,omitempty"`
 }
 
-func (u *Usage) Add(o Usage) { u.InputTokens += o.InputTokens; u.OutputTokens += o.OutputTokens }
+func (u *Usage) Add(o Usage) {
+	u.InputTokens += o.InputTokens
+	u.OutputTokens += o.OutputTokens
+	u.CacheWriteTokens += o.CacheWriteTokens
+	u.CacheReadTokens += o.CacheReadTokens
+}
+
+// Sub is u less o, field by field.
+func (u Usage) Sub(o Usage) Usage {
+	return Usage{InputTokens: u.InputTokens - o.InputTokens, OutputTokens: u.OutputTokens - o.OutputTokens,
+		CacheWriteTokens: u.CacheWriteTokens - o.CacheWriteTokens, CacheReadTokens: u.CacheReadTokens - o.CacheReadTokens}
+}
+
+// TotalIn is every input token the call processed: uncached, written and read.
+func (u Usage) TotalIn() int { return u.InputTokens + u.CacheWriteTokens + u.CacheReadTokens }
 
 // Quota is subscription utilization as reported by Claude Code (0..1 per window).
 type Quota struct {

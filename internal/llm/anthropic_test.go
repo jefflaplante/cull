@@ -48,7 +48,8 @@ func TestAnthropicRequestShapeRetryAndParse(t *testing.T) {
 				t.Errorf("request body contains %s", bad)
 			}
 		}
-		if body["max_tokens"].(float64) != 8192 || body["system"] != "sys" {
+		sys, _ := body["system"].([]any)
+		if body["max_tokens"].(float64) != 8192 || len(sys) != 1 || sys[0].(map[string]any)["text"] != "sys" {
 			t.Errorf("max_tokens=%v system=%v", body["max_tokens"], body["system"])
 		}
 		content := body["messages"].([]any)[0].(map[string]any)["content"].([]any)
@@ -100,5 +101,32 @@ func TestAnthropicStopReasonsAndFatalStatus(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.errHas) || calls != c.wantCalls {
 			t.Errorf("status %d: calls=%d err=%v (want %q)", c.status, calls, err, c.errHas)
 		}
+	}
+}
+
+// The system prompt (with the output format) is identical for every frame of a run:
+// cache it, so frames after the first read it at a tenth of the price.
+func TestAnthropicCachesTheSystemPrompt(t *testing.T) {
+	p := NewAnthropic("k", "claude-sonnet-5-5").params(tinyRequest())
+	blocks, ok := p["system"].([]any)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("system %#v", p["system"])
+	}
+	b := blocks[0].(map[string]any)
+	cc, _ := b["cache_control"].(map[string]any)
+	if b["type"] != "text" || b["text"] != "sys" || cc["type"] != "ephemeral" {
+		t.Fatalf("block %#v", b)
+	}
+}
+
+func TestParseAnthropicCacheUsage(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"content":     []any{map[string]any{"type": "text", "text": `{"score":1}`}},
+		"stop_reason": "end_turn",
+		"usage":       map[string]any{"input_tokens": 5000, "output_tokens": 100, "cache_creation_input_tokens": 900, "cache_read_input_tokens": 40},
+	})
+	r, err := parseAnthropic(body)
+	if err != nil || r.Usage.CacheWriteTokens != 900 || r.Usage.CacheReadTokens != 40 || r.Usage.InputTokens != 5000 || r.Usage.TotalIn() != 5940 {
+		t.Fatalf("usage %+v err %v", r.Usage, err)
 	}
 }

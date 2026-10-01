@@ -304,6 +304,9 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
   minutes to hours. Ctrl-C is safe; `--resume` re-attaches to batches already paid for.
 - Costs so far are recorded in the report; `judge` and `rank` print them when they
   finish.
+- On the API the system prompt is cached, so frames after the first read it at a
+  tenth of the input price. The report's cost includes cache writes (1.25× input) and
+  reads.
 
 ## Output: sidecars, Capture One and moving culls
 

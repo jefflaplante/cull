@@ -1228,3 +1228,31 @@ func TestSecondOpinionRefusedWithBatch(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestRankTwiceFlagOnJudgeAndRank(t *testing.T) {
+	seen := 0
+	for _, c := range NewRootCmd().Commands() {
+		if c.Name() == "judge" || c.Name() == "rank" {
+			if f := c.Flags().Lookup("rank-twice"); f == nil || f.DefValue != "false" {
+				t.Fatalf("%s: rank-twice %+v", c.Name(), f)
+			}
+			seen++
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("checked %d commands", seen)
+	}
+}
+
+func TestRankEstimateCountsReversedCalls(t *testing.T) {
+	dir := t.TempDir()
+	rankReportFixture(t, dir, "anthropic", "claude-sonnet-5", 2)
+	once, err := run(t, "rank", "--estimate", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	twice, err := run(t, "rank", "--estimate", "--rank-twice", dir)
+	if err != nil || once == twice {
+		t.Fatalf("estimate unchanged by --rank-twice:\n%s\n%s", once, twice)
+	}
+}

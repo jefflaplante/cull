@@ -273,6 +273,8 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
 
 ## Unverified assumptions — check before building on them
 
+- Whether `--rank-twice` disagreement (reversed-order ranking) tracks real ranking
+  uncertainty, and how often sets are disputed: measure on a labeled sample.
 - Structured output is written in schema property order. The evidence-first schemas
   (`llm.Schema` marshals properties in `required` order: focus_target, status, score)
   rely on it; not yet checked on a live call.

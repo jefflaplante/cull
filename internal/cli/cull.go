@@ -32,6 +32,7 @@ type cullOpts struct {
 	maxCost      float64
 	noRank       bool
 	second       bool
+	rankTwice    bool
 
 	escalateBackend string
 	escalateModel   string
@@ -143,7 +144,7 @@ Backends (--backend):
 				if err != nil {
 					return err
 				}
-				printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch, !o.noRank)
+				printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch, !o.noRank, o.rankTwice)
 				if o.second {
 					fmt.Fprintln(cmd.ErrOrStderr(), "second opinions: one more evaluation per soft-or-worse frame, on top of the estimate")
 				}
@@ -199,6 +200,7 @@ Backends (--backend):
 			cfg.CheckpointN = o.checkpoint
 			cfg.Rank = !o.noRank
 			cfg.SecondOpinion = o.second
+			cfg.RankTwice = o.rankTwice
 
 			var rep *report.Report
 			var usage eval.Usage
@@ -238,6 +240,7 @@ Backends (--backend):
 	f.BoolVar(&o.noLabels, "no-labels", false, "ignore your labels (cull-labels.jsonl beside the report): moves and sidecar rewrites follow the model's verdicts")
 	f.BoolVar(&o.moveCulled, "move-culled", false, "move frames decided cull (with their .xmp) into a culled/ folder beside them; undo with 'cull restore'. Use before importing into Capture One")
 	f.BoolVar(&o.second, "second-opinion", false, "ask the model again about soft-or-worse frames (one more evaluation each, typically a minority of frames); when the two disagree, review")
+	f.BoolVar(&o.rankTwice, "rank-twice", false, "rank each set of up to 8 frames a second time with its frames reversed; only places both orders agree on count (inside --keep-best in both: best; outside in both: outranked; else disputed, review). Doubles those calls")
 	f.BoolVar(&o.noRank, "no-rank", false, "after judging, don't rank the sets that need it (run 'cull rank' separately later)")
 	o.policy.register(f)
 	f.IntVar(&o.checkpoint, "checkpoint", 25, "save the report every N results")
@@ -274,7 +277,7 @@ func (o *cullOpts) escalation(cmd *cobra.Command) (*pipeline.Escalation, error) 
 // since actual set sizes aren't known before judging: a pair still costs one
 // call (more per frame than a full set), and a frame that joins no set costs
 // nothing. It's a ballpark, not a gate.
-func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch, rank bool) {
+func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch, rank, twice bool) {
 	w := cmd.ErrOrStderr()
 	if !priced {
 		fmt.Fprintf(w, "estimate: %d frames on %s (%s): no per-token cost (%s)\n", n, backend, model, backendDefaults[backend].basis)
@@ -284,6 +287,9 @@ func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price
 	fmt.Fprintf(w, "estimate: %d frames × ~7k in / ~1k out tokens ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", n, in, out, usd, rate(batch), model)
 	if rank && n > 0 {
 		calls := (n + 7) / 8
+		if twice { // each 8-frame set is also ranked reversed
+			calls *= 2
+		}
 		rusd, _, _ := llm.EstimateRank(calls, p, batch)
 		fmt.Fprintf(w, "ranking ≈ %d call(s), $%.2f at %s, if every frame lands in an 8-frame set (pairs cost more per frame; frames in no set cost nothing)\n", calls, rusd, rate(batch))
 	}

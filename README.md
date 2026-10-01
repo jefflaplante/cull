@@ -174,6 +174,15 @@ A set of more than 8 frames is split into chunks of at most 8. The top frames of
 chunk then meet in one final call; a 40-frame set takes 6 calls. Frames that failed
 the sharpness gate stay in the set but aren't ranked.
 
+**Ranking twice (`--rank-twice`, on `judge` and `rank`).** Models favour some positions
+in a list. With this flag, each set of up to 8 frames is ranked a second time with its
+frames shown in reverse, which doubles those calls.
+- A frame inside `--keep-best` in both orders is best.
+- A frame outside it in both orders is outranked.
+- A frame the two orders disagree on is disputed: a keep goes to review (unless
+  `--outranked ignore`), and it isn't marked best.
+- Sets already ranked once are re-ranked only with `--force`.
+
 **Keeping the best.**
 - `--keep-best` (default 3, range 0–5; 0 ranks without demoting) sets how many of
   each set stay keep. The rest get `--outranked` (`ignore`, `review` or `cull`;

@@ -19,6 +19,7 @@ type rankOpts struct {
 	estimate    bool
 	maxCost     float64
 	force       bool
+	rankTwice   bool
 	batch       bool
 	batchPoll   time.Duration
 	policy      policyFlags
@@ -106,6 +107,7 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 			if err := checkPriced(cmd, o.backend, o.model, o.maxCost); err != nil {
 				return err
 			}
+			cfg.RankTwice = o.rankTwice
 			price, priced := llm.PriceFor(o.backend, o.model)
 			if o.estimate || priced {
 				sets, calls, filled, cerr := pipeline.RankCalls(cmd.Context(), rep, cfg, o.force, cmd.ErrOrStderr())
@@ -157,6 +159,7 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 	f.IntVarP(&o.concurrency, "concurrency", "j", 0, "parallel rank calls (0 = backend default: anthropic 4, claude-code 2, openai 4)")
 	f.BoolVar(&o.estimate, "estimate", false, "print the cost estimate and exit (no model calls, no key needed)")
 	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price, or batch price with --batch (0 = no limit)")
+	f.BoolVar(&o.rankTwice, "rank-twice", false, "rank each set of up to 8 frames a second time with its frames reversed; only places both orders agree on count (inside --keep-best in both: best; outside in both: outranked; else disputed, review). Doubles those calls")
 	f.BoolVar(&o.force, "force", false, "re-rank every set of two or more rankable frames, even one that already has a model order")
 	f.BoolVar(&o.batch, "batch", false, "use the Message Batches API (anthropic): half price, results within minutes to hours; Ctrl-C is safe, rerun re-attaches")
 	f.DurationVar(&o.batchPoll, "batch-poll", 30*time.Second, "how often --batch checks progress")

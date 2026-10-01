@@ -90,6 +90,11 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 					s.Order = append(s.Order, f) // kept whole: a dropped member may come back
 				}
 			}
+			for _, f := range old.Reversed {
+				if _, in := member[f]; in {
+					s.Reversed = append(s.Reversed, f)
+				}
+			}
 			for _, nt := range old.Notes {
 				if _, in := member[nt.File]; in {
 					s.Notes = append(s.Notes, nt)
@@ -121,6 +126,18 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 		for pos, k := range order {
 			rankOf[k] = pos + 1
 		}
+		// The reversed order counts only while it, too, covers every rankable member.
+		rank2Of := map[int]int{}
+		if s.By == "model" && len(s.Reversed) > 0 {
+			for _, f := range s.Reversed {
+				if k, in := member[f]; in && rankable(rep.Results[idx[k]], decisions[idx[k]]) {
+					rank2Of[k] = len(rank2Of) + 1
+				}
+			}
+			if len(rank2Of) != len(ranked) {
+				rank2Of = map[int]int{}
+			}
+		}
 		notes := make(map[string]report.RankNote, len(s.Notes))
 		for _, nt := range s.Notes {
 			notes[nt.File] = nt
@@ -129,12 +146,18 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 			i := idx[k]
 			r := &rep.Results[i]
 			g := &report.Group{ID: s.ID, Size: len(set), Rank: rankOf[k], Of: s.Of, By: s.By}
-			g.Best = g.Rank >= 1 && g.Rank <= best
+			rank2 := rank2Of[k] // 0 = ranked once
+			g.Best = g.Rank >= 1 && g.Rank <= best && (rank2 == 0 || rank2 <= best)
 			if nt, ok := notes[r.File]; ok && g.Rank > 0 && s.By == "model" {
 				g.Strength, g.Weakness = nt.Strength, nt.Weakness
 			}
 			r.Group = g
-			if p.KeepBest > 0 && g.Rank > p.KeepBest && decisions[i] == eval.Keep {
+			disputed := rank2 > 0 && g.Rank > 0 && (g.Rank <= p.KeepBest) != (rank2 <= p.KeepBest)
+			switch {
+			case p.KeepBest == 0 || decisions[i] != eval.Keep:
+			case disputed:
+				decisions[i], reasons[i] = p.ApplyDisputed(decisions[i], reasons[i], g.Rank, rank2, g.Of, g.ID)
+			case g.Rank > p.KeepBest:
 				decisions[i], reasons[i] = p.ApplyOutranked(decisions[i], reasons[i], g.Rank, g.Of, g.ID, s.By == "scores")
 			}
 		}

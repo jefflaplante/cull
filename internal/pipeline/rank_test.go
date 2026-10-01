@@ -571,3 +571,74 @@ func TestRankAndDecideUpgradeV3Reports(t *testing.T) {
 		t.Fatalf("L1 %+v", g)
 	}
 }
+
+// With RankTwice a single-chunk set gets a second call with its frames shown in
+// reverse; the fake always prefers the last frame shown (pure position bias), so
+// the two orders disagree completely.
+func TestRankTwiceSendsReversedCall(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	c.RankTwice = true
+	b := &rankBackend{order: reverse}
+	if err := RankSets(context.Background(), rep, c, syncExec{b: b, concurrency: 1}, false); err != nil {
+		t.Fatal(err)
+	}
+	s := rep.Sets[0]
+	if b.calls != 2 || len(s.Order) != 3 || len(s.Reversed) != 3 ||
+		filepath.Base(s.Order[0]) != "L0000003.DNG" || filepath.Base(s.Reversed[0]) != "L0000001.DNG" {
+		t.Fatalf("calls %d order %v reversed %v", b.calls, s.Order, s.Reversed)
+	}
+	if s.Summary != "best moment" || len(s.Notes) != 3 {
+		t.Fatalf("notes/summary lost: %+v", s)
+	}
+}
+
+// Position bias: each order puts a different frame on top. With KeepBest 1 the
+// top frames are disputed: neither is best, both keeps go to review.
+func TestDisputedRankOnlyDemotesKeeps(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	c.RankTwice, c.Policy.KeepBest = true, 1
+	if err := RankSets(context.Background(), rep, c, syncExec{b: &rankBackend{order: reverse}, concurrency: 1}, false); err != nil {
+		t.Fatal(err)
+	}
+	decideAll(rep, c.Policy, c.Seq)
+	for _, r := range rep.Results {
+		if r.Group.Best || r.Decision != eval.Review {
+			t.Fatalf("%s best=%v decision=%s reasons=%v", filepath.Base(r.File), r.Group.Best, r.Decision, r.Reasons)
+		}
+	}
+	if top := result(t, rep, "L0000003.DNG"); !strings.Contains(strings.Join(top.Reasons, ";"), "disputed") {
+		t.Fatalf("reasons %v", top.Reasons)
+	}
+	c.Policy.Outranked = eval.ActionIgnore // nothing demotes: a dispute doesn't either
+	decideAll(rep, c.Policy, c.Seq)
+	for _, r := range rep.Results {
+		if r.Decision != eval.Keep {
+			t.Fatalf("%s %s with --outranked ignore", filepath.Base(r.File), r.Decision)
+		}
+	}
+}
+
+func TestSetWithoutReversedOrderDecidesAsBefore(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	c.Policy.KeepBest = 1
+	if err := RankSets(context.Background(), rep, c, syncExec{b: &rankBackend{order: reverse}, concurrency: 1}, false); err != nil {
+		t.Fatal(err)
+	}
+	decideAll(rep, c.Policy, c.Seq)
+	if top := result(t, rep, "L0000003.DNG"); !top.Group.Best || top.Decision != eval.Keep || len(rep.Sets[0].Reversed) != 0 {
+		t.Fatalf("top %+v %s", top.Group, top.Decision)
+	}
+	for _, n := range []string{"L0000001.DNG", "L0000002.DNG"} {
+		if r := result(t, rep, n); r.Decision != eval.Review {
+			t.Fatalf("%s %s", n, r.Decision)
+		}
+	}
+}
+
+func TestRankCallsCountsReversedCalls(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	c.RankTwice = true
+	if _, calls, _, err := RankCalls(context.Background(), rep, c, false, nil); err != nil || calls != 2 {
+		t.Fatalf("calls %d err %v", calls, err)
+	}
+}

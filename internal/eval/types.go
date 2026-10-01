@@ -134,6 +134,19 @@ func (p Policy) ApplyOutranked(d Decision, reasons []string, pos, of, set int, b
 	return d, append(reasons, fmt.Sprintf("rank %d of %d in set %d%s (keeping the best %d)", pos, of, set, how, p.KeepBest))
 }
 
+// ApplyDisputed raises a frame whose place the two orders disagree on (inside
+// KeepBest in one, outside in the other) to review at most, and only when the
+// Outranked action demotes at all: a dispute is doubt, never a cull.
+func (p Policy) ApplyDisputed(d Decision, reasons []string, a, b, of, set int) (Decision, []string) {
+	if _, act := p.Outranked.decision(); !act {
+		return d, reasons
+	}
+	if rank(Review) > rank(d) {
+		d = Review
+	}
+	return d, append(reasons, fmt.Sprintf("rank %d of %d in set %d, %d with the frames reversed: disputed (keeping the best %d)", a, of, set, b, p.KeepBest))
+}
+
 // Sanitize clamps values and drops invalid crops. Returns human-readable fixups.
 func (p Policy) Sanitize(e *Evaluation) []string {
 	var notes []string

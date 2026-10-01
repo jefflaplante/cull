@@ -370,7 +370,7 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 		// One batch holds every set and can't be stopped midway without losing it,
 		// so check up front, as RunBatch does for judging. A re-attach is exempt:
 		// what it collects is already paid for.
-		usd, _, _ := llm.EstimateRank(callsFor(rep, todo), *cfg.Price, true)
+		usd, _, _ := llm.EstimateRank(callsFor(rep, todo, cfg.RankTwice), *cfg.Price, true)
 		if _, spent := budget.add(0, 0); spent+usd > cfg.MaxCost {
 			return total, run, fmt.Errorf("%w: ranking estimated at $%.2f with $%.2f already spent exceeds --max-cost $%.2f; %d set(s) left by scores",
 				llm.ErrBudget, usd, spent, cfg.MaxCost, len(todo))
@@ -421,19 +421,20 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 
 // setRank is one set's ranking in progress. Positions index files and frames.
 type setRank struct {
-	set     *report.Set
-	files   []string         // rankable members, capture order
-	frames  []eval.RankFrame // decoded on demand (loadCallImages), kept for the next round
-	decoded []bool
-	parts   [][]int // chunks of positions: one part = a single call
-	orders  [][]int // each part's answer, positions best first
-	final   []int   // positions sent to the final call, capture order
-	order   []int   // the set's order, best first
-	notes   map[int]eval.RankEntry
-	summary string
-	usage   llm.Usage
-	keys    []string // batch answers whose usage is in usage
-	err     error
+	set      *report.Set
+	files    []string         // rankable members, capture order
+	frames   []eval.RankFrame // decoded on demand (loadCallImages), kept for the next round
+	decoded  []bool
+	parts    [][]int // chunks of positions: one part = a single call
+	orders   [][]int // each part's answer, positions best first
+	final    []int   // positions sent to the final call, capture order
+	order    []int   // the set's order, best first
+	reversed []int   // with RankTwice: the order when the frames were shown reversed, best first
+	notes    map[int]eval.RankEntry
+	summary  string
+	usage    llm.Usage
+	keys     []string // batch answers whose usage is in usage
+	err      error
 }
 
 func (j *setRank) fail(err error) {
@@ -476,7 +477,8 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 	}
 	load := func(ctx context.Context, calls []rankCall) error { return loadCallImages(ctx, rep, cfg, calls, byFile) }
 
-	// Round 1.
+	// Round 1. With RankTwice a set that fits one call is also sent reversed: the
+	// model favours some positions, and only places both orders agree on count.
 	var calls []rankCall
 	for _, j := range jobs {
 		if j.err != nil {
@@ -485,12 +487,22 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 		for k, part := range j.parts {
 			calls = append(calls, j.call(j.partID(k), part))
 		}
+		if cfg.RankTwice && len(j.parts) == 1 {
+			calls = append(calls, j.call(j.reversedID(), reversedPositions(j.parts[0])))
+		}
 	}
 	outs := answers(ctx, ex, calls, load)
 	var stop error
 	for _, j := range jobs {
 		if j.err != nil {
 			continue
+		}
+		if cfg.RankTwice && len(j.parts) == 1 {
+			r, err := j.takeReversed(outs, j.reversedID(), reversedPositions(j.parts[0]))
+			if isStop(err) && stop == nil {
+				stop = err
+			}
+			j.reversed = r
 		}
 		j.orders = make([][]int, len(j.parts))
 		for k, part := range j.parts {
@@ -567,6 +579,13 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 				s.Notes = append(s.Notes, report.RankNote{File: f, Strength: e.Strength, Weakness: e.Weakness})
 			}
 		}
+		s.Reversed = nil
+		for _, pos := range j.reversed {
+			s.Reversed = append(s.Reversed, j.files[pos])
+		}
+		if cfg.RankTwice && len(j.parts) == 1 && j.reversed == nil {
+			fmt.Fprintf(log, "set %d: the reversed ranking failed; ranked once\n", s.ID)
+		}
 		s.Summary, s.By = j.summary, "model"
 		fmt.Fprintf(log, "ranked set %d (%d frames): %s wins — %s\n", s.ID, len(j.files), filepath.Base(s.Order[0]), s.Summary)
 	}
@@ -585,6 +604,40 @@ func (j *setRank) partID(k int) string {
 		return fmt.Sprintf("S%d", j.set.ID)
 	}
 	return fmt.Sprintf("S%d-C%d", j.set.ID, k+1)
+}
+
+// reversedID is the call ID of a set's reversed-order call (RankTwice).
+func (j *setRank) reversedID() string { return fmt.Sprintf("S%d-R", j.set.ID) }
+
+// reversedPositions is positions in reverse: the frames shown last-first.
+func reversedPositions(positions []int) []int {
+	out := make([]int, len(positions))
+	for i, p := range positions {
+		out[len(positions)-1-i] = p
+	}
+	return out
+}
+
+// takeReversed records the reversed call's answer: its usage, and its order as
+// positions, best first. Unlike take it never fails the set (the forward order
+// still ranks it) and keeps no notes or summary (the forward call's are used).
+func (j *setRank) takeReversed(outs map[string]rankOut, id string, positions []int) ([]int, error) {
+	o, ok := outs[id]
+	if !ok {
+		return nil, nil
+	}
+	j.usage.Add(o.U)
+	if o.key != "" {
+		j.keys = append(j.keys, o.key)
+	}
+	if o.R == nil {
+		return nil, o.Err
+	}
+	order := make([]int, 0, len(o.R.Ranking))
+	for _, e := range o.R.Ranking {
+		order = append(order, positions[e.Frame-1])
+	}
+	return order, o.Err
 }
 
 // call builds the rank call for the frames at positions, without images.

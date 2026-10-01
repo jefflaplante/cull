@@ -67,15 +67,19 @@ func (g *Group) UnmarshalJSON(b []byte) error {
 // empty if never ranked. The set is ranked only when By is "model": a member the
 // model never compared makes it By "scores" while its Order is kept for later.
 type Set struct {
-	ID      int        `json:"id"`
-	Members []string   `json:"members"`
-	Of      int        `json:"of"` // rankable members at the last decide
-	Order   []string   `json:"order,omitempty"`
-	Notes   []RankNote `json:"notes,omitempty"`
-	Summary string     `json:"summary,omitempty"`
-	By      string     `json:"by"`
-	Usage   eval.Usage `json:"usage"`              // the set's rank calls, summed over re-rankings
-	CostUSD float64    `json:"cost_usd,omitempty"` // their list price; Report.RankCostUSD holds the total
+	ID      int      `json:"id"`
+	Members []string `json:"members"`
+	Of      int      `json:"of"` // rankable members at the last decide
+	Order   []string `json:"order,omitempty"`
+	// Reversed is the model's order (best first) when shown the same frames in
+	// reverse capture order (--rank-twice): places the two orders disagree on are
+	// disputed. Empty when ranked once.
+	Reversed []string   `json:"reversed,omitempty"`
+	Notes    []RankNote `json:"notes,omitempty"`
+	Summary  string     `json:"summary,omitempty"`
+	By       string     `json:"by"`
+	Usage    eval.Usage `json:"usage"`              // the set's rank calls, summed over re-rankings
+	CostUSD  float64    `json:"cost_usd,omitempty"` // their list price; Report.RankCostUSD holds the total
 }
 
 // Sequences are the grouping settings a report's sets came from.

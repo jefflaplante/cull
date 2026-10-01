@@ -64,6 +64,7 @@ type Config struct {
 	Seq               group.Options // sequences of similar frames; Seq.Gap 0 = no grouping
 	Rank              bool          // at the end of the run, rank the sets that need it with the run's backend
 	RankTokens        int           // max output tokens per rank call; 0 = defaultRankTokens
+	RankTwice         bool          // rank each single-call set again with its frames reversed (Set.Reversed)
 
 	rankWith    rankExec                            // set by Run (sync) or RunBatch (batch) when Rank: what finishRun ranks with; nil = no ranking
 	detect      func(*imageprep.Frame) []focus.Face // test hook; nil = pigo

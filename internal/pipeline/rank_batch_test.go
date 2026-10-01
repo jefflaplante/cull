@@ -1029,3 +1029,17 @@ func TestRankBatchStateFromRenamedFolderRefuses(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// The batch executor sends the reversed call like any other and records both orders.
+func TestRankBatchRankTwice(t *testing.T) {
+	c, rep := seqShoot(t, 3)
+	c.RankTwice = true
+	fb := &fakeBatch{rankOrder: reverse}
+	if err := RankSets(context.Background(), rep, c, rankEx(fb, c), false); err != nil {
+		t.Fatal(err)
+	}
+	s := rep.Sets[0]
+	if len(fb.submitted) != 1 || len(fb.submitted[0]) != 2 || len(s.Reversed) != 3 || s.Order[0] == s.Reversed[0] {
+		t.Fatalf("batches %d, set %+v", len(fb.submitted), s)
+	}
+}

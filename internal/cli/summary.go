@@ -13,7 +13,7 @@ import (
 func ScanSummary(rep *report.Report) string {
 	var edges []int
 	sources, orients := map[string]int{}, map[int]int{}
-	faces, targets := 0, 0
+	faces, targets, eyes := 0, 0, 0
 	for _, r := range rep.Results {
 		if pv := r.Preview; pv != nil {
 			edges = append(edges, max(pv.Width, pv.Height))
@@ -24,6 +24,9 @@ func ScanSummary(rep *report.Report) string {
 			targets++
 			if ft.Source == "face" {
 				faces++
+			}
+			if ft.EyeSharpness > 0 {
+				eyes++
 			}
 		}
 	}
@@ -45,6 +48,6 @@ func ScanSummary(rep *report.Report) string {
 	for _, k := range ori {
 		ors = append(ors, fmt.Sprintf("%d=%d", k, orients[k]))
 	}
-	return fmt.Sprintf("previews: long edge min/median/max = %d/%d/%d px; sources: %s; orientation: %s; faces: %d/%d",
-		edges[0], edges[len(edges)/2], edges[len(edges)-1], strings.Join(src, " "), strings.Join(ors, " "), faces, targets)
+	return fmt.Sprintf("previews: long edge min/median/max = %d/%d/%d px; sources: %s; orientation: %s; faces: %d/%d, eyes measured on %d",
+		edges[0], edges[len(edges)/2], edges[len(edges)-1], strings.Join(src, " "), strings.Join(ors, " "), faces, targets, eyes)
 }

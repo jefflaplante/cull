@@ -32,3 +32,18 @@ func centered(c image.Point, side, w, h int) image.Rectangle {
 	y0 := min(max(c.Y-side/2, 0), h-side)
 	return image.Rect(x0, y0, x0+side, y0+side)
 }
+
+// EyeWindows are the squares around each of a face target's pupils where the
+// eye's own detail is measured: 0.3 of the face's extent (at least 32 px), kept
+// inside the w×h frame.
+func EyeWindows(t Target, w, h int) []image.Rectangle {
+	side := max(32, int(0.3*float64(t.Size)))
+	side = min(side, w, h)
+	var out []image.Rectangle
+	for _, p := range t.Pupils {
+		x0 := min(max(p.X-side/2, 0), w-side)
+		y0 := min(max(p.Y-side/2, 0), h-side)
+		out = append(out, image.Rect(x0, y0, x0+side, y0+side))
+	}
+	return out
+}

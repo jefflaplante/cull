@@ -145,6 +145,14 @@ func buildInput(cfg Config, p *prepared, target *focus.Target) (eval.Input, erro
 	var subject *eval.Labeled
 	if target != nil {
 		ft.SubjectSharpness = round(focus.Ratio(frame.Luma, frame.W, subjectRect, noise), 3)
+		if len(target.Pupils) > 0 && ft.Box != nil { // advisory: see report.FocusTarget.EyeSharpness
+			eye := 0.0
+			for _, r := range focus.EyeWindows(*target, frame.W, frame.H) {
+				eye = max(eye, focus.Ratio(frame.Luma, frame.W, r, noise))
+			}
+			ft.EyeSharpness = round(eye, 3)
+			ft.FaceSharpness = round(focus.Ratio(frame.Luma, frame.W, denorm(*ft.Box, frame.W, frame.H), noise), 3)
+		}
 		jb, err := frame.Crop(subjectRect, 90)
 		if err != nil {
 			return eval.Input{}, fmt.Errorf("crop: %w", err)

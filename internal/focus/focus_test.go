@@ -250,3 +250,15 @@ func TestLandedNoiseIgnoresClippedCells(t *testing.T) {
 		t.Fatalf("noise %v on a half-clipped frame, %v without clipping", noise, want)
 	}
 }
+
+func TestEyeWindowsAroundPupils(t *testing.T) {
+	tg := Target{Center: image.Pt(500, 400), Size: 200, Pupils: []image.Point{{460, 400}, {540, 400}}}
+	ws := EyeWindows(tg, 1600, 1067)
+	if len(ws) != 2 || ws[0].Dx() != 60 || !image.Pt(460, 400).In(ws[0]) || !ws[1].In(image.Rect(0, 0, 1600, 1067)) {
+		t.Fatalf("%v", ws)
+	}
+	edge := Target{Center: image.Pt(10, 10), Size: 50, Pupils: []image.Point{{2, 3}}} // tiny face at the corner
+	if ws := EyeWindows(edge, 1600, 1067); len(ws) != 1 || ws[0].Dx() < 32 || !ws[0].In(image.Rect(0, 0, 1600, 1067)) {
+		t.Fatalf("%v", ws)
+	}
+}

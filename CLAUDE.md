@@ -280,6 +280,10 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
 
 - Whether `--rank-twice` disagreement (reversed-order ranking) tracks real ranking
   uncertainty, and how often sets are disputed: measure on a labeled sample.
+- `eye_sharpness` / `face_sharpness` (advisory): whether a low eye-to-face ratio flags
+  front/back focus. On the 17-frame sample (9 faces, none labelled soft) the ratio
+  ranged 0.75–1.17 (2026-09-30), and puploc's randomness moves it run to run. No
+  rule may use it before it's compared with labels.
 - Structured output is written in schema property order. The evidence-first schemas
   (`llm.Schema` marshals properties in `required` order: focus_target, status, score)
   rely on it; not yet checked on a live call.

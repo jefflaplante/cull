@@ -690,3 +690,28 @@ func TestSubjectIsTheLargestConfidentFace(t *testing.T) {
 		t.Fatalf("box %+v faceQ %v", ft.Box, ft.FaceQ)
 	}
 }
+
+// Scan records the advisory eye measure when the face's pupils were found.
+func TestScanRecordsEyeDetail(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		pupils []image.Point
+		want   bool
+	}{{"pupils", []image.Point{{460, 380}, {540, 380}}, true}, {"no pupils", nil, false}} {
+		dir := t.TempDir()
+		texturedDNG(t, filepath.Join(dir, "L1000001.DNG"))
+		conf := cfg(dir)
+		conf.DryRun, conf.WriteXMP, conf.FaceMinQ = true, false, 80
+		conf.detect = func(*imageprep.Frame) []focus.Face {
+			return []focus.Face{{Rect: image.Rect(400, 300, 600, 500), Q: 120, Pupils: c.pupils}}
+		}
+		rep, _, err := Run(context.Background(), conf, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ft := rep.Results[0].FocusTarget
+		if got := ft.EyeSharpness > 0 && ft.FaceSharpness > 0; got != c.want {
+			t.Errorf("%s: eye %v face %v", c.name, ft.EyeSharpness, ft.FaceSharpness)
+		}
+	}
+}

@@ -125,12 +125,12 @@ func TestFaceMinQDefault(t *testing.T) {
 
 func TestScanSummary(t *testing.T) {
 	rep := &report.Report{Results: []report.Result{
-		{Preview: &report.PreviewInfo{Width: 9504, Height: 6320, Orientation: 8, Source: "tiff-ifd"}, FocusTarget: &report.FocusTarget{Source: "face"}},
+		{Preview: &report.PreviewInfo{Width: 9504, Height: 6320, Orientation: 8, Source: "tiff-ifd"}, FocusTarget: &report.FocusTarget{Source: "face", EyeSharpness: 0.1}},
 		{Preview: &report.PreviewInfo{Width: 9504, Height: 6320, Orientation: 8, Source: "tiff-ifd"}, FocusTarget: &report.FocusTarget{Source: "none"}},
 		{Preview: &report.PreviewInfo{Width: 1333, Height: 2000, Orientation: 1, Source: "exiftool:PreviewImage"}, FocusTarget: &report.FocusTarget{Source: "face"}},
 		{Error: "preview: no JPEG"},
 	}}
-	want := "previews: long edge min/median/max = 2000/9504/9504 px; sources: exiftool:PreviewImage=1 tiff-ifd=2; orientation: 1=1 8=2; faces: 2/3"
+	want := "previews: long edge min/median/max = 2000/9504/9504 px; sources: exiftool:PreviewImage=1 tiff-ifd=2; orientation: 1=1 8=2; faces: 2/3, eyes measured on 1"
 	if got := ScanSummary(rep); got != want {
 		t.Fatalf("\n got %s\nwant %s", got, want)
 	}

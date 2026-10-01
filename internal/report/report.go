@@ -122,6 +122,11 @@ type FocusTarget struct {
 	Reason           string        `json:"reason,omitempty"`            // why there is no subject crop
 	SubjectSharpness float64       `json:"subject_sharpness,omitempty"` // fine/coarse detail ratio of the subject crop
 	LandedSharpness  float64       `json:"landed_sharpness"`            // same, best "focus landed" cell
+	// Advisory, uncalibrated: fine/coarse detail at the pupils (best eye) and over
+	// the whole face. A low eye-to-face ratio may mean focus landed in front of or
+	// behind the eyes; no rule uses them until labels show they help.
+	EyeSharpness  float64 `json:"eye_sharpness,omitempty"`
+	FaceSharpness float64 `json:"face_sharpness,omitempty"`
 }
 
 type Result struct {

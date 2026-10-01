@@ -757,3 +757,53 @@ func (c *cachedBackend) Call(ctx context.Context, req llm.Request) (*llm.Respons
 	}
 	return r, err
 }
+
+// effortRecorder answers like fakeBackend and records each call's schema and effort.
+type effortRecorder struct {
+	mu   sync.Mutex
+	seen map[string]string // schema name -> effort
+}
+
+func (e *effortRecorder) Name() string { return "fake" }
+func (e *effortRecorder) Call(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	e.mu.Lock()
+	if e.seen == nil {
+		e.seen = map[string]string{}
+	}
+	e.seen[req.SchemaName] = req.Effort
+	e.mu.Unlock()
+	return (&fakeBackend{status: "sharp"}).Call(ctx, req)
+}
+
+func TestEffortReachesEachCallAndTheReport(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	c := cfg(dir)
+	c.WriteXMP, c.Locate, c.Effort, c.LocateEffort = false, true, "medium", "low"
+	c.detect = func(*imageprep.Frame) []focus.Face { return nil } // no face: locate runs
+	b := &effortRecorder{}
+	rep, _, err := Run(context.Background(), c, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.seen["focus_target"] != "low" || b.seen["evaluation"] != "medium" || rep.Effort != "medium" || rep.LocateEffort != "low" {
+		t.Fatalf("seen %v report %q/%q", b.seen, rep.Effort, rep.LocateEffort)
+	}
+}
+
+func TestResumeRefusesDifferentEffort(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	if _, _, err := Run(context.Background(), cfg(dir), &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatal(err)
+	}
+	c := cfg(dir)
+	c.Resume, c.Effort = true, "low"
+	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err == nil || !strings.Contains(err.Error(), "--effort") {
+		t.Fatalf("got %v", err)
+	}
+	c.Effort = ""
+	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatalf("same (default) effort: %v", err)
+	}
+}

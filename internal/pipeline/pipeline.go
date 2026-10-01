@@ -65,6 +65,8 @@ type Config struct {
 	Rank              bool          // at the end of the run, rank the sets that need it with the run's backend
 	RankTokens        int           // max output tokens per rank call; 0 = defaultRankTokens
 	RankTwice         bool          // rank each single-call set again with its frames reversed (Set.Reversed)
+	Effort            string        // model effort for evaluations and rankings; "" = the model's default
+	LocateEffort      string        // the same for locate calls
 
 	rankWith    rankExec                            // set by Run (sync) or RunBatch (batch) when Rank: what finishRun ranks with; nil = no ranking
 	detect      func(*imageprep.Frame) []focus.Face // test hook; nil = pigo
@@ -134,6 +136,9 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 	rep, todo, err := startRun(&cfg)
 	if err != nil {
 		return nil, total, err
+	}
+	if b != nil {
+		b = withEffort(b, cfg)
 	}
 
 	jobs := make(chan string)
@@ -420,6 +425,35 @@ func cost(cfg Config, total, esc llm.Usage) float64 {
 	return c
 }
 
+// effortFor sets a request's effort from cfg: locate calls get LocateEffort, the
+// rest (evaluations, rankings) Effort.
+func (cfg Config) effortFor(req llm.Request) llm.Request {
+	if req.SchemaName == "focus_target" {
+		req.Effort = cfg.LocateEffort
+	} else {
+		req.Effort = cfg.Effort
+	}
+	return req
+}
+
+// effortBackend applies cfg's effort to every call it passes on.
+type effortBackend struct {
+	llm.Backend
+	cfg Config
+}
+
+func (e effortBackend) Call(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	return e.Backend.Call(ctx, e.cfg.effortFor(req))
+}
+
+// withEffort wraps b so its calls carry cfg's effort; with none set, b is returned as is.
+func withEffort(b llm.Backend, cfg Config) llm.Backend {
+	if cfg.Effort == "" && cfg.LocateEffort == "" {
+		return b
+	}
+	return effortBackend{b, cfg}
+}
+
 // startRun discovers the frames, applies the resume guard, and returns the report
 // (holding resumed results) and the frames still to process.
 func startRun(cfg *Config) (*report.Report, []string, error) {
@@ -440,7 +474,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 		}
 	}
 	rep := &report.Report{SchemaVersion: report.SchemaVersion, Backend: cfg.Backend, Model: cfg.Model,
-		Escalation: cfg.Escalate.Label(), Dir: cfg.Dir}
+		Effort: cfg.Effort, LocateEffort: cfg.LocateEffort, Escalation: cfg.Escalate.Label(), Dir: cfg.Dir}
 	done := map[string]bool{}
 	if cfg.Resume {
 		prev, err := report.Load(cfg.ReportPath)
@@ -474,6 +508,12 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 					"this run is schema v%d, backend %q, model %q, escalation %q: %s, or use -o for a separate report",
 					cfg.ReportPath, scan, prev.SchemaVersion, prev.Backend, prev.Model, prev.Escalation,
 					report.SchemaVersion, cfg.Backend, cfg.Model, rep.Escalation, fix)
+			}
+			// Effort changes what the model answers, so like the model it can't change
+			// within one report: calibration compares reports, not mixtures.
+			if prev.Effort != cfg.Effort || prev.LocateEffort != cfg.LocateEffort {
+				return nil, nil, fmt.Errorf("resume: %s was judged with --effort %q --locate-effort %q (\"\" = the model's default); "+
+					"rerun with those to continue it, or -o for a separate report", cfg.ReportPath, prev.Effort, prev.LocateEffort)
 			}
 			// Paid rankings carry over: decideAll reuses a stored order while it still
 			// covers its set, and ranking spend never leaves the report.

@@ -268,7 +268,7 @@ func Rank(ctx context.Context, cfg Config, b llm.Backend, force bool) (*report.R
 	if err := RankBatchPending(cfg); err != nil {
 		return nil, err
 	}
-	ex := syncExec{b: b, concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
+	ex := syncExec{b: withEffort(b, cfg), concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
 	return rank(ctx, cfg, ex, force)
 }
 

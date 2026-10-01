@@ -108,6 +108,7 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 				return err
 			}
 			cfg.RankTwice = o.rankTwice
+			cfg.Effort = o.effort
 			price, priced := llm.PriceFor(o.backend, o.model)
 			if o.estimate || priced {
 				sets, calls, filled, cerr := pipeline.RankCalls(cmd.Context(), rep, cfg, o.force, cmd.ErrOrStderr())

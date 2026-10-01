@@ -130,3 +130,15 @@ func TestParseAnthropicCacheUsage(t *testing.T) {
 		t.Fatalf("usage %+v err %v", r.Usage, err)
 	}
 }
+
+func TestAnthropicEffortOnlyWhenSet(t *testing.T) {
+	a := NewAnthropic("k", "claude-sonnet-5-5")
+	if oc := a.params(tinyRequest())["output_config"].(map[string]any); oc["effort"] != nil {
+		t.Fatalf("effort sent unasked: %v", oc)
+	}
+	req := tinyRequest()
+	req.Effort = "low"
+	if oc := a.params(req)["output_config"].(map[string]any); oc["effort"] != "low" {
+		t.Fatalf("effort %v", oc["effort"])
+	}
+}

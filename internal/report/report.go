@@ -167,6 +167,8 @@ type Report struct {
 	Backend       string    `json:"backend"`
 	Escalation    string    `json:"escalation,omitempty"` // "backend/model" frames were escalated to
 	Model         string    `json:"model"`
+	Effort        string    `json:"effort,omitempty"`        // --effort the frames were judged with; "" = the model's default
+	LocateEffort  string    `json:"locate_effort,omitempty"` // --locate-effort
 	Dir           string    `json:"dir"`
 	KeepBest      int       `json:"keep_best"` // Policy.KeepBest used at the last judge or decide
 	// Policy is the whole policy the decisions came from (the last judge, decide or

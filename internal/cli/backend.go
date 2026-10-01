@@ -22,6 +22,8 @@ type backendFlags struct {
 	openaiStream  bool
 	claudeBin     string
 	quotaStop     float64
+	effort        string
+	locateEffort  string
 }
 
 func (o *backendFlags) register(f *pflag.FlagSet) {
@@ -32,6 +34,8 @@ func (o *backendFlags) register(f *pflag.FlagSet) {
 	f.StringVar(&o.openaiKeyFile, "openai-key-file", "", "file containing a key for the openai backend (optional)")
 	f.BoolVar(&o.openaiStream, "openai-stream", true, "stream and hang up once the JSON closes (openai backend)")
 	f.StringVar(&o.claudeBin, "claude-bin", "claude", "Claude Code executable (claude-code backend)")
+	f.StringVar(&o.effort, "effort", "", "model effort for evaluations and rankings: low, medium, high, xhigh or max (default: the model's own); recorded in the report")
+	f.StringVar(&o.locateEffort, "locate-effort", "", "model effort for the locate call (default: the model's own); recorded in the report")
 	f.Float64Var(&o.quotaStop, "quota-stop", 0.9, "stop when this fraction of the 5-hour or 7-day subscription window is used (claude-code backend)")
 }
 
@@ -46,6 +50,16 @@ func (o *backendFlags) validate() error {
 	}
 	if o.quotaStop <= 0 || o.quotaStop > 1 {
 		return fmt.Errorf("--quota-stop must be in (0, 1]")
+	}
+	for _, e := range []struct{ flag, v string }{{"--effort", o.effort}, {"--locate-effort", o.locateEffort}} {
+		switch e.v {
+		case "", "low", "medium", "high", "xhigh", "max":
+		default:
+			return fmt.Errorf("%s %q: want low, medium, high, xhigh or max", e.flag, e.v)
+		}
+		if e.v != "" && o.backend == "openai" {
+			return fmt.Errorf("%s: the openai backend has no effort setting", e.flag)
+		}
 	}
 	return nil
 }

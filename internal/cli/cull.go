@@ -201,6 +201,7 @@ Backends (--backend):
 			cfg.Rank = !o.noRank
 			cfg.SecondOpinion = o.second
 			cfg.RankTwice = o.rankTwice
+			cfg.Effort, cfg.LocateEffort = o.effort, o.locateEffort
 
 			var rep *report.Report
 			var usage eval.Usage

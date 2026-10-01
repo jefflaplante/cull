@@ -221,7 +221,7 @@ func (e batchExec) send(ctx context.Context, cfg Config, st *rankBatchState, cal
 		}
 		id := rankCustomID(sub[k])
 		at[id] = i
-		reqs = append(reqs, llm.BatchRequest{CustomID: id, Req: eval.RankRequest(sub[k].Frames, tokens)})
+		reqs = append(reqs, llm.BatchRequest{CustomID: id, Req: cfg.effortFor(eval.RankRequest(sub[k].Frames, tokens))})
 	}
 	round := 1 // for the log and the record
 	if strings.HasSuffix(calls[idx[0]].ID, "-F") {

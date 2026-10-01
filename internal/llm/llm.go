@@ -28,6 +28,7 @@ type Request struct {
 	SchemaName string         // identifies the call, e.g. "evaluation", "focus_target"
 	Schema     map[string]any // JSON Schema; every object sets additionalProperties:false
 	MaxTokens  int            // 0 = backend default
+	Effort     string         // low|medium|high|xhigh|max; "" = the model's default
 }
 
 // Usage is a call's tokens. InputTokens is the uncached remainder only (the

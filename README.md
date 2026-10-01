@@ -308,6 +308,24 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
   tenth of the input price. The report's cost includes cache writes (1.25× input) and
   reads.
 
+### Cost experiments
+
+Two levers can cut cost, but could also change verdicts, so measure before adopting either:
+- **`--effort low`** (or `medium`), with **`--locate-effort`** for the locate call. Output
+  is about 40% of a frame's cost.
+- **`--max-edge 1024`**: the full frame is about 30% of input tokens and is only
+  context.
+
+```sh
+cull judge -o base.json ~/Pictures/shoot
+cull judge --effort low -o low.json ~/Pictures/shoot
+cull calibrate --compare base.json low.json
+```
+
+Adopt a lever only if `--compare` shows no keep↔cull crossings, and labels agree. On
+`--backend claude-code` these runs cost quota, not money. The report records the
+effort, and `--resume` refuses a different one.
+
 ## Output: sidecars, Capture One and moving culls
 
 **XMP sidecars** (`L1000123.xmp` beside `L1000123.DNG`) are written:

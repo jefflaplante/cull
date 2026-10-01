@@ -184,3 +184,16 @@ func TestClaudeCodeSevenDayWindowStops(t *testing.T) {
 		t.Fatalf("want ErrQuotaStop naming the 7-day window with the answer kept, got resp=%v err=%v", resp, err)
 	}
 }
+
+func TestClaudeCodePassesEffort(t *testing.T) {
+	bin, dir := setupFake(t, initEvent("none"), okResult)
+	req := tinyRequest()
+	req.Effort = "low"
+	if _, err := NewClaudeCode(bin, "sonnet", 0.9).Call(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := os.ReadFile(filepath.Join(dir, "args.txt"))
+	if !strings.Contains(string(args), "--effort\nlow\n") {
+		t.Fatalf("args:\n%s", args)
+	}
+}

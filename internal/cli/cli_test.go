@@ -248,6 +248,7 @@ func TestPolicyFlagValidation(t *testing.T) {
 		"keep-best too high":        {"decide", "--keep-best", "6", dir},
 		"cull-max-sharpness >10":    {"decide", "--cull-max-sharpness", "11", dir},
 		"second opinion with batch": {"judge", "--second-opinion", "--batch", dir},
+		"unknown effort":            {"judge", "--effort", "turbo", dir},
 		"bad escalate backend":      {"judge", "--escalate-backend", "gpt", "--escalate-model", "x", dir},
 		"escalate needs model":      {"judge", "--escalate-backend", "anthropic", dir},
 		"bad escalate-on":           {"judge", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5", "--escalate-on", "blurry", dir},
@@ -1255,5 +1256,12 @@ func TestRankEstimateCountsReversedCalls(t *testing.T) {
 	twice, err := run(t, "rank", "--estimate", "--rank-twice", dir)
 	if err != nil || once == twice {
 		t.Fatalf("estimate unchanged by --rank-twice:\n%s\n%s", once, twice)
+	}
+}
+
+func TestEffortRefusedOnOpenAI(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := run(t, "judge", "--backend", "openai", "--model", "m", "--effort", "low", dir); err == nil || !strings.Contains(err.Error(), "effort") {
+		t.Fatalf("got %v", err)
 	}
 }

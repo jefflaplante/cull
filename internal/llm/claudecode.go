@@ -50,8 +50,12 @@ func (c *ClaudeCode) Call(ctx context.Context, req Request) (*Response, error) {
 		return nil, err
 	}
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-		"--model", c.Model, "--tools", "", "--no-session-persistence", "--strict-mcp-config",
-		"--setting-sources", "", "--system-prompt", req.System, "--json-schema", string(schema)}
+		"--model", c.Model}
+	if req.Effort != "" {
+		args = append(args, "--effort", req.Effort)
+	}
+	args = append(args, "--tools", "", "--no-session-persistence", "--strict-mcp-config",
+		"--setting-sources", "", "--system-prompt", req.System, "--json-schema", string(schema))
 	return validated(ctx, req.Schema, func(ctx context.Context) (*Response, error) { return c.run(ctx, args, stdin) })
 }
 

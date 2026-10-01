@@ -137,7 +137,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 				p.res.Error = "locate: " + err.Error()
 				return llm.BatchRequest{}, "error", false
 			}
-			return llm.BatchRequest{CustomID: "L-" + frameID(p.res.File), Req: eval.LocateRequest(small, cameraOf(p.res.Exif), locateMaxTokens)}, "locate", true
+			return llm.BatchRequest{CustomID: "L-" + frameID(p.res.File), Req: cfg.effortFor(eval.LocateRequest(small, cameraOf(p.res.Exif), locateMaxTokens))}, "locate", true
 		}
 		return evalRequest(cfg, p, target)
 	})
@@ -239,7 +239,7 @@ func evalRequest(cfg Config, p *prepared, target *focus.Target) (llm.BatchReques
 		p.res.Error = err.Error()
 		return llm.BatchRequest{}, "error", false
 	}
-	return llm.BatchRequest{CustomID: "E-" + frameID(p.res.File), Req: eval.EvalRequest(in)}, "eval", true
+	return llm.BatchRequest{CustomID: "E-" + frameID(p.res.File), Req: cfg.effortFor(eval.EvalRequest(in))}, "eval", true
 }
 
 // prepareRound prepares frames in parallel, records each in the state, and

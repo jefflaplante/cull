@@ -664,8 +664,8 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 			return used, err // the ranking's state stays: a re-run reuses what was paid for
 		}
 		// After a quota stop or Ctrl-C too: those decisions are final.
-		if n := moveCulled(rep, lab, cfg.Log); n > 0 {
-			fmt.Fprintf(cfg.Log, "moved %d culled frame(s) into %s/ (undo: cull restore %s)\n", n, CulledDir, cfg.Dir)
+		if n := moveCulled(rep, lab, cfg.warnWriter()); n > 0 {
+			cfg.note(ui.Quiet, "moved %d culled frame(s) into %s/ (undo: cull restore %s)", n, CulledDir, cfg.Dir)
 		}
 	}
 	if err := rep.Save(cfg.ReportPath); err != nil {

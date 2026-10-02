@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -91,5 +92,27 @@ func TestLiveModelStoppedStage(t *testing.T) {
 		Event{Stage: &Stage{Name: "scan", Done: true}})
 	if v := m.View().Content; !strings.Contains(v, "8/17 frames") || !strings.Contains(v, "stopped") || strings.Contains(v, "done") {
 		t.Fatalf("interrupted stage:\n%s", v)
+	}
+}
+
+// An event sent after the program stopped must not block: Bubble Tea's Println is a
+// bare channel send that nobody reads once the program has exited.
+func TestLiveSendAfterExitDoesNotBlock(t *testing.T) {
+	s, err := NewLive(io.Discard, Normal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := s.(*live)
+	l.Close()
+	done := make(chan struct{})
+	go func() {
+		l.send(Event{Frame: &Frame{Line: "late", Decision: "keep"}})
+		l.send(Event{Note: &Note{Sev: Warn, Text: "late warning"}})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("send blocked after the program exited")
 	}
 }

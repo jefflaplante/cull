@@ -151,6 +151,7 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 			cfg.Concurrency = o.backendFlags.concurrencyOrDefault(o.concurrency)
 			fmt.Fprintf(cmd.ErrOrStderr(), "backend: %s, model: %s, %s\n", b.Name(), o.model, auth)
 			ro := so.out.newOutput(cmd, true)
+			defer ro.Close() // a panic must still release the terminal
 			ro.attach(&cfg)
 			ro.debugTo(b)
 

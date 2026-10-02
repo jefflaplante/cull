@@ -46,18 +46,25 @@ func (s *live) Emit(e Event) {
 		return
 	default:
 	}
+	s.send(e)
+}
+
+// send hands e to the program. It never blocks once the program has stopped:
+// Bubble Tea's Program.Println is a bare channel send, so lines go through Send,
+// which gives up when the program's context ends.
+func (s *live) send(e Event) {
 	switch {
 	case e.Note != nil:
 		if e.Note.Sev == Info && e.Note.Level > s.level {
 			return
 		}
-		s.p.Println(prefixed(e.Note))
+		s.p.Send(tea.Println(prefixed(e.Note))())
 		if e.Note.Sev >= Warn {
 			s.p.Send(eventMsg(e))
 		}
 	case e.Frame != nil:
 		if s.level >= Normal {
-			s.p.Println(e.Frame.Line)
+			s.p.Send(tea.Println(e.Frame.Line)())
 		}
 		s.p.Send(eventMsg(e))
 	case e.Stage != nil:

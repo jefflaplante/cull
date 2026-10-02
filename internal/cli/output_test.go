@@ -120,3 +120,19 @@ func TestNoLiveViewWithoutTerminal(t *testing.T) {
 		out.Close()
 	}
 }
+
+// Moving DNGs is the one change cull makes to the shoot: -q must still say so.
+func TestQuietStillReportsMoves(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	out, err := run(t, "judge", "-q", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--move-culled", dir)
+	if err != nil {
+		t.Fatalf("judge: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "moved 1 culled frame(s)") || !strings.Contains(out, "cull restore") {
+		t.Fatalf("-q hid the move:\n%s", out)
+	}
+}

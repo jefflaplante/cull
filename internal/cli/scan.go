@@ -32,6 +32,7 @@ Use it to confirm the previews are large enough for focus judgement, and with
 			cfg.RawClip = rawClip
 			cfg.Fresh = fresh
 			out := so.out.newOutput(cmd, true)
+			defer out.Close() // a panic must still release the terminal
 			out.attach(&cfg)
 			rep, usage, err := pipeline.Run(cmd.Context(), cfg, nil)
 			out.Close()

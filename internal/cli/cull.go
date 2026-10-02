@@ -211,6 +211,7 @@ Backends (--backend):
 			var rep *report.Report
 			var usage eval.Usage
 			out := so.out.newOutput(cmd, true)
+			defer out.Close() // a panic must still release the terminal
 			out.attach(&cfg)
 			out.debugTo(b)
 			if cfg.Escalate != nil {

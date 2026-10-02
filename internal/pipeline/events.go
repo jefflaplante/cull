@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 
 	"github.com/jefflaplante/cull/internal/report"
@@ -29,6 +30,15 @@ func (cfg Config) warn(format string, args ...any) {
 	case cfg.Log != nil:
 		fmt.Fprintln(cfg.Log, text)
 	}
+}
+
+// warnWriter is a writer for call sites that print problems line by line (moves):
+// with a sink, each line is a warning, shown at every level.
+func (cfg Config) warnWriter() io.Writer {
+	if cfg.UI != nil {
+		return ui.LineWriter(cfg.UI, ui.Quiet, ui.Warn)
+	}
+	return cfg.Log
 }
 
 // stage reports stage progress; only a sink renders it.

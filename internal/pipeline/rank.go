@@ -17,6 +17,7 @@ import (
 	"github.com/jefflaplante/cull/internal/imageprep"
 	"github.com/jefflaplante/cull/internal/llm"
 	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/ui"
 )
 
 // The rank stage: once every frame is judged and grouped, each set of two or more
@@ -385,6 +386,10 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 				llm.ErrBudget, usd, spent, cfg.MaxCost, len(todo))
 		}
 	}
+	if len(todo) > 0 {
+		cfg.stage(ui.Stage{Name: "rank", Unit: "sets", Total: int64(len(todo))})
+		defer cfg.stage(ui.Stage{Name: "rank", Done: true})
+	}
 	var last error // the last wave's budget stop: the ranking still finished
 	for len(todo) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -398,6 +403,7 @@ func rankSets(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 		total.Add(u)
 		run.charged = append(run.charged, charged...)
 		todo = todo[n:]
+		cfg.stage(ui.Stage{Name: "rank", Add: int64(n)})
 		switch {
 		case err == nil:
 		case errors.Is(err, llm.ErrBudget) && len(todo) > 0:
@@ -576,7 +582,7 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 		}
 		if j.err != nil {
 			if !errors.Is(j.err, errBatchPending) { // the stage's error says it once
-				fmt.Fprintf(log, "set %d (%d frames) not ranked: %v\n", s.ID, len(j.files), j.err)
+				cfg.warn("set %d (%d frames) not ranked: %v", s.ID, len(j.files), j.err)
 			}
 			continue
 		}
@@ -593,7 +599,7 @@ func rankWave(ctx context.Context, rep *report.Report, cfg Config, ex rankExec, 
 			s.Reversed = append(s.Reversed, j.files[pos])
 		}
 		if cfg.RankTwice && len(j.parts) == 1 && j.reversed == nil {
-			fmt.Fprintf(log, "set %d: the reversed ranking failed; ranked once\n", s.ID)
+			cfg.warn("set %d: the reversed ranking failed; ranked once", s.ID)
 		}
 		s.Summary, s.By = j.summary, "model"
 		fmt.Fprintf(log, "ranked set %d (%d frames): %s wins — %s\n", s.ID, len(j.files), filepath.Base(s.Order[0]), s.Summary)

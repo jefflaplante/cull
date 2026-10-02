@@ -198,18 +198,21 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 	go func() { wg.Wait(); close(results) }()
 
 	n := 0
+	name := cfg.stageName()
+	cfg.stage(ui.Stage{Name: name, Unit: "frames", Total: int64(len(todo))})
 	for r := range results {
 		n++
 		total.Add(r.Usage)
 		rep.Results = append(rep.Results, r)
-		fmt.Fprintf(cfg.Log, "[%d/%d] %s\n", n, len(todo), summarize(r))
+		cfg.frame(name, n, len(todo), r)
 		if cfg.CheckpointN > 0 && n%cfg.CheckpointN == 0 {
 			rep.Generated = time.Now()
 			if err := rep.Save(cfg.ReportPath); err != nil {
-				fmt.Fprintf(cfg.Log, "checkpoint failed: %v\n", err)
+				cfg.warn("checkpoint failed: %v", err)
 			}
 		}
 	}
+	cfg.stage(ui.Stage{Name: name, Done: true})
 	// A stopped run (quota, abort, budget, Ctrl-C) makes no more calls: its sets stay
 	// by scores until cull rank.
 	if cfg.Rank && !cfg.DryRun && stopErr == nil && ctx.Err() == nil {
@@ -609,7 +612,7 @@ func guardOverwrite(cfg *Config) error {
 func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spend) (llm.Usage, error) {
 	lab := cfg.Labels
 	if dups := labels.Duplicates(rep.Results); len(lab) > 0 && len(dups) > 0 {
-		fmt.Fprintf(cfg.Log, "warning: frames share a file name, so your labels can't tell them apart; sidecars and moves follow the model's verdicts: %s\n", strings.Join(dups, "; "))
+		cfg.warn("warning: frames share a file name, so your labels can't tell them apart; sidecars and moves follow the model's verdicts: %s", strings.Join(dups, "; "))
 		lab = nil
 	}
 	changed := map[int]bool{}

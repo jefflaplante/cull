@@ -48,3 +48,20 @@ func TestDefaultLevelKeepsProgressLines(t *testing.T) {
 		t.Fatalf("default level lost today's lines:\n%s", out)
 	}
 }
+
+func TestVerboseShowsStages(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	out, err := run(t, "scan", "-v", dir)
+	if err != nil {
+		t.Fatalf("scan: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "scan: 1 frames") || !strings.Contains(out, "focus:") {
+		t.Fatalf("verbose lacks the stage or per-frame detail:\n%s", out)
+	}
+	out, _ = run(t, "scan", dir)
+	if strings.Contains(out, "scan: 1 frames") || strings.Contains(out, "focus:") {
+		t.Fatalf("default level shows verbose lines:\n%s", out)
+	}
+}

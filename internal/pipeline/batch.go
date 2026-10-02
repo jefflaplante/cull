@@ -212,7 +212,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 		budget.add(f.Result.CostUSD, 0)
 		total.Add(f.Result.Usage)
 		rep.Results = append(rep.Results, f.Result)
-		fmt.Fprintf(cfg.Log, "%s\n", summarize(f.Result))
+		cfg.frameEvent(summarize(f.Result), f.Result)
 	}
 	// The report now holds every judged frame: save it, then drop the judge state.
 	// The ranking below can stop (Ctrl-C while polling) after that, and a resume
@@ -222,7 +222,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 		return rep, total, err
 	}
 	if err := os.Remove(statePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintf(cfg.Log, "warning: couldn't remove %s (%v); a later --resume skips the frames it holds\n", statePath, err)
+		cfg.warn("couldn't remove %s (%v); a later --resume skips the frames it holds", statePath, err)
 	}
 	if cfg.Rank && !cfg.DryRun {
 		cfg.rankWith = batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg), rerun: rerunJudgeBatch}

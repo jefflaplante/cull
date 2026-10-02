@@ -37,11 +37,15 @@ func Sidecar(r report.Result, l Entry, orientation int, develop bool) xmp.Sideca
 	if r.Group != nil && r.Group.Best {
 		sc.Keywords = append(sc.Keywords, "cull:best")
 	}
+	if l.EV != nil { // yours, from review: for Adobe tools (Capture One ignores it; apply-c1 carries it there)
+		v := *l.EV
+		sc.ExposureEV = &v
+	}
 	if !develop || r.Evaluation == nil || d == eval.Cull {
 		return sc
 	}
 	e := r.Evaluation
-	if e.Exposure.Status == "fixable" {
+	if e.Exposure.Status == "fixable" && sc.ExposureEV == nil {
 		v := e.Exposure.EVAdjust
 		sc.ExposureEV = &v
 	}

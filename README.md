@@ -239,6 +239,7 @@ per-session token, then opens your browser.
 | N | next unlabelled frame |
 | [ / ] | previous / next set |
 | - / = | one keeper fewer / more in the frame's set (top N by the model's rank keep, the rest cull) |
+| , / . | exposure −/+0.1 EV (< / > for ±0.5; \ resets): previewed on the page, applied in Capture One by `apply-c1 --exposure` |
 
 **Filters** combine three rows:
 - **Verdict:** your label, else the model's.
@@ -367,6 +368,13 @@ and Bridge.
 | Capture One, from sidecars | read on import; use Image › Sync Metadata after import | not applied |
 | Capture One, via `apply-c1` | yes | yes, with `--exposure` / `--crop`, only over default exposure and crop |
 | Lightroom Classic | ignores sidecars for DNG files | — |
+
+**Exposure from review.** Set a frame's exposure in the review page (the slider in the
+detail view, or `,` `.` `<` `>`). The page previews it from the camera JPEG, and it's
+saved with your labels. The sidecar gets `crs:Exposure2012` for Adobe tools, but
+Capture One 16.7.2 ignores that on import (tested). `apply-c1 --exposure` sets it in
+Capture One instead. Your EV always overwrites Capture One's exposure, while the model's
+suggestion applies only where it is still 0.
 
 **`apply-c1`** writes an AppleScript for the open Capture One document. Run
 `--probe` first (read-only), read the dry-run output, then use `--run` to apply it.

@@ -29,9 +29,9 @@ import (
 	"github.com/jefflaplante/cull/internal/report"
 )
 
-// Options select what the script writes. Exposure and Crop apply only where the
-// image still has Capture One's default exposure (0) or an uncropped frame, so
-// edits made in Capture One are never overwritten.
+// Options select what the script writes. Exposure applies your EV from review
+// (o.Labels) as is, and otherwise the model's suggestion only where the image still
+// has Capture One's default exposure (0); Crop applies only to an uncropped frame.
 type Options struct {
 	Rating, Label, Keyword bool
 	Exposure               bool                    // suggested EV for frames the model marked fixable
@@ -96,8 +96,14 @@ func Script(rep *report.Report, o Options) string {
 				b.WriteString("\t\t\tif k is not missing value then apply keyword k to {v}\n")
 			}
 		}
-		if o.Exposure && e != nil && e.Exposure.Status == "fixable" {
-			// Only over the default: an exposure set in Capture One is the user's edit.
+		switch {
+		case o.Exposure && l.EV != nil:
+			// Yours, set in review: it wins over whatever Capture One holds, since it
+			// is the last thing you chose.
+			fmt.Fprintf(&b, "\t\t\tset exposure of adjustments of v to %s\n", num(*l.EV))
+		case o.Exposure && e != nil && e.Exposure.Status == "fixable":
+			// The model's suggestion: only over the default, so an exposure set in
+			// Capture One is never overwritten.
 			fmt.Fprintf(&b, "\t\t\tif (exposure of adjustments of v) is 0 then set exposure of adjustments of v to %s\n", num(e.Exposure.EVAdjust))
 		}
 		if crop {

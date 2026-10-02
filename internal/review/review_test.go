@@ -286,3 +286,12 @@ func TestPageNamesGroupsWithoutBestPill(t *testing.T) {
 		t.Fatal("page still shows the best pill or lacks group_n names")
 	}
 }
+
+// Exposure: a linear-light SVG filter for the preview, keys , . < > \ and a slider.
+func TestPageHasExposureControls(t *testing.T) {
+	for _, want := range []string{`color-interpolation-filters="linearRGB"`, `k === ","`, `k === "."`, `k === "\\"`, `type: "range"`, ", . exposure"} {
+		if !strings.Contains(pageTemplate, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+}

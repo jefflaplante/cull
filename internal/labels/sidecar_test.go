@@ -130,3 +130,17 @@ func TestWriteSidecarRecordsDevelop(t *testing.T) {
 		t.Fatalf("err=%v develop=%v", err, r.XMPDevelop)
 	}
 }
+
+// Your EV goes into the sidecar's crs:Exposure2012 (Adobe tools read it; Capture One
+// doesn't, so apply-c1 carries it there) even without --xmp-develop, and wins over
+// the model's suggestion.
+func TestSidecarCarriesYourEV(t *testing.T) {
+	ev := -0.3
+	r := report.Result{Decision: eval.Keep, Evaluation: &eval.Evaluation{Exposure: eval.Exposure{Status: "fixable", EVAdjust: 0.8}}}
+	for _, develop := range []bool{false, true} {
+		sc := Sidecar(r, Entry{EV: &ev}, 1, develop)
+		if sc.ExposureEV == nil || *sc.ExposureEV != -0.3 {
+			t.Fatalf("develop=%v: exposure %v", develop, sc.ExposureEV)
+		}
+	}
+}

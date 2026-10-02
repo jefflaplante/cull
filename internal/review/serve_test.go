@@ -286,3 +286,18 @@ func TestPageOffersTheLoupe(t *testing.T) {
 		t.Fatal("page doesn't offer the loupe")
 	}
 }
+
+// The server takes an EV with a label change, logs it and returns it.
+func TestServerSavesExposure(t *testing.T) {
+	dir, h, tok := serveFixture(t, false)
+	if rec := call(h, "POST", "/api/labels", `{"file":"L1.DNG","label":"keep","stars":0,"ev":0.4}`, api(tok)); rec.Code != 200 {
+		t.Fatalf("post: %d %s", rec.Code, rec.Body)
+	}
+	got, _ := labels.Read(filepath.Join(dir, labels.FileName))
+	if got["L1.DNG"].EV == nil || *got["L1.DNG"].EV != 0.4 {
+		t.Fatalf("log %+v", got["L1.DNG"])
+	}
+	if rec := call(h, "GET", "/api/labels", "", api(tok)); !strings.Contains(rec.Body.String(), `"ev":0.4`) {
+		t.Fatalf("get: %s", rec.Body)
+	}
+}

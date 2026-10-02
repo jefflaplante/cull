@@ -158,8 +158,9 @@ func (s *Server) renderNative(src, p string) error {
 }
 
 type state struct {
-	Label string `json:"label"`
-	Stars int    `json:"stars"`
+	Label string   `json:"label"`
+	Stars int      `json:"stars"`
+	EV    *float64 `json:"ev,omitempty"`
 }
 
 func (s *Server) getLabels(w http.ResponseWriter, _ *http.Request) {
@@ -172,16 +173,17 @@ func (s *Server) getLabels(w http.ResponseWriter, _ *http.Request) {
 	}
 	out := map[string]state{}
 	for f, e := range m {
-		out[f] = state{e.Label, e.Stars}
+		out[f] = state{e.Label, e.Stars, e.EV}
 	}
 	writeJSON(w, map[string]any{"labels": out})
 }
 
 func (s *Server) postLabel(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		File  string `json:"file"`
-		Label string `json:"label"`
-		Stars int    `json:"stars"`
+		File  string   `json:"file"`
+		Label string   `json:"label"`
+		Stars int      `json:"stars"`
+		EV    *float64 `json:"ev"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
@@ -192,7 +194,7 @@ func (s *Server) postLabel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not in the report: "+in.File, http.StatusBadRequest)
 		return
 	}
-	e := labels.Entry{File: in.File, Label: in.Label, Stars: in.Stars, At: time.Now()}
+	e := labels.Entry{File: in.File, Label: in.Label, Stars: in.Stars, EV: in.EV, At: time.Now()}
 	if err := e.Validate(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

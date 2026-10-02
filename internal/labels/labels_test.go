@@ -153,3 +153,21 @@ func TestAppendAfterOnlyATornLine(t *testing.T) {
 		t.Fatalf("got %+v err %v", got, err)
 	}
 }
+
+// Your exposure rides in the log beside the label: a frame with only an EV is not
+// cleared, and an out-of-range EV is refused.
+func TestEntryCarriesExposure(t *testing.T) {
+	p := filepath.Join(t.TempDir(), FileName)
+	ev := 0.7
+	if err := Append(p, Entry{File: "A.DNG", EV: &ev}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(p)
+	if err != nil || got["A.DNG"].EV == nil || *got["A.DNG"].EV != 0.7 {
+		t.Fatalf("got %+v err %v", got, err)
+	}
+	far := 9.0
+	if err := (Entry{File: "A.DNG", EV: &far}).Validate(); err == nil {
+		t.Fatal("EV 9 accepted")
+	}
+}

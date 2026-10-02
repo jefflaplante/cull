@@ -176,3 +176,18 @@ func TestScriptAppliesEditsOnlyOverDefaults(t *testing.T) {
 		t.Error("helper missing")
 	}
 }
+
+// Your EV from review always overwrites Capture One's exposure (you chose it last);
+// the model's suggestion still applies only over the default.
+func TestScriptAppliesYourEVUnconditionally(t *testing.T) {
+	ev := 0.7
+	lab := map[string]labels.Entry{"L2.DNG": {File: "L2.DNG", EV: &ev}}
+	s := Script(testReport(), Options{Exposure: true, Labels: lab})
+	b2 := block(s, "L2.DNG")
+	if !strings.Contains(b2, "\t\t\tset exposure of adjustments of v to 0.7\n") {
+		t.Errorf("your EV not applied unconditionally:\n%s", b2)
+	}
+	if b1 := block(s, "L1.DNG"); !strings.Contains(b1, "if (exposure of adjustments of v) is 0 then set exposure of adjustments of v to 0.7") {
+		t.Errorf("model suggestion lost its guard:\n%s", b1)
+	}
+}

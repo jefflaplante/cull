@@ -4,8 +4,8 @@ const fs = require("fs");
 const page = fs.readFileSync(process.argv[2], "utf8");
 const m = page.match(/\/\*pure:start\*\/([\s\S]*?)\/\*pure:end\*\//);
 if (!m) { console.error("no pure block"); process.exit(1); }
-const { compareScale, rejectChange, groupOrder, keepLabels, rowStep, groupNumbers } =
-  new Function(m[1] + "; return { compareScale, rejectChange, groupOrder, keepLabels, rowStep, groupNumbers };")();
+const { compareScale, rejectChange, groupOrder, keepLabels, rowStep, groupNumbers, stepEV, evSlope, fmtEV } =
+  new Function(m[1] + "; return { compareScale, rejectChange, groupOrder, keepLabels, rowStep, groupNumbers, stepEV, evSlope, fmtEV };")();
 let failed = 0;
 const check = (cond, msg) => { if (!cond) { console.error("FAIL: " + msg); failed++; } };
 
@@ -86,5 +86,16 @@ const check = (cond, msg) => { if (!cond) { console.error("FAIL: " + msg); faile
   const g = (id, size) => ({ group: { id, size } });
   const nums = groupNumbers([g(7, 2), {}, g(3, 1), g(12, 3), g(7, 2), g(12, 3), g(4, 2)]);
   check(nums.get(7) === 1 && nums.get(12) === 2 && nums.get(4) === 3 && !nums.has(3), "groupNumbers " + JSON.stringify([...nums]));
+}
+// EV steps round to a tenth and stay within ±3; the preview multiplies linear light
+// by 2^EV; a rejected EV-only change reverts to no EV.
+{
+  check(stepEV(0, 0.1) === 0.1 && stepEV(0.2, 0.1) === 0.3 && stepEV(0.7, -0.5) === 0.2, "stepEV tenths");
+  check(stepEV(2.8, 0.5) === 3 && stepEV(-2.9, -0.5) === -3, "stepEV clamps to ±3");
+  check(evSlope(1) === 2 && evSlope(-1) === 0.5 && evSlope(0) === 1, "evSlope");
+  check(fmtEV(0.7) === "+0.7" && fmtEV(-0.3) === "-0.3" && fmtEV(0) === "0", "fmtEV " + fmtEV(0.7));
+  const labels = { "A.DNG": { label: "", stars: 0, ev: 0.5 } };
+  const pending = [{ file: "A.DNG", label: "", stars: 0, ev: 0.5, prev: { label: "", stars: 0 } }];
+  check(rejectChange(pending, labels) && !labels["A.DNG"], "rejected EV-only change reverts to nothing");
 }
 process.exit(failed ? 1 : 0);

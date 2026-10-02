@@ -95,12 +95,18 @@ ul { margin: 4px 0 0; padding-left: 18px; }
     <label class="file">Import labels<input type="file" id="import" accept=".jsonl,application/jsonl,application/x-ndjson,text/plain"></label>
   </div>
   <span class="save" id="save"></span>
-  <span class="help">← → ↑ ↓ move · Z 100% · S compare set · - = keepers in set · N next unlabelled · [ ] sets · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid · badges: top right = you · bottom = model</span>
+  <span class="help">← → ↑ ↓ move · Z 100% · S compare set · - = keepers in set · , . exposure (< > ±0.5, \ reset) · N next unlabelled · [ ] sets · K keep · R review · C cull · U clear · 1–5 stars · 0 no stars · Enter open · Esc grid · badges: top right = you · bottom = model</span>
 </header>
 <main>
   <div id="grid"></div>
   <div id="detail"></div>
 </main>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- The exposure preview: linear light × 2^EV (the slope), back to sRGB. -->
+  <filter id="evf" color-interpolation-filters="linearRGB">
+    <feComponentTransfer><feFuncR type="linear" slope="1"/><feFuncG type="linear" slope="1"/><feFuncB type="linear" slope="1"/></feComponentTransfer>
+  </filter>
+</svg>
 <div id="compare" tabindex="-1"></div>
 <div id="loupe" tabindex="-1"></div>
 <script id="data" type="application/json">/*__DATA__*/null</script>
@@ -123,7 +129,7 @@ function rejectChange(pending, labels) {
   const later = pending.find(q => q.file === p.file);
   if (later) { later.prev = p.prev; return false; }
   if (!p.prev) return false;
-  if (!p.prev.label && !p.prev.stars) delete labels[p.file]; else labels[p.file] = p.prev;
+  if (!p.prev.label && !p.prev.stars && p.prev.ev == null) delete labels[p.file]; else labels[p.file] = p.prev;
   return true;
 }
 // groupOrder keeps the cards' order but pulls each set's shown members together at
@@ -185,6 +191,12 @@ function groupNumbers(cards) {
   }
   return nums;
 }
+// stepEV moves an exposure by d EV, rounded to a tenth and kept within ±3.
+function stepEV(ev, d) { return Math.max(-3, Math.min(3, Math.round(((ev || 0) + d) * 10) / 10)); }
+// evSlope is the linear-light gain an EV adjustment applies: 2^EV.
+function evSlope(ev) { return Math.pow(2, ev || 0); }
+// fmtEV writes an EV with its sign ("+0.7", "-0.3", "0").
+function fmtEV(ev) { return !ev ? "0" : (ev > 0 ? "+" : "") + (Math.round(ev * 10) / 10); }
 /*pure:end*/
 (() => {
   const data = JSON.parse(document.getElementById("data").textContent);
@@ -303,7 +315,8 @@ function groupNumbers(cards) {
     const keeper = inSet && effective(c) === "keep";
     const card = el("div", { cls: "card" + (k === sel ? " sel" : "") + setTint(c.group) + (keeper ? " keeper" : ""), tabindex: "0" },
       img(c.thumb, c.file) || el("div", { cls: "empty", text: c.error || "no preview" }),
-      el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), starText(l.stars), setBadge(c.group), modelBadge(c.decision)));
+      el("div", { cls: "row" }, el("span", { cls: "name", text: c.file, title: c.path }), starText(l.stars),
+        l.ev ? el("span", { cls: "meta", text: "EV " + fmtEV(l.ev), title: "your exposure adjustment" }) : null, setBadge(c.group), modelBadge(c.decision)));
     if (l.label) card.appendChild(yourBadge(l.label, " label"));
     if (inSet && !c.error) {
       const t = el("button", { cls: "keeper-toggle", type: "button", "aria-pressed": String(keeper), title: "keeper: keep or cull this frame",
@@ -437,15 +450,53 @@ function groupNumbers(cards) {
       }
     }
 
+    const mainImg = img(c.thumb, c.file), subjImg = img(c.subject, "subject crop");
+    previewEV(l.ev, mainImg, subjImg);
     box.replaceChildren(
-      el("div", { cls: "pane" }, img(c.thumb, c.file) || el("p", { cls: "empty", text: c.error || "no preview" }),
+      el("div", { cls: "pane" }, mainImg || el("p", { cls: "empty", text: c.error || "no preview" }),
         el("p", { cls: "cap", text: `${sel + 1} / ${vis.length} · ${c.file}` }), nav),
       el("div", { cls: "pane subject" },
-        c.subject ? el("div", {}, img(c.subject, "subject crop"), el("p", { cls: "cap", text: "Subject at native preview resolution (what the model judged)" })) : null,
+        subjImg ? el("div", {}, subjImg, el("p", { cls: "cap", text: "Subject at native preview resolution (what the model judged)" })) : null,
+        c.error ? null : evControl(vis[sel], c, l, mainImg, subjImg),
         el("div", {}, modelBadge(c.decision), l.label ? el("span", { text: "  your label: " }) : null, l.label ? yourBadge(l.label) : null,
           l.stars ? el("span", { text: "  " }) : null, starText(l.stars)),
         st ? el("p", { cls: "status" + (/^(not saved|rejected)|sidecar not written/.test(st) ? " warn" : ""), text: st }) : null,
         actions, starBtns, info, strip));
+  }
+
+  // previewEV shows imgs at ev through the page's linear-light filter (#evf): an
+  // approximation from the camera's JPEG. Highlights the JPEG clipped stay clipped
+  // here, though Capture One, rendering the raw, may recover them.
+  function previewEV(ev, ...imgs) {
+    for (const f of document.querySelectorAll("#evf feFuncR, #evf feFuncG, #evf feFuncB")) f.setAttribute("slope", String(evSlope(ev)));
+    for (const im of imgs) if (im) im.style.filter = ev ? "url(#evf)" : "";
+  }
+  // evChange is the change an exposure key makes to card i's EV (null if k isn't one).
+  function evChange(i, k) {
+    if (i < 0) return null;
+    const cur = get(cards[i].file).ev || 0;
+    const d = { ",": -0.1, ".": 0.1, "<": -0.5, ">": 0.5 }[k];
+    if (d !== undefined) return { ev: stepEV(cur, d) };
+    return k === "\\" ? { ev: null } : null;
+  }
+  // evControl is the detail view's exposure row: a slider previewing as it moves and
+  // saving when let go, your EV beside the model's suggestion, and the caveat.
+  function evControl(i, c, l, ...imgs) {
+    const e = c.eval, sug = e && e.exposure && e.exposure.status === "fixable" ? e.exposure.ev_adjust : null;
+    const val = el("span", { text: `EV ${fmtEV(l.ev)}` + (l.ev ? " (yours)" : "") });
+    const range = el("input", { type: "range", min: "-3", max: "3", step: "0.1", value: String(l.ev || 0), "aria-label": "exposure, EV" });
+    range.oninput = () => { const v = Number(range.value); val.textContent = `EV ${fmtEV(v)}`; previewEV(v, ...imgs); };
+    range.onchange = () => { labelCard(i, { ev: stepEV(Number(range.value), 0) }); render(); };
+    const row = el("div", { cls: "actions" }, val, range);
+    if (sug !== null) {
+      const b = el("button", { type: "button", text: `use suggestion (${fmtEV(sug)})` });
+      b.onclick = () => { labelCard(i, { ev: stepEV(sug, 0) }); render(); };
+      row.appendChild(b);
+    }
+    const reset = el("button", { type: "button", text: "reset (\\)" });
+    reset.onclick = () => { labelCard(i, { ev: null }); render(); };
+    row.appendChild(reset);
+    return el("div", {}, row, el("p", { cls: "cap", text: "Exposure preview from the camera's JPEG: highlights it clipped stay clipped here; Capture One renders the raw. Applied in Capture One with cull apply-c1 --exposure." }));
   }
 
   // labelCard applies a change to card i and queues it for the server.
@@ -453,10 +504,11 @@ function groupNumbers(cards) {
     const c = cards[i];
     const prev = Object.assign({}, get(c.file)); // restored if the server rejects the change
     const next = Object.assign({}, prev, change);
-    if (!next.label && !next.stars) delete labels[c.file]; else labels[c.file] = next;
+    if (next.ev === 0) next.ev = null;
+    if (!next.label && !next.stars && next.ev == null) delete labels[c.file]; else labels[c.file] = next;
     store(key, labels);
     pinned = i;
-    if (serve) { pending.push({ file: c.file, label: next.label, stars: next.stars, prev: prev }); store(qkey, pending); flush(); }
+    if (serve) { pending.push({ file: c.file, label: next.label, stars: next.stars, ev: next.ev ?? null, prev: prev }); store(qkey, pending); flush(); }
   }
   function update(change, advance) {
     const vis = visible();
@@ -514,6 +566,7 @@ function groupNumbers(cards) {
     loupeName = c.file;
     const cap = el("p", { cls: "cap", text: "loading the native preview… (the first time takes a few seconds)" });
     const im = el("img", { src: "assets/" + encodeURIComponent(c.native), alt: c.file, draggable: "false" });
+    previewEV(get(c.file).ev, im);
     im.onload = () => {
       const dpr = window.devicePixelRatio || 1, w = im.naturalWidth / dpr, h = im.naturalHeight / dpr;
       im.style.width = w + "px";
@@ -644,7 +697,7 @@ function groupNumbers(cards) {
         let res;
         try {
           res = await fetch("/api/labels", { method: "POST", headers: { "Content-Type": "application/json", "X-Cull-Token": token },
-            body: JSON.stringify({ file: p.file, label: p.label, stars: p.stars }) });
+            body: JSON.stringify({ file: p.file, label: p.label, stars: p.stars, ev: p.ev ?? null }) });
         } catch (e) {
           pending.forEach(q => { status[q.file] = "not saved: server unreachable"; });
           break;
@@ -695,8 +748,12 @@ function groupNumbers(cards) {
       // Label the frame in the loupe, never advance: the view underneath must not
       // move on while this frame is still shown.
       const change = { k: { label: "keep" }, r: { label: "review" }, c: { label: "cull" }, u: { label: "" } }[k] ||
-        (/^[0-5]$/.test(k) ? { stars: Number(k) } : null);
-      if (change && loupeIdx >= 0) { labelCard(loupeIdx, change); render(); loupeCaption(); ev.preventDefault(); }
+        (/^[0-5]$/.test(k) ? { stars: Number(k) } : null) || evChange(loupeIdx, k);
+      if (change && loupeIdx >= 0) {
+        labelCard(loupeIdx, change); render(); loupeCaption();
+        previewEV(get(cards[loupeIdx].file).ev, loupe.querySelector("img"));
+        ev.preventDefault();
+      }
       return;
     }
     if (compareOpen) {
@@ -714,6 +771,10 @@ function groupNumbers(cards) {
     else if (k === "n") nextUnlabelled();
     else if (k === "]") nextSet(1);
     else if (k === "[") nextSet(-1);
+    else if (k === "," || k === "." || k === "<" || k === ">" || k === "\\") {
+      const vis = visible();
+      if (vis.length) { const i = vis[Math.min(sel, vis.length - 1)], ch = evChange(i, k); if (ch) { labelCard(i, ch); render(); } }
+    }
     else if (k === "-" || k === "=" || k === "+") { // one keeper fewer / more in the current frame's set
       const c = currentCard();
       if (c && c.group && c.group.size > 1) setKeepCount(c.group.id, setKeepers(c.group.id) + (k === "-" ? -1 : 1));
@@ -728,7 +789,8 @@ function groupNumbers(cards) {
 
   document.getElementById("export").onclick = () => {
     const at = new Date().toISOString();
-    const lines = cards.filter(c => labels[c.file]).map(c => JSON.stringify({ file: c.file, label: get(c.file).label, stars: get(c.file).stars, at }) + "\n");
+    const lines = cards.filter(c => labels[c.file]).map(c => JSON.stringify(Object.assign({ file: c.file, label: get(c.file).label, stars: get(c.file).stars },
+      get(c.file).ev != null ? { ev: get(c.file).ev } : {}, { at })) + "\n");
     const a = el("a", { href: URL.createObjectURL(new Blob(lines, { type: "application/jsonl" })), download: "cull-labels.jsonl" });
     document.body.appendChild(a); a.click(); a.remove();
   };
@@ -742,13 +804,14 @@ function groupNumbers(cards) {
         if (!lines[n].trim()) continue;
         let e = null;
         try { e = JSON.parse(lines[n]); } catch (err) {}
-        const label = e && (e.label || ""), stars = e && (e.stars || 0);
-        const valid = e && typeof e.file === "string" && e.file && ["", "keep", "review", "cull"].includes(label) && Number.isInteger(stars) && stars >= 0 && stars <= 5;
+        const label = e && (e.label || ""), stars = e && (e.stars || 0), evv = e && e.ev != null ? e.ev : null;
+        const valid = e && typeof e.file === "string" && e.file && ["", "keep", "review", "cull"].includes(label) && Number.isInteger(stars) && stars >= 0 && stars <= 5 &&
+          (evv === null || (typeof evv === "number" && evv >= -5 && evv <= 5));
         if (!valid) {
           if (torn && n === lines.length - 1) break; // an interrupted final append
           note = `import: line ${n + 1} is not a valid label; nothing imported`; render(); return;
         }
-        if (!label && !stars) delete next[e.file]; else next[e.file] = { label, stars };
+        if (!label && !stars && evv === null) delete next[e.file]; else next[e.file] = { label, stars, ev: evv };
       }
       labels = next; store(key, labels); note = ""; render();
     });

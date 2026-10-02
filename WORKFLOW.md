@@ -86,6 +86,7 @@ an offline page instead of serving).
 | N | next unlabelled frame |
 | [ / ] | previous / next set |
 | - / = | one keeper fewer / more in the frame's set (top N by the model's rank keep, the rest cull) |
+| , / . | exposure −/+0.1 EV (< / > for ±0.5; \ resets): previewed on the page, applied in Capture One by `apply-c1 --exposure` |
 
 - **Sets:** each set is boxed, with its keeper count in the header. Use **−** / **+**
   (or **-** / **=**) to keep the top N by the model's rank and cull the rest, or the
@@ -138,6 +139,8 @@ cull apply-c1 --run ~/Pictures/2026-10-04                   # apply it
 ```
 
 It sets colour tags, keywords and your stars on the images already in your catalog.
+With `--exposure` it also sets the EV you chose in review, overwriting what Capture One
+holds; the model's suggestion applies only where Capture One's exposure is still 0.
 `--exposure` and `--crop` also apply the suggested fixes, but only to images whose
 exposure and crop are still at their defaults: edits you made in Capture One stay.
 

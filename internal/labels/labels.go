@@ -19,9 +19,10 @@ const FileName = "cull-labels.jsonl"
 
 // Entry is one frame's full state at one time. The last entry per file wins.
 type Entry struct {
-	File  string    `json:"file"`  // base name
-	Label string    `json:"label"` // keep | review | cull | "" (unlabelled)
-	Stars int       `json:"stars"` // 0-5; 0 = unrated
+	File  string    `json:"file"`         // base name
+	Label string    `json:"label"`        // keep | review | cull | "" (unlabelled)
+	Stars int       `json:"stars"`        // 0-5; 0 = unrated
+	EV    *float64  `json:"ev,omitempty"` // your exposure adjustment from review; nil = none
 	At    time.Time `json:"at"`
 }
 
@@ -38,11 +39,14 @@ func (e Entry) Validate() error {
 	if e.Stars < 0 || e.Stars > 5 {
 		return fmt.Errorf("stars %d: want 0-5", e.Stars)
 	}
+	if e.EV != nil && (*e.EV < -5 || *e.EV > 5 || *e.EV != *e.EV) {
+		return fmt.Errorf("ev %v: want -5 to +5", *e.EV)
+	}
 	return nil
 }
 
 // Empty reports whether the entry clears the frame.
-func (e Entry) Empty() bool { return e.Label == "" && e.Stars == 0 }
+func (e Entry) Empty() bool { return e.Label == "" && e.Stars == 0 && e.EV == nil }
 
 // DefaultPath is the log beside a report: one log per shoot directory, shared by
 // every report there, since labels describe photos, not a model run.

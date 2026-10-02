@@ -32,6 +32,7 @@ type OpenAI struct {
 	Stream     bool
 	MaxRetries int
 	HTTP       *http.Client
+	Debug      io.Writer // --debug: endpoint, sizes, statuses, answers; never the key
 }
 
 func NewOpenAI(baseURL, apiKey, model string) *OpenAI {
@@ -52,7 +53,8 @@ func (o *OpenAI) Call(ctx context.Context, req Request) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	return validated(ctx, req.Schema, func(ctx context.Context) (*Response, error) { return o.post(ctx, payload) })
+	debugf(o.Debug, "openai: %s; model %s, %d bytes", describeRequest(req), o.Model, len(payload))
+	return validated(ctx, req.Schema, logged(o.Debug, "openai", func(ctx context.Context) (*Response, error) { return o.post(ctx, payload) }))
 }
 
 func (o *OpenAI) body(req Request) ([]byte, error) {
@@ -160,11 +162,14 @@ func (o *OpenAI) once(ctx context.Context, payload []byte) (*Response, error) {
 	if o.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+o.APIKey)
 	}
+	debugf(o.Debug, "openai: POST %s/chat/completions (%d bytes, stream=%v)", o.BaseURL, len(payload), o.Stream)
 	resp, err := o.HTTP.Do(req)
 	if err != nil {
+		debugf(o.Debug, "openai: transport error: %v", err)
 		return nil, &transportError{err}
 	}
 	defer resp.Body.Close()
+	debugf(o.Debug, "openai: status %d", resp.StatusCode)
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		se := &statusError{code: resp.StatusCode, body: truncate(body, 500)}

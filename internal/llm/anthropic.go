@@ -30,6 +30,7 @@ type Anthropic struct {
 	Endpoint   string
 	MaxRetries int
 	HTTP       *http.Client
+	Debug      io.Writer // --debug: request sizes, statuses, retries, answers; never the key
 }
 
 func NewAnthropic(apiKey, model string) *Anthropic {
@@ -49,7 +50,8 @@ func (a *Anthropic) Call(ctx context.Context, req Request) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	return validated(ctx, req.Schema, func(ctx context.Context) (*Response, error) { return a.post(ctx, payload) })
+	debugf(a.Debug, "anthropic: %s; model %s, %d bytes", describeRequest(req), a.Model, len(payload))
+	return validated(ctx, req.Schema, logged(a.Debug, "anthropic", func(ctx context.Context) (*Response, error) { return a.post(ctx, payload) }))
 }
 
 func (a *Anthropic) body(req Request) ([]byte, error) { return json.Marshal(a.params(req)) }
@@ -102,16 +104,19 @@ func (a *Anthropic) post(ctx context.Context, payload []byte) (*Response, error)
 		req.Header.Set("x-api-key", a.APIKey)
 		req.Header.Set("anthropic-version", anthropicVersion)
 
+		debugf(a.Debug, "anthropic: POST %s (%d bytes, attempt %d)", a.Endpoint, len(payload), attempt+1)
 		resp, err := a.HTTP.Do(req)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
+			debugf(a.Debug, "anthropic: transport error: %v", err)
 			lastErr = err
 			continue
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		debugf(a.Debug, "anthropic: status %d (%d bytes back, request-id %s)", resp.StatusCode, len(body), resp.Header.Get("request-id"))
 
 		switch {
 		case resp.StatusCode == http.StatusOK:
@@ -122,6 +127,7 @@ func (a *Anthropic) post(ctx context.Context, payload []byte) (*Response, error)
 			if s, err := strconv.Atoi(resp.Header.Get("retry-after")); err == nil {
 				retryAfter = time.Duration(s) * time.Second
 			}
+			debugf(a.Debug, "anthropic: retrying in %s", backoff(attempt+1, retryAfter).Round(time.Millisecond))
 		default: // other 4xx: not retryable
 			return nil, fmt.Errorf("api status %d: %s", resp.StatusCode, truncate(body, 500))
 		}

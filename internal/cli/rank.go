@@ -152,6 +152,7 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 			fmt.Fprintf(cmd.ErrOrStderr(), "backend: %s, model: %s, %s\n", b.Name(), o.model, auth)
 			ro := so.out.newOutput(cmd, true)
 			ro.attach(&cfg)
+			ro.debugTo(b)
 
 			var out *report.Report
 			if o.batch {

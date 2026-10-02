@@ -212,6 +212,10 @@ Backends (--backend):
 			var usage eval.Usage
 			out := so.out.newOutput(cmd, true)
 			out.attach(&cfg)
+			out.debugTo(b)
+			if cfg.Escalate != nil {
+				out.debugTo(cfg.Escalate.Backend)
+			}
 			if o.batch {
 				cfg.Batch, cfg.BatchPoll = true, o.batchPoll
 				rep, usage, err = pipeline.RunBatch(cmd.Context(), cfg, b.(*llm.Anthropic))

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/jefflaplante/cull/internal/llm"
 	"github.com/jefflaplante/cull/internal/pipeline"
 	"github.com/jefflaplante/cull/internal/ui"
 )
@@ -53,6 +54,7 @@ func (o *outputOpts) level() (ui.Level, error) {
 type output struct {
 	UI     ui.Sink
 	Log    io.Writer
+	level  ui.Level
 	closed bool
 }
 
@@ -61,7 +63,25 @@ type output struct {
 func (o *outputOpts) newOutput(cmd *cobra.Command, live bool) *output {
 	l, _ := o.level() // validated in the root's PersistentPreRunE
 	s := ui.NewPlain(cmd.ErrOrStderr(), l)
-	return &output{UI: s, Log: ui.LineWriter(s, ui.Normal, ui.Info)}
+	return &output{UI: s, Log: ui.LineWriter(s, ui.Normal, ui.Info), level: l}
+}
+
+// debugTo points the backends' --debug detail at this output, when the level is debug.
+func (o *output) debugTo(backends ...llm.Backend) {
+	if o.level < ui.Debug {
+		return
+	}
+	w := ui.LineWriter(o.UI, ui.Debug, ui.Info)
+	for _, b := range backends {
+		switch b := b.(type) {
+		case *llm.Anthropic:
+			b.Debug = w
+		case *llm.ClaudeCode:
+			b.Debug = w
+		case *llm.OpenAI:
+			b.Debug = w
+		}
+	}
 }
 
 // attach routes a pipeline run's reporting through this output.

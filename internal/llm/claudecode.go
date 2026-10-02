@@ -24,6 +24,7 @@ type ClaudeCode struct {
 	Model     string
 	QuotaStop float64 // stop the run once 5-hour utilization reaches this
 	Timeout   time.Duration
+	Debug     io.Writer // --debug: the invocation (prompt and schema by length), init, quota events, answers
 
 	mu               sync.Mutex
 	resolved, pinned string // see Resolved and Pin
@@ -63,7 +64,9 @@ func (c *ClaudeCode) Call(ctx context.Context, req Request) (*Response, error) {
 	}
 	args = append(args, "--tools", "", "--no-session-persistence", "--strict-mcp-config",
 		"--setting-sources", "", "--system-prompt", req.System, "--json-schema", string(schema))
-	return validated(ctx, req.Schema, func(ctx context.Context) (*Response, error) { return c.run(ctx, args, stdin) })
+	debugf(c.Debug, "claude-code: %s; %d bytes on stdin", describeRequest(req), len(stdin))
+	debugf(c.Debug, "claude-code: %s %s", c.Bin, redactArgs(args))
+	return validated(ctx, req.Schema, logged(c.Debug, "claude-code", func(ctx context.Context) (*Response, error) { return c.run(ctx, args, stdin) }))
 }
 
 func streamJSONMessage(parts []Part) ([]byte, error) {
@@ -195,6 +198,7 @@ func (c *ClaudeCode) parse(r io.Reader) (*Response, error) {
 			if ev.Subtype != "init" {
 				continue
 			}
+			debugf(c.Debug, "claude-code: init apiKeySource=%s model=%s", ev.APIKeySource, ev.Model)
 			if ev.APIKeySource != "none" {
 				return nil, fmt.Errorf("%w: claude reported apiKeySource=%q, not the subscription; refusing to bill an API account",
 					ErrAbortRun, ev.APIKeySource)
@@ -210,6 +214,7 @@ func (c *ClaudeCode) parse(r io.Reader) (*Response, error) {
 					FiveHour: ev.RateLimitInfo.UnifiedWindows["five_hour"].Utilization,
 					SevenDay: ev.RateLimitInfo.UnifiedWindows["seven_day"].Utilization,
 				}
+				debugf(c.Debug, "claude-code: quota %s, 5-hour %.0f%%, 7-day %.0f%%", quota.Status, 100*quota.FiveHour, 100*quota.SevenDay)
 			}
 		case "result":
 			if !sawInit { // fail closed: the billing guard depends on the init event

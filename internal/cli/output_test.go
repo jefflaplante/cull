@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,5 +64,28 @@ func TestVerboseShowsStages(t *testing.T) {
 	out, _ = run(t, "scan", dir)
 	if strings.Contains(out, "scan: 1 frames") || strings.Contains(out, "focus:") {
 		t.Fatalf("default level shows verbose lines:\n%s", out)
+	}
+}
+
+func TestDebugReachesTheBackend(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+
+	out, err := run(t, "judge", "--debug", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir)
+	if err != nil {
+		t.Fatalf("judge: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "claude-code: init apiKeySource=none") || !strings.Contains(out, "--system-prompt <") {
+		t.Fatalf("--debug lacks backend detail:\n%s", out)
+	}
+	out, err = run(t, "judge", "--fresh", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir)
+	if err != nil {
+		t.Fatalf("judge: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "claude-code: init") {
+		t.Fatalf("backend detail without --debug:\n%s", out)
 	}
 }

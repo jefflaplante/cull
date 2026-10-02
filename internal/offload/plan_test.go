@@ -230,8 +230,12 @@ func TestPlanChecksFreeSpace(t *testing.T) {
 	card(t, src, map[string]spec{"DCIM/M1.DNG": {size: 5000}})
 	o := opts(t, src)
 	o.freeSpace = func(string) (uint64, error) { return 5000, nil }
-	if _, err := MakePlan(o); err == nil || !strings.Contains(err.Error(), "free") {
+	p, err := MakePlan(o)
+	if err == nil || !strings.Contains(err.Error(), "free") {
 		t.Fatalf("free space not checked: %v", err)
+	}
+	if p == nil || p.Bytes != 5000 { // the plan still comes back, for --dry-run to show
+		t.Fatalf("no plan with the space error: %+v", p)
 	}
 }
 
@@ -263,5 +267,17 @@ func TestPlanCopiesOnlyWhereMissing(t *testing.T) {
 	f := p.Files[0]
 	if f.Skip != "" || len(f.To) != 1 || f.To[0] != p.Dests[1] {
 		t.Fatalf("want a copy to the backup only, got skip=%q to=%v", f.Skip, f.To)
+	}
+}
+
+// A destination that doesn't exist yet is measured on the nearest folder that does.
+func TestPlanDestNotYetCreated(t *testing.T) {
+	src := t.TempDir()
+	card(t, src, map[string]spec{"DCIM/M1.DNG": {}})
+	o := opts(t, src)
+	o.freeSpace = nil // real statfs
+	o.Dest = filepath.Join(t.TempDir(), "Pictures", "new")
+	if _, err := MakePlan(o); err != nil {
+		t.Fatal(err)
 	}
 }

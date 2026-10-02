@@ -82,6 +82,7 @@ go install github.com/jefflaplante/cull/cmd/cull@latest
 ## Quick start
 
 ```sh
+cull offload /Volumes/LEICA\ M ~/Pictures --name shoot   # card → verified copy → free scan
 cull scan ~/Pictures/shoot                # free: previews, faces, EXIF; no model calls
 cull judge --estimate ~/Pictures/shoot    # free: what judging would cost
 cull judge ~/Pictures/shoot               # model assessment + decisions + set ranking
@@ -91,6 +92,42 @@ cull decide --write-xmp --move-culled ~/Pictures/shoot   # sidecars; culls into 
 
 Everything is recorded in `cull-report.json` beside the photos. `cull restore <dir>`
 undoes `--move-culled`.
+
+## Offload: card to shoot folder
+
+`cull offload <card>... <dest>` copies every DNG on the cards into one folder per run,
+`<dest>/<YYYY-MM-DD> <name>/`. It then scans that folder, which is free.
+
+- **The cards are only read.** Nothing on them is written, renamed or deleted.
+- **The folder date** comes from the earliest capture date. Camera clocks get set wrong,
+  so the plan says which file it came from; use `--date` to set it yourself. A run is
+  never split by day.
+- **Planned first.** Every name, skip and refusal is decided before any byte is written:
+  - a file name already in the folder with different content is refused (use `--rename`);
+  - too little free space on either destination is refused.
+
+  `--dry-run` prints the plan and stops.
+- **Verified copies.** The card is read once:
+  - the SHA-256 is taken during that read, and the same read feeds `--backup` too;
+  - each copy goes to a hidden temp file, is synced, dropped from the page cache, and read
+    back from the disk;
+  - only a matching copy gets its real name, and nothing existing is ever replaced;
+  - a read or write error retries the file twice, then lists it as failed.
+- **"Safe to format"** prints only when all of these hold:
+  - every file is verified on every destination;
+  - each drive's own write cache was flushed (`F_FULLFSYNC`);
+  - no file was merely "already there" without ever being checked against the card. Use
+    `--checksum` to check those.
+- **Re-running is safe** after a pulled card or Ctrl-C. Only what's missing is copied:
+  `cull-offload.jsonl` records each verified file. `--verify <folder>` re-checks copies
+  later against those checksums, for example before formatting the next day.
+- **`--rename "{date}_{name}_{n:4}"`** renames as it copies. Tokens: `{date}` (YYYYMMDD),
+  `{name}`, `{orig}` (camera name), `{n}` and `{n:W}`. The counter continues from the
+  folder's largest number, so a second card carries on from the first. Frames are
+  numbered in camera file order, not by capture time.
+- **Speed (measured on an M11-P card over USB):** the card reads at about 280 MB/s. A
+  verified offload runs at about 216 MB/s, against 264 MB/s for plain `cp` with no
+  checks: about 5 minutes for a 63 GB card.
 
 ## Commands
 

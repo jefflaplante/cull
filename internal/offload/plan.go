@@ -67,7 +67,9 @@ const mtimeWindow = 2 * time.Second
 // reserve is the free space kept beyond the bytes to copy: 1% plus 512 MB.
 func reserve(n int64) uint64 { return uint64(n) + uint64(n)/100 + 512<<20 }
 
-// MakePlan scans the sources and decides every name, skip and refusal. It writes nothing.
+// MakePlan scans the sources and decides every name, skip and refusal. It writes
+// nothing. When the only problem is free space, the plan comes back with the error,
+// so a dry run can still show it.
 func MakePlan(o Options) (*Plan, error) {
 	if len(o.Sources) == 0 || o.Dest == "" {
 		return nil, errors.New("offload needs at least one source and a destination")
@@ -114,7 +116,7 @@ func MakePlan(o Options) (*Plan, error) {
 			return nil, fmt.Errorf("free space on %s: %w", r, err)
 		}
 		if need := reserve(p.Bytes); n < need {
-			return nil, fmt.Errorf("not enough free space on %s: %s free, %s needed (%s to copy plus a margin)",
+			return p, fmt.Errorf("not enough free space on %s: %s free, %s needed (%s to copy plus a margin)",
 				r, gb(int64(n)), gb(int64(need)), gb(p.Bytes))
 		}
 	}
@@ -405,12 +407,23 @@ func patternRE(pat, date, name string) *regexp.Regexp {
 	return regexp.MustCompile(b.String())
 }
 
+// statfsFree is the space free to unprivileged users on path's volume; a path that
+// doesn't exist yet (the shoot folder's parents) is measured at its nearest existing
+// ancestor, the volume it will be created on.
 func statfsFree(path string) (uint64, error) {
-	var s syscall.Statfs_t
-	if err := syscall.Statfs(path, &s); err != nil {
-		return 0, err
+	p := filepath.Clean(path)
+	for {
+		var s syscall.Statfs_t
+		err := syscall.Statfs(p, &s)
+		if err == nil {
+			return s.Bavail * uint64(s.Bsize), nil
+		}
+		parent := filepath.Dir(p)
+		if !errors.Is(err, fs.ErrNotExist) || parent == p {
+			return 0, err
+		}
+		p = parent
 	}
-	return s.Bavail * uint64(s.Bsize), nil
 }
 
 func gb(n int64) string { return fmt.Sprintf("%.1f GB", float64(n)/1e9) }

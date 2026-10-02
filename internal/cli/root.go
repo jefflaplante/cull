@@ -69,7 +69,7 @@ then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.`,
 	for _, c := range []*cobra.Command{scan, judge, rank, decide} {
 		so.registerSeq(c.Flags())
 	}
-	root.AddCommand(scan, judge, rank, decide, newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newStatusCmd(&so), newImportLabelsCmd(&so), newVersionCmd())
+	root.AddCommand(newOffloadCmd(&so), scan, judge, rank, decide, newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newStatusCmd(&so), newImportLabelsCmd(&so), newVersionCmd())
 	return root
 }
 

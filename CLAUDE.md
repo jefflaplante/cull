@@ -67,6 +67,13 @@ make vet
   `WriteSidecar`) used by cull, decide, the server; apply-c1 mirrors it
 - `internal/calib` — confusion matrix, rates, sharpness-threshold sweep
 - `internal/c1` — Capture One AppleScript generator, read-only probe, osascript runner
+- `internal/offload` — `cull offload`: plan.go (hygienic card walk, one folder per run,
+  names/--rename counter, skips, clashes, free space; nothing written), copy.go (single-read
+  tee, SHA-256 while reading, F_NOCACHE temp, evict + mincore check, uncached verify,
+  link-based no-replace rename), run.go (retries, verified-only manifest
+  `cull-offload.jsonl`, F_FULLFSYNC per destination, `Safe`, `Verify`), sys_darwin.go
+  (fcntl/msync/mincore; no-ops elsewhere). `go test -tags cardbench` benchmarks against
+  `cp` on the LEICA M card.
 - `internal/report` — JSON source of truth (schema v4)
 - `internal/ui` — verbosity levels and progress events (`Sink`): plain lines, or the Bubble Tea
   live view on an interactive terminal (live.go); `-q`/`-v`/`--debug`/`--plain` in cli/output.go
@@ -318,6 +325,10 @@ balance`, but no run has tested them yet.
   - So EXIF times can't date or split folders, or order frames. Offload makes one folder
     per run (`--date` overrides) and numbers frames in file-name order.
   - The file times match EXIF exactly, offset by the time zone, so they're no better.
+- Offload benchmark, 20 real frames per tool, read from the card uncached: the `cull`
+  engine runs at 216 MB/s (hash, uncached write, evict, verify from disk, F_FULLFSYNC);
+  `cp` runs at 264 MB/s. The gap is the verify re-read, which isn't overlapped with the
+  next file's card read. A dry run over 992 frames plans in about 1 s.
 - Page cache (internal SSD, `mincore`):
   - a normal write leaves every page cached, so a re-read verifies RAM;
   - with `F_NOCACHE` on the write handle, 0 of 4097 pages stayed cached in a quiet probe;

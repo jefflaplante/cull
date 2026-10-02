@@ -94,6 +94,13 @@ make vet
   on a clone of M1103817 with a cull-written sidecar): `xmp:Rating` stars and
   the `xmp:Label` colour showed up. So write sidecars before import; after import,
   changes go through `apply-c1`.
+- **Capture One 16.7.2 ignores `crs:Exposure2012` in a sidecar on import** (user-tested
+  2026-10-01, `photos/c1-ev-test/`). Two copies of M1103823 were imported:
+  - A carried cull's exact sidecar output;
+  - B also carried `crs:Version` and `crs:ProcessVersion`.
+
+  Both got their stars, green label and keyword, and neither got the +1.00 EV. Exposure
+  edits must go through `apply-c1` (AppleScript) after import.
 - Lightroom Classic ignores sidecars for DNG files (uses embedded XMP).
 - Sidecar naming convention is `L1000123.xmp`, not `L1000123.DNG.xmp`.
 

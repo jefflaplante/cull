@@ -101,6 +101,10 @@ make vet
 
   Both got their stars, green label and keyword, and neither got the +1.00 EV. Exposure
   edits must go through `apply-c1` (AppleScript) after import.
+- **AppleScript exposure works on Capture One 16.7.2** (user-run 2026-10-01,
+  `photos/c1-ev-test/set-ev-A.applescript`): `set exposure of adjustments of v to 1.0`
+  on an imported image's variant read back 0.0 → 1.0. An image's `name` includes the
+  extension ("EVTEST_A.DNG").
 - Lightroom Classic ignores sidecars for DNG files (uses embedded XMP).
 - Sidecar naming convention is `L1000123.xmp`, not `L1000123.DNG.xmp`.
 
@@ -332,8 +336,9 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
   rely on it; not yet checked on a live call.
 
 - Capture One runtime details not in its dictionary: color-tag numbering (code assumes
-  1 red, 3 yellow, 4 green), whether image `name` includes the extension (script tries both),
-  orientation of `dimensions`/`crop`, `make new keyword`. Run `apply-c1 --probe` first.
+  1 red, 3 yellow, 4 green), orientation of `dimensions`/`crop`, `make new keyword`.
+  (`name` includes the extension and `exposure` is settable: verified 2026-10-01.) Run
+  `apply-c1 --probe` first.
 
 - pigo Q threshold (~80 separated true/false on 12 frames) needs calibration on more
   shoots.

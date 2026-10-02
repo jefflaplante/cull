@@ -132,7 +132,12 @@ any byte is written. `--dry-run` prints the plan: files, GB, folders, skips.
   the card's hash is required.
   - Measured 2026-10-02 on the internal SSD (64 MB, `mincore`): a normal write leaves all
     4097 pages cached, so a naive re-read checks RAM. With `F_NOCACHE` on the write
-    handle, none stay cached, so the verify read has to reach the device.
+    handle, none stayed cached in a quiet probe.
+  - **But under load (the whole test package running), the second 2 MiB of each 4 MiB
+    write sometimes stayed cached.** So after the fsync, the copy is explicitly evicted
+    (`msync(MS_INVALIDATE)` on a mapping). `mincore` must then show 0 pages resident
+    before the verify read (up to 5 tries), or the file fails. It is never verified
+    against RAM.
   - The drive's own cache can still answer, and only `F_FULLFSYNC` empties it. This is the
     limit of every source-against-copy check, and it's stated, not hidden.
 - **Rename into place** only after verifying, then sync the folder entry.

@@ -318,8 +318,13 @@ balance`, but no run has tested them yet.
   - So EXIF times can't date or split folders, or order frames. Offload makes one folder
     per run (`--date` overrides) and numbers frames in file-name order.
   - The file times match EXIF exactly, offset by the time zone, so they're no better.
-- Page cache (internal SSD, 64 MB, `mincore`): a normal write leaves every page cached,
-  so a re-read verifies RAM. With `F_NOCACHE` on the write handle, 0 of 4097 pages stay cached.
+- Page cache (internal SSD, `mincore`):
+  - a normal write leaves every page cached, so a re-read verifies RAM;
+  - with `F_NOCACHE` on the write handle, 0 of 4097 pages stayed cached in a quiet probe;
+  - but under load, the second 2 MiB of each 4 MiB write sometimes stayed cached.
+  - `msync(MS_INVALIDATE)` on a mapping evicted every page of a fully cached 80 MB file
+    (5/5 trials). Offload evicts and checks 0 resident before every verify read
+    (`offload.dropCache`).
 
 ### Sequences: look distances on the 17 sample frames (2026-09-28)
 

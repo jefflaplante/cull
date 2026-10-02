@@ -197,3 +197,17 @@ itself hasn't been driven in a browser yet, because the Chrome extension wasn't 
   - Alias `Luma` to the Y plane at orientation 1.
   - `pick` should `DecodeConfig` candidates rather than read them all.
   - Run the ±18° pigo passes only when 0° finds nothing confident.
+
+## Part 1 output (2026-10-02): deferred minors
+
+- The plain sink prints "done (8)" for an interrupted stage; the live view says "stopped".
+- Three default-level lines now carry "warning: " (checkpoint failed, set not ranked,
+  reversed ranking failed).
+- `-q`/`-v`/`--debug`/`--plain` are accepted no-ops on `decide`, `review`, `restore`,
+  `calibrate` and `apply-c1`, but the help says "every command".
+- The openai backend's `--debug` prints the base URL verbatim, so userinfo in it would show.
+- `liveModel.width` is stored but never used; the bar is a fixed 30 columns.
+- The flush-on-close test covers only the non-TTY renderer; the TTY path was checked by
+  hand under a pty.
+- `main` never releases its SIGINT handler, so a second Ctrl-C can't force-quit a hung run.
+- `judge --batch` has no progress bar, by ruling: results arrive at the end of each round.

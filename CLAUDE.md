@@ -265,6 +265,20 @@ compared pairwise.
   its own overhead. Re-check on hard, faceless frames, where the full frame carries
   more of the judgement.
 
+### White balance from the model: probed and dropped (2026-10-01)
+
+A throwaway probe sent Sonnet a white-balance-only question (claude-code backend): the full
+frame plus the face crop, with the status good, cast or intentional, and a direction.
+- On the 17 sample frames (open-shade forest): 16 good; M1104119 a slight magenta cast.
+- Casts added in linear light:
+  - about 1000 K wrong: 0/4 caught (warm, cool, green, magenta);
+  - about 2000 K wrong: 3/4 caught in the right direction, all called "slight". Green was
+    missed, put down to foliage bounce.
+
+It catches only gross casts and is blind to green in foliage, so it isn't worth wiring in.
+Capture One's dictionary does expose `temperature`, `tint` and `autoadjust … adjust white
+balance`, but no run has tested them yet.
+
 ### Camera support (tested 2026-09-29 on 22 raw.pixls.us samples with `cull scan --raw-clip`)
 
 - `cull` judges only the embedded JPEG preview, so support depends on the camera's DNG

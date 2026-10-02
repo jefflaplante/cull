@@ -76,46 +76,102 @@ remains for anything that isn't a terminal.
 
 ## Part 2: Offload and folder sorting
 
-### `cull offload <card> <dest>`
+### `cull offload <card>... <dest>`
 
 ```
-cull offload /Volumes/LEICA ~/Pictures --name "Smith wedding" --backup /Volumes/Backup/Pictures \
-     [--rename "{date}_{name}_{n:4}"] [--project …] [--event …] [--location …] [--keyword …] [--no-scan]
+cull offload /Volumes/LEICA [/Volumes/M11-P] ~/Pictures --name "Smith wedding" --backup /Volumes/Backup/Pictures \
+     [--rename "{date}_{name}_{n:4}"] [--checksum] [--dry-run] [--jobs N] [--verify]
+     [--project …] [--event …] [--location …] [--keyword …] [--no-scan]
 ```
 
-**Finding frames:** every DNG under `<card>`, recursively (DCIM). The card is only read,
-never written, renamed or deleted.
+Held to rsync's standard and beyond it where a card that is about to be formatted needs
+more. The sources are only ever read: never written, renamed or deleted.
 
-**Shoot folders:** `<dest>/<YYYY-MM-DD>[ <name>]/`, dated by each frame's capture time
-(local date). A card spanning days fills one folder per day.
+**1. Plan before copying** (like rsync's file list):
+- list every regular DNG under each source, recursively;
+- skip AppleDouble `._*`, `.Trashes` and `.Spotlight-*`;
+- never follow a symlink;
+- read each frame's capture date from EXIF, falling back to the file's modification time;
+- work out the shoot folder `<dest>/<YYYY-MM-DD>[ <name>]/` (one per capture day) and the
+  destination name (the camera name, or the `--rename` pattern);
+- detect collisions;
+- check free space on the destination and the backup with `statfs`: the bytes to copy plus
+  a margin.
 
-**Copy and verify, for each frame:**
-1. Write to a temporary name in the shoot folder, sync it, then rename it into place.
-2. Verify by re-reading the copy: same size, and SHA-256 equal to the card file's.
-3. With `--backup`, do the same into the same layout under the backup root.
-4. A failed verification removes the copy and reports an error. The run continues, and
-   exits non-zero at the end.
+Every refusal (a collision, too little space, an unreadable source) happens here, before
+any byte is written. `--dry-run` prints the plan: files, GB, folders, skips.
 
-**Names:** camera filenames are kept by default.
-- A name already in the folder with the **same checksum** was already copied, and is
-  skipped. This makes offload resumable, and safe to re-run on the same card.
-- The same name with **different content** (two bodies, or a counter rollover) is
-  refused for that file. The error names both files and suggests `--rename`.
+**2. Skip what is already there:**
+- **The quick check, as rsync's default:** the same size and modification time as a file
+  already in the shoot folder means it's skipped. The time comparison allows 2 s, because
+  exFAT and FAT32 timestamps are coarse and can be stored in local time (rsync's
+  `--modify-window` for FAT).
+- **`--checksum`** compares by SHA-256 instead.
+- **Renamed files** are matched through the manifest's checksums, so re-offloading a card
+  never copies a frame twice.
+- **The same camera name with different content** is refused in the plan, with a pointer
+  to `--rename`.
 
-**`--rename <pattern>`:**
-- **Tokens:**
+**3. Copy, for each file in the card's own order:**
+- **Read the card once.** A reader goroutine fills large buffers (about 4 MB), and a writer
+  goroutine streams them to every destination at once (the main folder and `--backup`), so
+  reading and writing overlap.
+- **Hash while streaming.** The SHA-256 is computed during that single read of the card.
+- **Write to a temp file:** each destination writes `.<name>.cull-<random>.tmp` in the
+  final folder, as rsync does, then:
+  - `fsync` it;
+  - set its modification time to the card file's, like rsync `-t`;
+  - set permissions to `0644`, not FAT's `0777`.
+- **Verify the disk, not the cache.** Each temp file is re-read with `F_NOCACHE` (macOS),
+  so the bytes come from the device and not the page cache, and is hashed. A match with
+  the card's hash is required.
+- **Rename into place** only after verifying, then sync the folder entry.
+- **Retry:** a mismatch or a read error deletes the temp file and retries from the card
+  (up to 2 retries, with backoff). If it still fails, the file is recorded as failed and
+  the run continues; the exit status is non-zero at the end.
+- **The manifest** `cull-offload.jsonl` in the shoot folder gets a line only after a file
+  verifies, synced line by line. It holds the source path, the destination names, size,
+  SHA-256 and time.
+
+**4. Concurrency:** `--jobs N`, default 1. SD cards read fastest as one sequential stream;
+parallel reads make the card seek back and forth. A higher value helps only fast media
+such as CFexpress.
+
+**5. Interruption:**
+- **Ctrl-C** finishes or abandons the current file (its temp files are removed), keeps
+  everything already verified, and exits non-zero.
+- **A card pulled mid-run** (EIO/ENXIO) is handled the same way.
+- **A re-run** resumes: the quick check or the manifest skips what's done, and stale
+  `.cull-*.tmp` files are removed.
+
+**6. "Safe to format":**
+- At the end, one `F_FULLFSYNC` per destination volume flushes the drive's own write cache.
+  Plain `fsync` on macOS doesn't. The shoot folders' entries are synced too.
+- Only when every planned file is verified on every destination, and these syncs
+  succeeded, does it print: **"all N files verified on <dest> and <backup>: safe to format
+  the card"**.
+- Otherwise it lists what failed and never says that.
+- **`cull offload --verify <shoot-folder>`** re-hashes every manifest entry later, for
+  example before reformatting the card the next day.
+
+**7. Progress and summary:**
+- progress in bytes, with throughput and ETA (Part 1's view);
+- the summary gives copied, skipped as already present, failed, total GB and MB/s per
+  destination.
+
+**Names:**
+- **Kept by default.**
+- **`--rename <pattern>` tokens:**
   - `{date}` is the capture date as YYYYMMDD;
   - `{name}` is `--name`, with spaces as `_`;
   - `{orig}` is the camera's file stem;
   - `{n}` or `{n:W}` is the counter, zero-padded to W digits.
-- **The counter continues across cards:** the next `n` is 1 + the largest `n` among files
-  in the shoot folder that match the pattern.
-  - Within one card, frames are numbered by capture time, then camera filename.
-  - So card 2, 3 and so on carry on where the last one stopped.
-- **The manifest** `cull-offload.jsonl` in the shoot folder records one line per copied
-  file: card path, original name, new name, size, SHA-256, time.
-  - A re-run skips any frame whose checksum is already in the manifest. That holds even
-    when renamed, so re-offloading a card never copies a frame twice.
+- **The counter continues across cards:** the next `n` is 1 + the largest `n` among the
+  shoot folder's files matching the pattern. Within one run, frames are numbered by capture
+  time, then source path, so card 2, 3 and so on carry on where the last stopped.
+
+**Not done:** rsync's rolling-checksum delta transfer and compression. Neither helps a
+local copy of new files; rsync itself uses whole-file copies for local disks.
 
 **After copying:** it runs `scan` on each shoot folder, which is free: junk pre-filter,
 previews, faces, sets. Then it prints the next step, `cull judge --estimate <folder>`.
@@ -143,21 +199,34 @@ previews, faces, sets. Then it prints the next step, `cull judge --estimate <fol
 
 ### Testing
 
-- **Offload, against a fake card directory:**
-  - layout by date;
-  - the checksum is verified, and a corrupted copy (a test hook) is removed and reported;
-  - a re-run skips everything;
-  - a same name with different content is refused;
-  - the rename counter continues across two "cards";
+**Offload** (against a fake card directory):
+- **Plan:**
+  - layout by capture day;
+  - a collision is refused before any write;
+  - too little free space is refused before any write (a test hook for `statfs`);
+  - `--dry-run` writes nothing.
+- **Copy:**
+  - injected corruption between write and verify is caught: retried, then failed, with
+    nothing left under the real name;
+  - a source read error mid-file is injected, and must be retried and recovered;
+  - an interruption leaves no partial file under a real name, and the re-run resumes;
+  - the quick check honours the 2 s window;
+  - `--checksum` skips identical files;
   - the manifest skips renamed duplicates;
-  - backup;
-  - the card is unchanged, shown by hashing the card tree before and after.
-- **Sorting:**
-  - keep, review and cull land in their folders;
-  - re-sorting after a label change moves the frame;
-  - `restore` puts everything back;
-  - reconcile after a simulated crash;
-  - never overwrites.
+  - the rename counter continues across two "cards";
+  - backup verified separately;
+  - "safe to format" appears only when everything verified;
+  - modification time and `0644` are kept;
+  - the card tree is byte-for-byte unchanged, shown by hashing it before and after.
+- **`--verify`** finds a copy corrupted later.
+- **Benchmark:** offload against `cp` on 2 GB of large files, with the result recorded.
+
+**Sorting:**
+- keep, review and cull land in their folders;
+- re-sorting after a label change moves the frame;
+- `restore` puts everything back;
+- reconcile after a simulated crash;
+- never overwrites.
 
 ---
 

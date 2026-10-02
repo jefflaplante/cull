@@ -68,6 +68,8 @@ make vet
 - `internal/calib` — confusion matrix, rates, sharpness-threshold sweep
 - `internal/c1` — Capture One AppleScript generator, read-only probe, osascript runner
 - `internal/report` — JSON source of truth (schema v4)
+- `internal/ui` — verbosity levels and progress events (`Sink`): plain lines, or the Bubble Tea
+  live view on an interactive terminal (live.go); `-q`/`-v`/`--debug`/`--plain` in cli/output.go
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default
 - `internal/config` — API key resolution
 
@@ -81,7 +83,10 @@ make vet
   only assesses. Keeps decisions deterministic, auditable, and tunable.
 - Don't run `judge` on real photos without asking first: it spends money.
 - Dependencies: stdlib plus cobra, and pigo `core` (face detection; justified in the
-  2026-09-26 spec). Justify anything else.
+  2026-09-26 spec), and Charm's Bubble Tea v2 / Bubbles / Lip Gloss (+ `x/term`) for the
+  live progress view on terminals (2026-10-02: a live view of a 1000-frame, multi-hour run
+  was asked for; non-terminal output stays plain lines). Bubble Tea v2.0.10 requires
+  Go 1.26. Justify anything else.
 - Tests use synthetic fixtures. Never commit real images.
 
 ## Verified facts

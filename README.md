@@ -64,7 +64,7 @@ Tested on 22 sample files from [raw.pixls.us](https://raw.pixls.us) with
 
 ## Install
 
-Requires Go 1.22+.
+Requires Go 1.26+ (Bubble Tea v2, the live progress view, needs it).
 
 ```sh
 make build                                            # bin/cull, version stamped from git
@@ -396,8 +396,12 @@ includes subfolders.
 **Verbosity** (every command): `-q/--quiet` prints only warnings, errors and the final
 summary; the default adds progress and a line per frame; `-v/--verbose` adds per-stage
 and per-call detail; `--debug` adds backend events and raw model answers (never
-credentials). `--log-level quiet|normal|verbose|debug` is the long form. `--plain` keeps
-plain lines on a terminal.
+credentials). `--log-level quiet|normal|verbose|debug` is the long form.
+
+On an interactive terminal, `scan`, `judge` and `rank` show a live view: a progress bar
+per stage with an ETA, keep/review/cull tallies, spend and any warnings, with each
+frame's line printed above it. Piped or redirected output (and `--plain`, and `-q`) stays
+plain lines. Ctrl-C works as before: in-flight frames finish, the report is saved.
 
 **Image** (`scan`, `judge`):
 - `--max-edge` (1024) sets the size of the full frame sent to the model. It was

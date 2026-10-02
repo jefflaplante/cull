@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestVerbosityFlagConflicts(t *testing.T) {
@@ -87,5 +90,33 @@ func TestDebugReachesTheBackend(t *testing.T) {
 	}
 	if strings.Contains(out, "claude-code: init") {
 		t.Fatalf("backend detail without --debug:\n%s", out)
+	}
+}
+
+func TestNoLiveViewWithoutTerminal(t *testing.T) {
+	defer func(f func(io.Writer) bool) { outputIsTerminal = f }(outputIsTerminal)
+	cmd := &cobra.Command{}
+	cmd.SetErr(io.Discard)
+	cases := []struct {
+		name     string
+		terminal bool
+		opts     outputOpts
+		live     bool
+		want     bool
+	}{
+		{"not a terminal", false, outputOpts{}, true, false},
+		{"terminal", true, outputOpts{}, true, true},
+		{"terminal, --plain", true, outputOpts{plain: true}, true, false},
+		{"terminal, -q", true, outputOpts{quiet: true}, true, false},
+		{"terminal, short command", true, outputOpts{}, false, false},
+	}
+	for _, c := range cases {
+		outputIsTerminal = func(io.Writer) bool { return c.terminal }
+		o := c.opts
+		out := o.newOutput(cmd, c.live)
+		if out.live != c.want {
+			t.Errorf("%s: live=%v, want %v", c.name, out.live, c.want)
+		}
+		out.Close()
 	}
 }

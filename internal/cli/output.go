@@ -3,6 +3,9 @@ package cli
 import (
 	"errors"
 	"io"
+	"os"
+
+	"github.com/charmbracelet/x/term"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -55,15 +58,37 @@ type output struct {
 	UI     ui.Sink
 	Log    io.Writer
 	level  ui.Level
+	live   bool // the live terminal view
 	closed bool
+}
+
+// outputIsTerminal reports whether w is an interactive terminal (a test hook); unlike
+// a char-device check it is false for /dev/null, and for a terminal of unknown size.
+var outputIsTerminal = func(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok || !term.IsTerminal(f.Fd()) {
+		return false
+	}
+	cols, rows, err := term.GetSize(f.Fd()) // a 0x0 pty has no room to draw the view
+	return err == nil && cols > 0 && rows > 0
 }
 
 // newOutput builds the command's output. live asks for the live terminal view where
 // it is allowed (long-running commands only).
 func (o *outputOpts) newOutput(cmd *cobra.Command, live bool) *output {
 	l, _ := o.level() // validated in the root's PersistentPreRunE
-	s := ui.NewPlain(cmd.ErrOrStderr(), l)
-	return &output{UI: s, Log: ui.LineWriter(s, ui.Normal, ui.Info), level: l}
+	w := cmd.ErrOrStderr()
+	var s ui.Sink
+	isLive := false
+	if live && !o.plain && l > ui.Quiet && outputIsTerminal(w) {
+		if ls, err := ui.NewLive(w, l); err == nil {
+			s, isLive = ls, true
+		}
+	}
+	if s == nil {
+		s = ui.NewPlain(w, l)
+	}
+	return &output{UI: s, Log: ui.LineWriter(s, ui.Normal, ui.Info), level: l, live: isLive}
 }
 
 // debugTo points the backends' --debug detail at this output, when the level is debug.

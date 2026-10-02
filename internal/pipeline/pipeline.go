@@ -25,6 +25,7 @@ import (
 	"github.com/jefflaplante/cull/internal/llm"
 	"github.com/jefflaplante/cull/internal/rawclip"
 	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/ui"
 )
 
 type Config struct {
@@ -72,7 +73,8 @@ type Config struct {
 	pinner      llm.ModelPinner                     // the backend, when its model is an alias: finishRun records what it resolved to
 	detect      func(*imageprep.Frame) []focus.Face // test hook; nil = pigo
 	CheckpointN int
-	Log         io.Writer
+	Log         io.Writer // Normal-level lines (the CLI backs it with UI)
+	UI          ui.Sink   // structured progress events; nil = plain lines through Log
 }
 
 // Escalation re-evaluates frames whose first assessment matches On (sharpness

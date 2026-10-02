@@ -30,6 +30,7 @@ type sharedOpts struct {
 	landedWithSubject bool
 	seqGap            time.Duration
 	seqLook           float64
+	out               outputOpts
 }
 
 func NewRootCmd() *cobra.Command {
@@ -55,6 +56,11 @@ then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.`,
 	pf := root.PersistentFlags()
 	pf.StringVarP(&so.report, "report", "o", "", "report path (default <dir>/cull-report.json)")
 	pf.BoolVarP(&so.recursive, "recursive", "r", false, "recurse into subdirectories")
+	so.out.register(pf)
+	root.PersistentPreRunE = func(*cobra.Command, []string) error {
+		_, err := so.out.level()
+		return err
+	}
 
 	scan, judge, rank, decide := newScanCmd(&so), newCullCmd(&so), newRankCmd(&so), newDecideCmd(&so)
 	for _, c := range []*cobra.Command{scan, judge} {

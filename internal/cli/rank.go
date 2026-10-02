@@ -150,7 +150,8 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 			cfg.MaxCost = o.maxCost
 			cfg.Concurrency = o.backendFlags.concurrencyOrDefault(o.concurrency)
 			fmt.Fprintf(cmd.ErrOrStderr(), "backend: %s, model: %s, %s\n", b.Name(), o.model, auth)
-			cfg.Log = cmd.ErrOrStderr()
+			ro := so.out.newOutput(cmd, true)
+			ro.attach(&cfg)
 
 			var out *report.Report
 			if o.batch {
@@ -159,6 +160,7 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 			} else {
 				out, err = pipeline.Rank(cmd.Context(), cfg, b, o.force)
 			}
+			ro.Close()
 			printSummary(cmd, cfg.ReportPath, out, eval.Usage{}, b.Name(), o.batch)
 			if errors.Is(err, llm.ErrBudget) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "stopped at --max-cost; rerun (and raise --max-cost) to rank the rest")

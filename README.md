@@ -393,6 +393,12 @@ its sidecar into a `culled/` folder beside it.
 **Global** (every command): `-o/--report` sets the report path; `-r/--recursive`
 includes subfolders.
 
+**Verbosity** (every command): `-q/--quiet` prints only warnings, errors and the final
+summary; the default adds progress and a line per frame; `-v/--verbose` adds per-stage
+and per-call detail; `--debug` adds backend events and raw model answers (never
+credentials). `--log-level quiet|normal|verbose|debug` is the long form. `--plain` keeps
+plain lines on a terminal.
+
 **Image** (`scan`, `judge`):
 - `--max-edge` (1024) sets the size of the full frame sent to the model. It was
   1568 before 2026-10-01: 1024 cut input tokens by 16% with verdicts unchanged.

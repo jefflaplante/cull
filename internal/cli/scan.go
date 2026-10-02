@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/jefflaplante/cull/internal/pipeline"
 )
 
 func newScanCmd(so *sharedOpts) *cobra.Command {
@@ -29,7 +31,10 @@ Use it to confirm the previews are large enough for focus judgement, and with
 			cfg.Concurrency = concurrency
 			cfg.RawClip = rawClip
 			cfg.Fresh = fresh
-			rep, usage, err := runPipeline(cmd, cfg, nil)
+			out := so.out.newOutput(cmd, true)
+			out.attach(&cfg)
+			rep, usage, err := pipeline.Run(cmd.Context(), cfg, nil)
+			out.Close()
 			printSummary(cmd, cfg.ReportPath, rep, usage, "", false)
 			if rep != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), ScanSummary(rep))

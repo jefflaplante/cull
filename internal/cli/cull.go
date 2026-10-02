@@ -210,12 +210,15 @@ Backends (--backend):
 
 			var rep *report.Report
 			var usage eval.Usage
+			out := so.out.newOutput(cmd, true)
+			out.attach(&cfg)
 			if o.batch {
-				cfg.Batch, cfg.BatchPoll, cfg.Log = true, o.batchPoll, cmd.ErrOrStderr()
+				cfg.Batch, cfg.BatchPoll = true, o.batchPoll
 				rep, usage, err = pipeline.RunBatch(cmd.Context(), cfg, b.(*llm.Anthropic))
 			} else {
-				rep, usage, err = runPipeline(cmd, cfg, b)
+				rep, usage, err = pipeline.Run(cmd.Context(), cfg, b)
 			}
+			out.Close()
 			printSummary(cmd, cfg.ReportPath, rep, usage, b.Name(), o.batch)
 			if errors.Is(err, llm.ErrBudget) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "stopped at --max-cost; rerun with --resume (and a higher --max-cost) to continue")
@@ -311,11 +314,6 @@ func rate(batch bool) string {
 		return "batch price (50%)"
 	}
 	return "list price"
-}
-
-func runPipeline(cmd *cobra.Command, cfg pipeline.Config, b llm.Backend) (*report.Report, eval.Usage, error) {
-	cfg.Log = cmd.ErrOrStderr()
-	return pipeline.Run(cmd.Context(), cfg, b)
 }
 
 func printSummary(cmd *cobra.Command, path string, rep *report.Report, usage eval.Usage, backend string, batch bool) {

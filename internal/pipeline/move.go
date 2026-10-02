@@ -14,36 +14,102 @@ import (
 	"github.com/jefflaplante/cull/internal/xmp"
 )
 
-// CulledDir is the folder, next to the frames, that --move-culled moves culls
-// into. Discover skips it, so resumed and recursive runs never re-process them.
-const CulledDir = "culled"
+// The folders, beside a frame's home, that frames are moved into: CulledDir by
+// --move-culled, the sort folders by --sort. Discover skips all of them, so resumed
+// and recursive runs never re-process moved frames.
+const (
+	CulledDir = "culled"
+	KeepDir   = "keep"
+	ReviewDir = "review"
+	CullDir   = "cull"
+)
 
-// moveCulled moves every frame whose effective verdict is cull (the user's label
-// when lab has one, else the model's decision) and that isn't moved yet into
-// CulledDir beside it,
-// with its .xmp sidecar, and records the move in the result. Frames that can't
-// be moved stay where they are with the reason in Fixups. Nothing is deleted
-// and nothing is overwritten; `cull restore` reverses it.
-func moveCulled(rep *report.Report, lab map[string]labels.Entry, log io.Writer) int {
+var placeDirs = []string{CulledDir, KeepDir, ReviewDir, CullDir}
+
+// placement is how frames are laid out: culls aside, or every verdict in its folder.
+type placement int
+
+const (
+	placeNone   placement = iota
+	placeCulled           // --move-culled: culls into culled/, everything else home
+	placeSorted           // --sort: keep/, review/, cull/ by verdict
+)
+
+// want is the folder beside home where r belongs ("" = home), from its effective
+// verdict: the user's label when there is one, else the model's decision. Frames
+// that failed stay home.
+func want(r report.Result, lab labels.Entry, mode placement) string {
+	if r.Error != "" {
+		return ""
+	}
+	d, _ := labels.Effective(r, lab)
+	switch mode {
+	case placeCulled:
+		if d == eval.Cull {
+			return CulledDir
+		}
+	case placeSorted:
+		switch d {
+		case eval.Keep:
+			return KeepDir
+		case eval.Review:
+			return ReviewDir
+		case eval.Cull:
+			return CullDir
+		}
+	}
+	return ""
+}
+
+// place moves frames, with their .xmp sidecars, to where mode wants them: with
+// toHome only the ones going home, otherwise only the ones going into (or between)
+// folders, so callers can write sidecars in between. Moves are recorded in the
+// result; a frame that can't move stays put with the reason in Fixups and a line on
+// log. Nothing is deleted or overwritten; `cull restore` reverses it. Returns how
+// many moved.
+func place(rep *report.Report, lab map[string]labels.Entry, mode placement, log io.Writer, toHome bool) int {
 	n := 0
 	for i := range rep.Results {
 		r := &rep.Results[i]
 		reconcileMove(r)
-		if d, _ := labels.Effective(*r, lab[filepath.Base(r.File)]); d != eval.Cull || r.Error != "" || r.MovedTo != "" {
+		if r.Error != "" {
 			continue
 		}
-		dst := filepath.Join(filepath.Dir(r.File), CulledDir, filepath.Base(r.File))
-		sidecar, err := relocate(r.File, dst)
+		w := want(*r, lab[filepath.Base(r.File)], mode)
+		cur, src := "", r.File
+		if r.MovedTo != "" {
+			cur, src = filepath.Base(filepath.Dir(r.MovedTo)), r.MovedTo
+		}
+		if w == cur || toHome != (w == "") {
+			continue
+		}
+		dst := r.File
+		if w != "" {
+			dst = filepath.Join(filepath.Dir(r.File), w, filepath.Base(r.File))
+		}
+		sidecar, err := relocate(src, dst)
 		if err != nil {
 			addFixup(r, "move: "+err.Error())
 			fmt.Fprintf(log, "not moved %s: %v\n", filepath.Base(r.File), err)
 			continue
 		}
-		followSidecar(r, r.File, sidecar)
-		r.MovedTo = dst
+		followSidecar(r, src, sidecar)
+		if cur != "" {
+			os.Remove(filepath.Dir(src)) // only succeeds when empty
+		}
+		r.MovedTo = ""
+		if w != "" {
+			r.MovedTo = dst
+		}
 		n++
 	}
 	return n
+}
+
+// moveCulled moves every frame whose effective verdict is cull, and that isn't
+// moved yet, into CulledDir beside it (see place).
+func moveCulled(rep *report.Report, lab map[string]labels.Entry, log io.Writer) int {
+	return place(rep, lab, placeCulled, log, false)
 }
 
 // Restore moves every frame recorded as moved back to its original path (under
@@ -67,15 +133,13 @@ func Restore(reportPath, dir string, log io.Writer) (int, error) {
 		if r.MovedTo != "" {
 			dirs[filepath.Dir(r.MovedTo)] = true
 		}
-		if wasMoved := r.MovedTo != ""; reconcileMove(r) {
-			if wasMoved { // restored before, but that report was never saved
-				continue
-			}
-			dirs[filepath.Dir(r.MovedTo)] = true // moved before, never recorded: restore it now
-		}
+		// Moved or restored by a run whose report was never saved, or moved by hand
+		// between folders: restore from wherever it is now.
+		reconcileMove(r)
 		if r.MovedTo == "" {
 			continue
 		}
+		dirs[filepath.Dir(r.MovedTo)] = true
 		sidecar, err := relocate(r.MovedTo, r.File)
 		if err != nil {
 			fmt.Fprintf(log, "not restored %s: %v\n", filepath.Base(r.File), err)
@@ -114,30 +178,49 @@ func renameNoReplace(src, dst string) error {
 	return os.Rename(src, dst)
 }
 
-// reconcileMove repairs a result whose files moved without the report being
-// saved (a crash or a failed save between the renames and the save). A frame's
-// place in culled/ is fixed (CulledDir beside it), so where exactly one of the
-// two paths exists, that is where it is. Returns whether r changed.
+// reconcileMove repairs a result whose file moved without the report being told: a
+// crash or failed save between the renames and the save, or a move by hand between
+// the folders. A frame can only be at home or in one of placeDirs beside it, so when
+// it isn't where the report says and exactly one of those places holds it (same size
+// and mtime: never a stranger), that is where it is. Returns whether r changed.
 func reconcileMove(r *report.Result) bool {
 	if r.Error != "" {
 		return false
 	}
-	from, to := r.File, filepath.Join(filepath.Dir(r.File), CulledDir, filepath.Base(r.File)) // unrecorded move
+	at := r.File
 	if r.MovedTo != "" {
-		from, to = r.MovedTo, r.File // unrecorded restore
+		at = r.MovedTo
 	}
-	if exists(from) || !sameVersion(to, r) {
+	if exists(at) {
 		return false
 	}
-	if r.XMP == xmp.Path(from) && !exists(xmp.Path(from)) && exists(xmp.Path(to)) {
+	home, base := filepath.Dir(r.File), filepath.Base(r.File)
+	var found []string
+	for _, c := range append([]string{r.File}, placePaths(home, base)...) {
+		if c != at && sameVersion(c, r) {
+			found = append(found, c)
+		}
+	}
+	if len(found) != 1 {
+		return false
+	}
+	to := found[0]
+	if r.XMP == xmp.Path(at) && !exists(xmp.Path(at)) && exists(xmp.Path(to)) {
 		r.XMP = xmp.Path(to)
 	}
-	if r.MovedTo == "" {
+	r.MovedTo = ""
+	if to != r.File {
 		r.MovedTo = to
-	} else {
-		r.MovedTo = ""
 	}
 	return true
+}
+
+func placePaths(home, base string) []string {
+	out := make([]string, len(placeDirs))
+	for i, d := range placeDirs {
+		out[i] = filepath.Join(home, d, base)
+	}
+	return out
 }
 
 func exists(p string) bool { _, err := os.Lstat(p); return err == nil }

@@ -47,7 +47,8 @@ make vet
   rank call's prompt/schema/request and permutation-checked decode (rank.go)
 - `internal/pipeline` — detect → locate → crops → evaluate → decide; worker pool,
   resume (path+size+mtime; refuses a different backend/model/schema), checkpointing,
-  quota stop, `--save-inputs`, `--move-culled` / `Restore` (move.go; Discover skips `culled/`),
+  quota stop, `--save-inputs`, `--move-culled` / `--sort` / `Restore` (move.go: `place` puts frames
+  home, in `culled/`, or in `keep/` `review/` `cull/`; `reconcileMove` searches them all; Discover skips them),
   stages.go (shared frame stages), decide.go, groups.go (decideAll: regroups sequences,
   reuses/applies stored ranks, marks best), batch.go (Message Batches driver with
   re-attachable `<report>.batch.json` state), escalation, cost budget; rank.go (`Rank`/
@@ -82,9 +83,9 @@ make vet
 
 ## Invariants — do not break
 
-- Never modify or delete DNGs. Only `judge --move-culled` / `decide --move-culled` move them (same-disk
-  rename into `culled/`, never overwriting, recorded as `moved_to`), and `restore`
-  undoes it. Never overwrite an existing `.xmp` unless `--overwrite-xmp`.
+- Never modify or delete DNGs. Only `--move-culled` / `--sort` (judge, decide) move them (same-disk
+  rename into `culled/` or `keep/` `review/` `cull/`, never overwriting, recorded as `moved_to`),
+  and `restore` undoes it. `offload` only reads cards and never replaces a file. Never overwrite an existing `.xmp` unless `--overwrite-xmp`.
 - Never print, log, or read the API key contents beyond `internal/config`.
 - Keep/review/cull is decided in Go (`eval.Policy`), not by the model. The model
   only assesses. Keeps decisions deterministic, auditable, and tunable.

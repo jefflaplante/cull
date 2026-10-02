@@ -87,11 +87,11 @@ cull scan ~/Pictures/shoot                # free: previews, faces, EXIF; no mode
 cull judge --estimate ~/Pictures/shoot    # free: what judging would cost
 cull judge ~/Pictures/shoot               # model assessment + decisions + set ranking
 cull review ~/Pictures/shoot              # browser: check, label keep/review/cull, add stars
-cull decide --write-xmp --move-culled ~/Pictures/shoot   # sidecars; culls into culled/
+cull decide --write-xmp --sort ~/Pictures/shoot   # sidecars; keep/ review/ cull/ for import
 ```
 
 Everything is recorded in `cull-report.json` beside the photos. `cull restore <dir>`
-undoes `--move-culled`.
+undoes `--sort` and `--move-culled`.
 
 ## Offload: card to shoot folder
 
@@ -424,6 +424,18 @@ its sidecar into a `culled/` folder beside it.
   in the report.
 - **Later runs** skip `culled/`, and `cull restore` puts everything back.
 - Look through `culled/` before deleting anything.
+
+**Sorting for import.** `--sort` (on `judge` or `decide`) moves every judged frame, and
+its sidecar, into `keep/`, `review/` or `cull/` beside it, by its verdict (your label
+first).
+- **Then import** `keep/` and `review/` into Capture One, Lightroom or anything else. No
+  sidecar support is needed for that split.
+- **Re-sorting:** run `decide --sort` again after changing labels in `review`, and frames
+  move between the folders.
+- **Do it before importing:** the catalog loses track of frames moved afterwards.
+- **Safety:** frames that failed stay where they are. The same rules as `--move-culled`
+  apply (no overwrites, recorded in the report, `cull restore` undoes it). The two
+  options can't be combined.
 
 ## Flag reference
 

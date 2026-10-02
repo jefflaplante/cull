@@ -24,6 +24,7 @@ type cullOpts struct {
 	xmpDevelop   bool
 	overwriteXMP bool
 	moveCulled   bool
+	sort         bool
 	noLabels     bool
 	labelsPath   string
 	rawClip      bool
@@ -78,6 +79,9 @@ Backends (--backend):
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if o.fresh && o.resume {
 				return fmt.Errorf("--fresh and --resume contradict each other")
+			}
+			if o.sort && o.moveCulled {
+				return fmt.Errorf("--sort and --move-culled can't be combined: --sort already puts culls in cull/")
 			}
 			if o.xmpDevelop && !o.writeXMP {
 				return fmt.Errorf("--xmp-develop requires --write-xmp")
@@ -179,8 +183,8 @@ Backends (--backend):
 			cfg.WriteXMP = o.writeXMP
 			cfg.XMPDevelop = o.xmpDevelop
 			cfg.OverwriteXMP = o.overwriteXMP
-			cfg.MoveCulled = o.moveCulled
-			if o.moveCulled || o.writeXMP {
+			cfg.MoveCulled, cfg.Sort = o.moveCulled, o.sort
+			if o.moveCulled || o.sort || o.writeXMP {
 				if cfg.Labels, err = userLabels(cmd.ErrOrStderr(), cfg.ReportPath, o.labelsPath, o.noLabels); err != nil {
 					return err
 				}
@@ -255,6 +259,7 @@ Backends (--backend):
 	f.StringVar(&o.labelsPath, "labels", "", "your labels log (default: cull-labels.jsonl beside the report, when it exists)")
 	f.BoolVar(&o.noLabels, "no-labels", false, "ignore your labels (cull-labels.jsonl beside the report): moves and sidecar rewrites follow the model's verdicts")
 	f.BoolVar(&o.moveCulled, "move-culled", false, "move frames decided cull (with their .xmp) into a culled/ folder beside them; undo with 'cull restore'. Use before importing into Capture One")
+	f.BoolVar(&o.sort, "sort", false, "move every judged frame (with its .xmp) into keep/, review/ or cull/ beside it, for import; undo with 'cull restore'")
 	f.BoolVar(&o.second, "second-opinion", false, "ask the model again about soft-or-worse frames (one more evaluation each, typically a minority of frames); when the two disagree, review")
 	f.BoolVar(&o.rankTwice, "rank-twice", false, "rank each set of up to 8 frames a second time with its frames reversed; only places both orders agree on count (inside --keep-best in both: best; outside in both: outranked; else disputed, review). Doubles those calls")
 	f.BoolVar(&o.noRank, "no-rank", false, "after judging, don't rank the sets that need it (run 'cull rank' separately later)")

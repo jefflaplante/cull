@@ -117,7 +117,7 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	}
 	fmt.Fprintf(w, "  assessed %d · errors %d · not yet judged %d\n", assessed, errs, unjudged)
 	if assessed > 0 {
-		fmt.Fprintf(w, "  model: keep %d · review %d · cull %d · moved to culled/ %d\n", counts["keep"], counts["review"], counts["cull"], moved)
+		fmt.Fprintf(w, "  model: keep %d · review %d · cull %d · moved out of the shoot folder (culled/ or keep/ review/ cull/) %d\n", counts["keep"], counts["review"], counts["cull"], moved)
 	}
 	fmt.Fprintf(w, "  you: labelled %d/%d · rated %d · disagree with the model %d\n", labelled, len(rep.Results), rated, disagree)
 	byModel, byScores := 0, 0

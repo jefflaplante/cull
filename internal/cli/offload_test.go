@@ -110,3 +110,30 @@ func TestOffloadArgs(t *testing.T) {
 		t.Fatal("--verify with two arguments accepted")
 	}
 }
+
+func TestSortFlags(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	if _, err := run(t, "judge", "--sort", "--move-culled", "--backend", "claude-code", "--claude-bin", bin, dir); err == nil {
+		t.Fatal("judge --sort --move-culled accepted")
+	}
+	if out, err := run(t, "scan", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, err := run(t, "decide", "--sort", dir); err == nil || !strings.Contains(err.Error(), "judge") {
+		t.Fatalf("decide --sort on a scan report: %v\n%s", err, out)
+	}
+	out, err := run(t, "judge", "--fresh", "--sort", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cull", "L1000001.DNG")); err != nil || !strings.Contains(out, "sorted 1 frame(s)") {
+		t.Fatalf("judge --sort didn't sort:\n%s", out)
+	}
+	if out, err := run(t, "restore", dir); err != nil || !strings.Contains(out, "restored 1") {
+		t.Fatalf("restore: %v\n%s", err, out)
+	}
+}

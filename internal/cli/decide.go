@@ -14,10 +14,10 @@ import (
 
 func newDecideCmd(so *sharedOpts) *cobra.Command {
 	var (
-		pol                                    policyFlags
-		writeXMP, xmpDevelop, overwrite, moveC bool
-		labelsPath                             string
-		noLabels                               bool
+		pol                                           policyFlags
+		writeXMP, xmpDevelop, overwrite, moveC, sortF bool
+		labelsPath                                    string
+		noLabels                                      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "decide <dir>",
@@ -46,6 +46,9 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 			var savedSeq *report.Sequences
 			if rep, err := report.Load(cfg.ReportPath); err == nil { // a missing report is Decide's error to report
 				saved, savedSeq = rep.Policy, rep.Seq
+				if rep.Backend == "" { // a scan: there are no verdicts to decide or sort
+					return fmt.Errorf("%s is a scan report with no judged frames: run cull judge %s first", cfg.ReportPath, args[0])
+				}
 			}
 			p, notes, err := pol.resolve(cmd.Flags(), saved)
 			if err != nil {
@@ -65,7 +68,7 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 				return err
 			}
 			sum, err := pipeline.Decide(cmd.Context(), cfg.ReportPath, pipeline.DecideOptions{
-				Dir: cfg.Dir, Policy: p, WriteXMP: writeXMP, XMPDevelop: xmpDevelop, OverwriteXMP: overwrite, MoveCulled: moveC,
+				Dir: cfg.Dir, Policy: p, WriteXMP: writeXMP, XMPDevelop: xmpDevelop, OverwriteXMP: overwrite, MoveCulled: moveC, Sort: sortF,
 				Seq: cfg.Seq, Labels: lab,
 			}, cmd.ErrOrStderr())
 			if err != nil {
@@ -81,6 +84,7 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 	f.BoolVar(&xmpDevelop, "xmp-develop", false, "also write Adobe crs exposure/crop (not applied by Capture One)")
 	f.BoolVar(&overwrite, "overwrite-xmp", false, "also overwrite sidecars not written by cull")
 	f.BoolVar(&moveC, "move-culled", false, "sync culled/: move new culls there, restore frames no longer culled")
+	f.BoolVar(&sortF, "sort", false, "sync keep/, review/, cull/ with the current verdicts (your labels first); undo with 'cull restore'")
 	f.StringVar(&labelsPath, "labels", "", "your labels log (default: cull-labels.jsonl beside the report, when it exists)")
 	f.BoolVar(&noLabels, "no-labels", false, "ignore your labels: sidecars and moves follow the model's verdicts")
 	return cmd

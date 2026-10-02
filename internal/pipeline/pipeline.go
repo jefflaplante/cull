@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -39,6 +40,7 @@ type Config struct {
 	WriteXMP       bool
 	OverwriteXMP   bool
 	MoveCulled     bool                    // move cull decisions (and sidecars) into CulledDir after processing
+	Sort           bool                    // move every judged frame (and sidecar) into keep/, review/ or cull/
 	Labels         map[string]labels.Entry // your labels by base name: drive moves and sidecar rewrites at the end; nil = the model's
 	XMPDevelop     bool                    // also write crs:Exposure2012 / crs:Crop*
 	MinPreviewEdge int
@@ -105,7 +107,7 @@ func Discover(dir string, recursive bool) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			if p != dir && (!recursive || d.Name() == CulledDir) {
+			if p != dir && (!recursive || slices.Contains(placeDirs, d.Name())) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -657,14 +659,19 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 		}
 	}
 	rep.Generated = time.Now()
-	if cfg.MoveCulled && !cfg.DryRun {
+	if (cfg.MoveCulled || cfg.Sort) && !cfg.DryRun {
 		// Save first: every result is on disk before any frame moves, so a crash
 		// mid-move leaves nothing reconcileMove can't find again.
 		if err := rep.Save(cfg.ReportPath); err != nil {
 			return used, err // the ranking's state stays: a re-run reuses what was paid for
 		}
 		// After a quota stop or Ctrl-C too: those decisions are final.
-		if n := moveCulled(rep, lab, cfg.warnWriter()); n > 0 {
+		if cfg.Sort {
+			n := place(rep, lab, placeSorted, cfg.warnWriter(), true)
+			if n += place(rep, lab, placeSorted, cfg.warnWriter(), false); n > 0 {
+				cfg.note(ui.Quiet, "sorted %d frame(s) into %s/, %s/ and %s/ (undo: cull restore %s)", n, KeepDir, ReviewDir, CullDir, cfg.Dir)
+			}
+		} else if n := moveCulled(rep, lab, cfg.warnWriter()); n > 0 {
 			cfg.note(ui.Quiet, "moved %d culled frame(s) into %s/ (undo: cull restore %s)", n, CulledDir, cfg.Dir)
 		}
 	}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -24,6 +23,7 @@ type DecideOptions struct {
 	XMPDevelop   bool
 	OverwriteXMP bool                    // also overwrite sidecars the report doesn't record as ours
 	MoveCulled   bool                    // sync culled/: move new culls, restore frames no longer culled
+	Sort         bool                    // sync keep/, review/, cull/ with the effective verdicts
 	Seq          group.Options           // sequences of similar frames; Seq.Gap 0 = no grouping
 	Labels       map[string]labels.Entry // the user's labels by base name; nil = the model's verdicts alone
 }
@@ -44,9 +44,15 @@ type DecideSummary struct {
 // context's error before redecide runs, so no sidecar is rewritten and no file
 // is moved.
 func Decide(ctx context.Context, reportPath string, o DecideOptions, log io.Writer) (DecideSummary, error) {
+	if o.Sort && o.MoveCulled {
+		return DecideSummary{Changed: map[string]int{}}, errors.New("--sort and --move-culled can't be combined: --sort already puts culls in cull/")
+	}
 	rep, err := report.Load(reportPath)
 	if err != nil {
 		return DecideSummary{Changed: map[string]int{}}, err
+	}
+	if o.Sort && !judged(rep) {
+		return DecideSummary{Changed: map[string]int{}}, fmt.Errorf("%s holds no judged frames to sort: run cull judge first", reportPath)
 	}
 	if rep.Relocate(reportPath, o.Dir) {
 		fmt.Fprintf(log, "the report's frames moved to %s (the folder was renamed): using their new paths\n", o.Dir)
@@ -109,22 +115,15 @@ func redecide(rep *report.Report, o DecideOptions, log io.Writer, between func()
 		reconcileMove(&rep.Results[i]) // files moved or restored by a run whose report was never saved
 	}
 
-	if o.MoveCulled { // restore first, so sidecars are then written where frames live
-		for i := range rep.Results {
-			r := &rep.Results[i]
-			if d, _ := labels.Effective(*r, o.Labels[filepath.Base(r.File)]); r.MovedTo == "" || d == eval.Cull {
-				continue
-			}
-			sidecar, err := relocate(r.MovedTo, r.File)
-			if err != nil {
-				fmt.Fprintf(log, "not restored %s: %v\n", filepath.Base(r.File), err)
-				continue
-			}
-			followSidecar(r, r.MovedTo, sidecar)
-			os.Remove(filepath.Dir(r.MovedTo)) // only succeeds when empty
-			r.MovedTo = ""
-			sum.Restored++
-		}
+	mode := placeNone
+	switch {
+	case o.MoveCulled:
+		mode = placeCulled
+	case o.Sort:
+		mode = placeSorted
+	}
+	if mode != placeNone { // home first, so sidecars are then written where frames live
+		sum.Restored = place(rep, o.Labels, mode, log, true)
 	}
 	if o.WriteXMP {
 		for i := range rep.Results {
@@ -135,8 +134,8 @@ func redecide(rep *report.Report, o DecideOptions, log io.Writer, between func()
 			writeDecidedSidecar(r, o)
 		}
 	}
-	if o.MoveCulled {
-		sum.Moved = moveCulled(rep, o.Labels, log)
+	if mode != placeNone {
+		sum.Moved = place(rep, o.Labels, mode, log, false)
 	}
 	return sum, nil
 }
@@ -163,4 +162,14 @@ func addFixup(r *report.Result, note string) {
 		}
 	}
 	r.Fixups = append(r.Fixups, note)
+}
+
+// judged reports whether any frame has a model assessment.
+func judged(rep *report.Report) bool {
+	for _, r := range rep.Results {
+		if r.Evaluation != nil {
+			return true
+		}
+	}
+	return false
 }

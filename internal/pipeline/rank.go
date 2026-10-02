@@ -315,7 +315,7 @@ func rank(ctx context.Context, cfg Config, ex rankExec, force bool) (*report.Rep
 		return rep, err
 	}
 	o := DecideOptions{Dir: cfg.Dir, Policy: cfg.Policy, WriteXMP: cfg.WriteXMP, XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP,
-		MoveCulled: cfg.MoveCulled, Seq: cfg.Seq, Labels: cfg.Labels}
+		MoveCulled: cfg.MoveCulled, Sort: cfg.Sort, Seq: cfg.Seq, Labels: cfg.Labels}
 	var rankErr error
 	var run rankRun
 	if _, err := redecide(rep, o, log, func() { _, run, rankErr = rankSets(ctx, rep, cfg, ex, force, &spend{}) }); err != nil {

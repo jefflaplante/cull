@@ -50,3 +50,25 @@ func readManifest(folder string) ([]Entry, error) {
 	}
 	return out, sc.Err()
 }
+
+// appendManifest records e in folder's manifest as one write, synced: a line exists
+// only for a file that verified, and survives a crash right after.
+func appendManifest(folder string, e Entry) error {
+	b, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(folder, ManifestName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	if err := plainSync(f); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}

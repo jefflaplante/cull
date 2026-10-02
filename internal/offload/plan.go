@@ -43,6 +43,10 @@ type File struct {
 	Name    string    // destination base name
 	To      []string  // shoot folders it is copied into (those that don't hold it yet)
 	Skip    string    // "" = copy; else why not
+	// Unverified: a destination already holds it by size and mtime only, with no cull
+	// manifest line and no --checksum comparison, so it was never checked against the
+	// card and can't count toward "safe to format".
+	Unverified bool
 }
 
 // Plan is everything an offload will do, decided before it writes anything.
@@ -52,6 +56,8 @@ type Plan struct {
 	Files  []File
 	Bytes  int64  // bytes to copy
 	Dated  string // where the folder date came from
+
+	h hooks // test seams for Run
 }
 
 // mtimeWindow is the quick check's tolerance: exFAT/FAT timestamps are coarse (FAT
@@ -238,6 +244,17 @@ func fileSum(p string) ([32]byte, error) {
 // cameraNames keeps the camera's file names: a name already present is skipped when it
 // is the same file on every destination, and refused when it differs on any.
 func (p *Plan) cameraNames(o Options) error {
+	verified := make([]map[string]int64, len(p.Dests)) // per destination: manifest name → size
+	for i, d := range p.Dests {
+		man, err := readManifest(d)
+		if err != nil {
+			return err
+		}
+		verified[i] = map[string]int64{}
+		for _, e := range man {
+			verified[i][e.Name] = e.Size
+		}
+	}
 	byName := map[string]string{}
 	for i := range p.Files {
 		f := &p.Files[i]
@@ -247,7 +264,7 @@ func (p *Plan) cameraNames(o Options) error {
 			return fmt.Errorf("%s is on two sources (%s and %s): use --rename to keep both", f.Name, other, f.Src)
 		}
 		byName[key] = f.Src
-		for _, d := range p.Dests {
+		for i, d := range p.Dests {
 			st, ok := existing(d, f.Name)
 			if !ok {
 				f.To = append(f.To, d)
@@ -259,6 +276,9 @@ func (p *Plan) cameraNames(o Options) error {
 			}
 			if !eq {
 				return fmt.Errorf("%s exists with different content; use --rename to keep both", filepath.Join(d, f.Name))
+			}
+			if size, ok := verified[i][f.Name]; !o.Checksum && (!ok || size != f.Size) {
+				f.Unverified = true
 			}
 		}
 		if len(f.To) == 0 {

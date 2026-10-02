@@ -305,6 +305,22 @@ balance`, but no run has tested them yet.
   "rangefinder (manual focus, often fast lenses shot wide open)". Checked on all 22
   samples via `scan --save-inputs`.
 
+### Card offload measurements (2026-10-02, the user's `LEICA M` card, read only)
+
+- exFAT over a USB reader: 992 DNGs, 63 GB, in `DCIM/100LEICA`, file names `M1103127`–`M1104130`
+  (the 17 sample frames come from this card). macOS adds `.fseventsd` on mount.
+- Uncached sequential read speed (`F_NOCACHE`): 282 MB/s with 1 file at a time, 271 MB/s
+  with 2, 272 MB/s with 4. Parallel reads don't help, so offload reads one file at a time.
+- EXIF for all 992 frames reads in 1.7 s. Every capture time falls between 2025-12-27 23:56
+  and 2025-12-28 00:06, and 969 of 991 consecutive pairs are 0 s apart.
+  - The user says the card holds several shoots and a multi-day trip, and the camera's clock
+    was set wrong at one point.
+  - So EXIF times can't date or split folders, or order frames. Offload makes one folder
+    per run (`--date` overrides) and numbers frames in file-name order.
+  - The file times match EXIF exactly, offset by the time zone, so they're no better.
+- Page cache (internal SSD, 64 MB, `mincore`): a normal write leaves every page cached,
+  so a re-read verifies RAM. With `F_NOCACHE` on the write handle, 0 of 4097 pages stay cached.
+
 ### Sequences: look distances on the 17 sample frames (2026-09-28)
 
 `scan -o <tmp>` looks, `group.LookDistance` between consecutive frames in `Sequences`
@@ -371,10 +387,10 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
 - How good and how stable the model's side-by-side ranking is: verdicts stay
   `review` (`--outranked` default) until the calibrate sets section shows it's
   trustworthy on a labeled sample.
-- M11-P capture-time spacing on files straight off the card: the 17-frame sample's
-  timestamps look rewritten (all fall within 2 s), so whether `--seq-gap` ever
-  actually splits a sequence on real files is unconfirmed; grouping there relied on
-  look distance alone.
+- M11-P capture-time spacing: the user's card has 992 frames within 10 minutes of camera
+  time, from a clock set wrong (see Card offload measurements), so `--seq-gap` never split
+  anything there. Grouping relied on look distance alone. Whether gaps split sequences on
+  a correctly set clock is still unconfirmed.
 - Batch ranking (`cull rank --batch` / `judge --batch` with ranking on) has not been
   run against the live Message Batches API; only `judge --batch`'s evaluate/locate
   calls have (2026-09-27, above).

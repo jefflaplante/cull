@@ -80,7 +80,7 @@ remains for anything that isn't a terminal.
 
 ```
 cull offload /Volumes/LEICA [/Volumes/M11-P] ~/Pictures --name "Smith wedding" --backup /Volumes/Backup/Pictures \
-     [--rename "{date}_{name}_{n:4}"] [--checksum] [--dry-run] [--jobs N] [--verify]
+     [--date 2026-10-02] [--rename "{date}_{name}_{n:4}"] [--checksum] [--dry-run] [--verify]
      [--project …] [--event …] [--location …] [--keyword …] [--no-scan]
 ```
 
@@ -92,8 +92,13 @@ more. The sources are only ever read: never written, renamed or deleted.
 - skip AppleDouble `._*`, `.Trashes` and `.Spotlight-*`;
 - never follow a symlink;
 - read each frame's capture date from EXIF, falling back to the file's modification time;
-- work out the shoot folder `<dest>/<YYYY-MM-DD>[ <name>]/` (one per capture day) and the
-  destination name (the camera name, or the `--rename` pattern);
+- work out the shoot folder `<dest>/<YYYY-MM-DD>[ <name>]/`: **one per run**, dated by
+  the earliest frame's EXIF capture date, or by `--date`. A run is never split by day: a
+  shoot that crosses midnight stays together, and a camera clock set wrong can't scatter
+  frames. The plan prints the date it chose, so a wrong clock is visible before any copy.
+  Later cards of the same shoot go into that folder by re-running with the same `--name`
+  and date;
+- work out each destination name (the camera name, or the `--rename` pattern);
 - detect collisions;
 - check free space on the destination and the backup with `statfs`: the bytes to copy plus
   a margin.
@@ -113,18 +118,23 @@ any byte is written. `--dry-run` prints the plan: files, GB, folders, skips.
   to `--rename`.
 
 **3. Copy, for each file in the card's own order:**
-- **Read the card once.** A reader goroutine fills large buffers (about 4 MB), and a writer
+- **Read the card once.** A reader goroutine fills large buffers (4 MB), and a writer
   goroutine streams them to every destination at once (the main folder and `--backup`), so
   reading and writing overlap.
 - **Hash while streaming.** The SHA-256 is computed during that single read of the card.
 - **Write to a temp file:** each destination writes `.<name>.cull-<random>.tmp` in the
-  final folder, as rsync does, then:
+  final folder, as rsync does, with `F_NOCACHE` set on the write handle, then:
   - `fsync` it;
   - set its modification time to the card file's, like rsync `-t`;
   - set permissions to `0644`, not FAT's `0777`.
 - **Verify the disk, not the cache.** Each temp file is re-read with `F_NOCACHE` (macOS),
   so the bytes come from the device and not the page cache, and is hashed. A match with
   the card's hash is required.
+  - Measured 2026-10-02 on the internal SSD (64 MB, `mincore`): a normal write leaves all
+    4097 pages cached, so a naive re-read checks RAM. With `F_NOCACHE` on the write
+    handle, none stay cached, so the verify read has to reach the device.
+  - The drive's own cache can still answer, and only `F_FULLFSYNC` empties it. This is the
+    limit of every source-against-copy check, and it's stated, not hidden.
 - **Rename into place** only after verifying, then sync the folder entry.
 - **Retry:** a mismatch or a read error deletes the temp file and retries from the card
   (up to 2 retries, with backoff). If it still fails, the file is recorded as failed and
@@ -133,9 +143,13 @@ any byte is written. `--dry-run` prints the plan: files, GB, folders, skips.
   verifies, synced line by line. It holds the source path, the destination names, size,
   SHA-256 and time.
 
-**4. Concurrency:** `--jobs N`, default 1. SD cards read fastest as one sequential stream;
-parallel reads make the card seek back and forth. A higher value helps only fast media
-such as CFexpress.
+**4. Concurrency:**
+- **One file at a time, no `--jobs` flag.** On the user's card and reader (exFAT over USB,
+  measured 2026-10-02), uncached reads gave 282 MB/s with 1 file at a time, 271 MB/s with 2
+  and 272 MB/s with 4.
+- **The rest of the pipeline is not the bottleneck.** Hashing and the verify re-read from
+  internal SSD are far faster than the card. A 63 GB card is one read pass of about 4
+  minutes.
 
 **5. Interruption:**
 - **Ctrl-C** finishes or abandons the current file (its temp files are removed), keeps
@@ -167,8 +181,10 @@ such as CFexpress.
   - `{orig}` is the camera's file stem;
   - `{n}` or `{n:W}` is the counter, zero-padded to W digits.
 - **The counter continues across cards:** the next `n` is 1 + the largest `n` among the
-  shoot folder's files matching the pattern. Within one run, frames are numbered by capture
-  time, then source path, so card 2, 3 and so on carry on where the last stopped.
+  shoot folder's files matching the pattern.
+- **Frames are numbered by camera file name, then source path, not capture time.** File
+  numbers are the camera's own order, and they survive a clock set wrong.
+- So card 2, 3 and so on carry on where the last stopped.
 
 **Not done:** rsync's rolling-checksum delta transfer and compression. Neither helps a
 local copy of new files; rsync itself uses whole-file copies for local disks.
@@ -201,7 +217,7 @@ previews, faces, sets. Then it prints the next step, `cull judge --estimate <fol
 
 **Offload** (against a fake card directory):
 - **Plan:**
-  - layout by capture day;
+  - one folder per run, dated by the earliest capture date or `--date`;
   - a collision is refused before any write;
   - too little free space is refused before any write (a test hook for `statfs`);
   - `--dry-run` writes nothing.

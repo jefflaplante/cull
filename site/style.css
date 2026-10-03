@@ -722,3 +722,23 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
   .flag dd{font-size:15.5px}
   .ex pre{font-size:12px;padding:8px 10px}
 }
+
+/* viewfinder: the 35 and 135 bright-line frames and the rangefinder patch over the
+   homepage hero, glowing like the M11's illuminated frames */
+html[data-vf] .hero{position:relative;--vf-line:#f7f4ec;--vf-glow:rgba(255,250,236,.55)}
+html[data-vf]:not(.vf-off) .rf::before,html[data-vf]:not(.vf-off) .rf::after{display:none}
+.vf{position:absolute;inset:0;z-index:3;pointer-events:none;opacity:0}
+.vf.on{animation:vf-on 1.2s ease-out forwards}
+@keyframes vf-on{0%{opacity:0}10%{opacity:.75}16%{opacity:.2}28%{opacity:.95}100%{opacity:1}}
+.vf-lines{position:absolute;overflow:visible;filter:drop-shadow(0 0 4px var(--vf-glow)) drop-shadow(0 0 12px var(--vf-glow))}
+.vf-lines .f{fill:none;stroke:var(--vf-line);stroke-width:2;stroke-linecap:butt;opacity:.95}
+.vf-lines .f135{stroke-width:1.8}
+.vf-patch{position:absolute;border-radius:3px;
+  background:rgba(255,248,232,.05);
+  box-shadow:inset 0 0 0 1px rgba(255,248,232,.16),inset 0 0 12px rgba(255,246,226,.12),0 0 18px rgba(255,246,226,.08);
+  -webkit-backdrop-filter:brightness(1.25) contrast(1.06);backdrop-filter:brightness(1.25) contrast(1.06)}
+.vf-ghost{position:absolute;z-index:2;pointer-events:none;opacity:0;transition:opacity .6s ease;
+  mix-blend-mode:lighten;filter:sepia(.9) saturate(1.6) hue-rotate(-8deg) brightness(1.05)}
+.vf-ghost.on{opacity:.55}
+.vf-ghost>.wrap{transform:translateX(var(--rf,0px));will-change:transform}
+@media (prefers-reduced-motion:reduce){.vf.on{animation:none;opacity:1}}

@@ -14,6 +14,7 @@
       cur += (target - cur) * 0.055;
       if (Math.abs(target - cur) < 0.0008) cur = target;
       rf.style.setProperty('--rf', (cur * em()).toFixed(2) + 'px');
+      if (hero) hero.style.setProperty('--rf', (cur * em()).toFixed(2) + 'px'); // the viewfinder's patch reads it
       rf.classList.toggle('focused', Math.abs(cur) < 0.004);
       if (cur !== target) requestAnimationFrame(frame); else running = false;
     }
@@ -33,6 +34,104 @@
       });
       hero.addEventListener('pointerleave', function () { target = 0; go(); });
     }
+  })();
+
+  // Viewfinder. With a 35 mm lens on an M11 the finder shows the 35 and 135 bright-line
+  // frames together. The 35 frame is four separate lines along the edges of a 3:2 field,
+  // each covering the middle ~72% of its side; the 135 frame is four corner brackets,
+  // 0.28 W by 0.31 H, about the centre; the rangefinder patch, 0.10 W by 0.066 W, sits
+  // at the centre (proportions measured from a 0.72x finder view). Inside the patch a
+  // second, warm image of the scene is offset until the focus ring brings it into
+  // register: here the --rf the headline's focus animation drives. The 35 frame
+  // surrounds the hero's contents; it's drawn only where it can, with room to spare
+  // from the window's edge (one tall column on a narrow screen has no 3:2 frame).
+  (function () {
+    var hero = document.querySelector('.hero');
+    if (!hero || !document.documentElement.hasAttribute('data-vf')) return;
+    var NS = 'http://www.w3.org/2000/svg';
+    var wrap = hero.querySelector('.wrap');
+    var vf = document.createElement('div');
+    vf.className = 'vf';
+    vf.setAttribute('aria-hidden', 'true');
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'vf-lines');
+    var patch = document.createElement('div');
+    patch.className = 'vf-patch';
+    // The patch's second image: a copy of the hero, clipped to the patch, offset by --rf.
+    var ghost = document.createElement('div');
+    ghost.className = 'vf-ghost';
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.inert = true;
+    var copy = wrap.cloneNode(true);
+    Array.prototype.forEach.call(copy.querySelectorAll('[id]'), function (e) { e.removeAttribute('id'); });
+    Array.prototype.forEach.call(copy.querySelectorAll('.reveal'), function (e) { e.classList.add('in'); });
+    ghost.appendChild(copy);
+    vf.appendChild(svg);
+    vf.appendChild(patch);
+    hero.appendChild(ghost);
+    hero.appendChild(vf);
+
+    function box(el) { // offsets within the hero, untouched by the reveal transforms
+      var x = 0, y = 0;
+      for (var e = el; e && e !== hero; e = e.offsetParent) { x += e.offsetLeft; y += e.offsetTop; }
+      return { x: x, y: y, w: el.offsetWidth, h: el.offsetHeight };
+    }
+    function el(name, attrs) {
+      var e = document.createElementNS(NS, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+    function frame35(W, H) { // four edge lines that stop short of the corners
+      var ix = W * 0.14, iy = H * 0.145;
+      return 'M' + ix + ' 0H' + (W - ix) + 'M' + ix + ' ' + H + 'H' + (W - ix) +
+        'M0 ' + iy + 'V' + (H - iy) + 'M' + W + ' ' + iy + 'V' + (H - iy);
+    }
+    function brackets(x, y, w, h, a) { // four corner brackets with arms a
+      return 'M' + x + ' ' + (y + a) + 'V' + y + 'H' + (x + a) +
+        'M' + (x + w - a) + ' ' + y + 'H' + (x + w) + 'V' + (y + a) +
+        'M' + (x + w) + ' ' + (y + h - a) + 'V' + (y + h) + 'H' + (x + w - a) +
+        'M' + (x + a) + ' ' + (y + h) + 'H' + x + 'V' + (y + h - a);
+    }
+    var EDGE = 64, CLEAR_X = 40, CLEAR_Y = 24; // from the window's edge; from the contents
+    function layout() {
+      var k = box(hero.querySelector('.kicker')), q = box(hero.querySelector('.req')), r = box(hero.querySelector('.readout'));
+      var left = k.x, right = r.x + r.w, top = k.y, bottom = Math.max(q.y + q.h, r.y + r.h);
+      var W = Math.max(right - left + 2 * CLEAR_X, (bottom - top + 2 * CLEAR_Y) * 1.5), H = W / 1.5;
+      var cx = (left + right) / 2, cy = (top + bottom) / 2;
+      // Keep the left line off the window's edge; give way to the right if there's room.
+      cx = Math.max(cx, EDGE + W / 2);
+      var fits = window.innerWidth >= 980 && cx - W / 2 <= left - 16 && cx + W / 2 <= window.innerWidth - 16;
+      vf.hidden = ghost.hidden = !fits;
+      document.documentElement.classList.toggle('vf-off', !fits); // the headline keeps its own patch then
+      if (!fits) return;
+      var g = 30; // room for the glow
+      svg.setAttribute('width', W + 2 * g);
+      svg.setAttribute('height', H + 2 * g);
+      svg.setAttribute('viewBox', [-g, -g, W + 2 * g, H + 2 * g].join(' '));
+      svg.style.left = (cx - W / 2 - g) + 'px';
+      svg.style.top = (cy - H / 2 - g) + 'px';
+      svg.textContent = '';
+      var lines = el('g', { 'class': 'f' });
+      lines.appendChild(el('path', { d: frame35(W, H) }));
+      var w135 = W * 0.28, h135 = H * 0.31;
+      lines.appendChild(el('path', { 'class': 'f135', d: brackets((W - w135) / 2, (H - h135) / 2, w135, h135, w135 * 0.19) }));
+      svg.appendChild(lines);
+      var pw = W * 0.10, ph = W * 0.066, pl = cx - pw / 2, pt = cy - ph / 2;
+      patch.style.cssText = 'left:' + pl + 'px;top:' + pt + 'px;width:' + pw + 'px;height:' + ph + 'px';
+      var wb = box(wrap);
+      ghost.style.left = wb.x + 'px';
+      ghost.style.top = wb.y + 'px';
+      ghost.style.width = wb.w + 'px';
+      ghost.style.height = wb.h + 'px';
+      var it = pt - wb.y, il = pl - wb.x;
+      ghost.style.clipPath = 'inset(' + it + 'px ' + (wb.w - il - pw) + 'px ' + (wb.h - it - ph) + 'px ' + il + 'px round 3px)';
+    }
+    layout();
+    window.addEventListener('resize', layout);
+    (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () {
+      layout();
+      setTimeout(function () { vf.classList.add('on'); ghost.classList.add('on'); }, reduce.matches ? 0 : 250);
+    });
   })();
 
   // Lens barrel. A 35 mm focusing ring as it reads on the lens: near distances to the

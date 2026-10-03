@@ -83,7 +83,8 @@ make vet
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default
 - `internal/config` — API key resolution
 - `site/` — the GitHub Pages site (`index.html` overview, `usage.html` walkthrough, shared
-  `style.css` + `site.js`: lens strip, shutter dial, rangefinder headline; `img/`), deployed to the
+  `style.css` + `site.js`: lens strip, shutter dial, rangefinder headline, and on the homepage hero the
+  M11's 35/135 bright-line frames and a centred focusing patch, proportions measured from a 0.72x finder view; `img/`), deployed to the
   `gh-pages` branch with `git subtree split --prefix site`; https://code.jefflaplante.com/cull/
 
 ## Invariants — do not break

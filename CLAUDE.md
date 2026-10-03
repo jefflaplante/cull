@@ -258,6 +258,24 @@ make vet
   (the pre-feature-batch sync run said 5.5 with a landed tile), M1103817 review 3.5
   "soft" (the subscription run called it missed_focus → cull; it is soft at 100%).
 
+### Content keywords, live (2026-10-02, claude-code, user-approved)
+
+`judge --backend claude-code --write-xmp` with tags, on clones of M1103823, M1104114,
+M1103817 and M1103865 in `photos/c1-kw-test/live/`; the report went to a temp folder.
+- **Verdicts matched earlier runs:** M1103817 cull (missed focus), the rest keep.
+- **Keywords:** the model gave the full 8 every time, lowercase and descriptive (e.g.
+  `portrait, woman, smile, glasses, curly hair, white cardigan, forest road, bokeh`).
+  Normalization dropped nothing.
+- **Synonyms vary across frames** (`smile` here, `smiling` there), so a catalog collects
+  both forms.
+- **Output tokens per frame:** 514 and 578 for face frames with one call; 1156 and 1285
+  for frames that also needed a locate call. 8 short keywords are roughly 30–40 of those.
+  The cost estimate's ~1k out per frame still covers it.
+- **The sidecar was as designed:** `cull:keep`, then the 8 keywords and the 3 tag values
+  in `dc:subject`; `content|…`, `project|…` and `location|…` in `lr:hierarchicalSubject`.
+- **Still unchecked: whether structured output is written in schema property order.**
+  The decoded answer doesn't show key order, so that unverified assumption stands.
+
 ### Run-to-run stability after the section-3 changes (2026-09-30, user-approved)
 
 Two `judge --backend claude-code` runs (Sonnet via subscription, ranking on, defaults) on

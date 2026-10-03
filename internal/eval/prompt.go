@@ -19,7 +19,7 @@ func SystemPrompt(minCropArea float64, cam Camera) string {
 
 4. PEOPLE (flag, don't judge taste). present: a person is the subject. eyes, judged on the subject crop: open, closed (a blink), partial (mid-blink or squint), not_visible (turned away, hidden, or no person). expression: good, neutral, awkward (grimace, mid-word, unflattering moment), or not_applicable.
 
-5. KEYWORDS (description, not evidence; write them last): 3-8 short lowercase keywords a photographer would search a catalog by: subject, setting, notable objects, mood (e.g. portrait, woman, forest, red dress, laughing).
+5. KEYWORDS (description, not evidence; write them last): 3-8 short lowercase keywords a photographer would search a catalog by: subject, setting, notable objects, mood (e.g. portrait, woman, forest, red dress, laugh). Use one form so the same idea always gets the same keyword across photos: singular nouns, and verbs and adjectives in their base form (smile, not smiling; laugh, not laughing).
 
 Write each section's evidence first (sharpness: focus_target; exposure: reason and clipping; composition: issues), then its status, then a score that fits the status. Sharpness bands: sharp 8-10, acceptable 6-7.9, soft 3-5.9, missed_focus or motion_blur 0-2.9. Other scores are 0-10: 5 = usable, 7 = good, 9+ = exceptional. Do not inflate. Keep text fields terse.`, cam.Describe(), 100*minCropArea)
 }

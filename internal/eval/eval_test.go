@@ -370,3 +370,12 @@ func TestDecodeEvaluationNormalizesKeywords(t *testing.T) {
 		t.Fatalf("keywords %q", e.Keywords)
 	}
 }
+
+// Keywords come in one form across frames, so a catalog doesn't collect "smile" and
+// "smiling" (seen in the 2026-10-02 live run) as two keywords.
+func TestPromptAsksForBaseFormKeywords(t *testing.T) {
+	p := SystemPrompt(0.6, Camera{})
+	if !strings.Contains(p, "base form") || !strings.Contains(p, "smile, not smiling") {
+		t.Fatalf("prompt doesn't ask for base forms:\n%s", p[strings.Index(p, "5. KEYWORDS"):])
+	}
+}

@@ -686,15 +686,18 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 			}
 		}
 		// finish() (stages.go) writes each frame's sidecar during processing, before
-		// grouping exists, so a set's cull:best keyword (labels.Sidecar) never lands
-		// there. Catch every frame left in a set (Group != nil, set by decideAll above)
-		// whose decision didn't change above, so its sidecar still gets cull:best.
+		// grouping exists and from the model's verdict alone. Rewrite every frame whose
+		// decision didn't change above but that is left in a set (Group != nil, set by
+		// decideAll), so its sidecar gets cull:best, or that you labelled, so it carries
+		// your verdict and stars as --sort and --move-culled do.
 		for i := range rep.Results {
 			r := &rep.Results[i]
-			if changed[i] || r.Evaluation == nil || r.Error != "" || r.Group == nil {
+			if changed[i] || r.Evaluation == nil || r.Error != "" {
 				continue
 			}
-			writeDecidedSidecar(r, o, rep.Tags)
+			if _, mine := lab[filepath.Base(r.File)]; r.Group != nil || mine {
+				writeDecidedSidecar(r, o, rep.Tags)
+			}
 		}
 	}
 	if cfg.pinner != nil {

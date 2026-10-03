@@ -404,7 +404,7 @@
 
   /* ---------- the dial ---------- */
   var secs = Array.prototype.slice.call(document.querySelectorAll('main > section[data-n]'));
-  var idxs = secs.map(function(s){ return NUMS.indexOf(parseInt(s.getAttribute('data-n'), 10)); });
+  var idxs = secs.map(function(s){ var v = s.getAttribute('data-n'), n = parseInt(v, 10); return NUMS.indexOf(isNaN(n) ? v : n); });
   var dial = document.getElementById('dial');
   var numsBox = document.getElementById('dialNums');
   var cap = document.getElementById('dialCap');

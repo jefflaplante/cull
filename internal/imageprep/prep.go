@@ -27,6 +27,11 @@ type Stats struct {
 	LumaP99          int     `json:"luma_p99"`
 	HighlightClipPct float64 `json:"highlight_clip_pct"` // any channel >= 250
 	ShadowClipPct    float64 `json:"shadow_clip_pct"`    // luma <= 3
+	// Junk filter measures (see Junk): share of near-black (luma < 16) and blown
+	// (luma >= 250) pixels, and whole-frame contrast, the luma std of a 64 px thumbnail.
+	DarkPct   float64 `json:"dark_pct"`
+	BrightPct float64 `json:"bright_pct"`
+	Contrast  float64 `json:"contrast"`
 }
 
 // Options controls model-input preparation.
@@ -197,7 +202,17 @@ func Measure(f *Frame) Stats {
 		return 255
 	}
 	shadow := hist[0] + hist[1] + hist[2] + hist[3]
+	dark, bright := 0, 0
+	for i := 0; i < 16; i++ {
+		dark += hist[i]
+	}
+	for i := 250; i < 256; i++ {
+		bright += hist[i]
+	}
 	return Stats{
+		DarkPct:          round(100*float64(dark)/float64(n), 2),
+		BrightPct:        round(100*float64(bright)/float64(n), 2),
+		Contrast:         round(thumbContrast(f), 2),
 		MeanLuma:         round(sum/float64(n), 1),
 		LumaP1:           pct(0.01),
 		LumaP50:          pct(0.50),

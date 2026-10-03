@@ -129,6 +129,14 @@ type FocusTarget struct {
 	FaceSharpness float64 `json:"face_sharpness,omitempty"`
 }
 
+// JunkInfo records why a frame was flagged junk, with the measured values.
+type JunkInfo struct {
+	Kind      string  `json:"kind"` // black, white, uniform
+	DarkPct   float64 `json:"dark_pct"`
+	BrightPct float64 `json:"bright_pct"`
+	Contrast  float64 `json:"contrast"`
+}
+
 type Result struct {
 	File        string           `json:"file"`
 	Size        int64            `json:"size"`
@@ -150,7 +158,8 @@ type Result struct {
 	CostUSD     float64          `json:"cost_usd,omitempty"` // list price of this frame's calls
 	XMP         string           `json:"xmp,omitempty"`
 	XMPDevelop  bool             `json:"xmp_develop,omitempty"` // the sidecar at XMP carries crs: develop settings
-	MovedTo     string           `json:"moved_to,omitempty"`    // set by --move-culled; cleared by restore
+	MovedTo     string           `json:"moved_to,omitempty"`
+	Junk        *JunkInfo        `json:"junk,omitempty"` // an unmistakably empty frame (see imageprep.Junk)    // set by --move-culled; cleared by restore
 	Error       string           `json:"error,omitempty"`
 }
 

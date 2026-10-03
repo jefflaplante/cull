@@ -54,6 +54,9 @@ func prepareFrame(cfg Config, path string) (*prepared, error) {
 	}
 	p.stats = imageprep.Measure(p.frame)
 	res.Stats = &p.stats
+	if kind := imageprep.Junk(p.stats); kind != "" {
+		res.Junk = &report.JunkInfo{Kind: kind, DarkPct: p.stats.DarkPct, BrightPct: p.stats.BrightPct, Contrast: p.stats.Contrast}
+	}
 	res.Look = report.EncodeLook(p.frame.Grid(group.LookSize))
 	if cfg.RawClip {
 		if rc, err := rawclip.Measure(path); err == nil {

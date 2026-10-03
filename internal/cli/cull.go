@@ -262,7 +262,7 @@ Backends (--backend):
 	f.BoolVar(&o.sort, "sort", false, "move every judged frame (with its .xmp) into keep/, review/ or cull/ beside it, for import; undo with 'cull restore'")
 	f.BoolVar(&o.second, "second-opinion", false, "ask the model again about soft-or-worse frames (one more evaluation each, typically a minority of frames); when the two disagree, review")
 	f.BoolVar(&o.rankTwice, "rank-twice", false, "rank each set of up to 8 frames a second time with its frames reversed; only places both orders agree on count (inside --keep-best in both: best; outside in both: outranked; else disputed, review). Doubles those calls")
-	f.BoolVar(&o.noRank, "no-rank", false, "after judging, don't rank the sets that need it (run 'cull rank' separately later)")
+	f.BoolVar(&o.noRank, "no-rank", false, "after judging, don't rank the sets that need it (run 'cull rank' separately later); until then each set is ordered by scores and --outranked applies to that order")
 	o.policy.register(f)
 	f.IntVar(&o.checkpoint, "checkpoint", 25, "save the report every N results")
 	cmd.MarkFlagFilename("api-key-file")

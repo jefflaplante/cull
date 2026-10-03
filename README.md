@@ -18,7 +18,7 @@ Capture One or Lightroom.
 ![cull judge running: per-frame verdicts, progress, and keep/review/cull tallies](docs/images/judge-running.png)
 
 For a whole session with real output at every step, from the card to Capture One, see
-[USAGE.md](USAGE.md). Project site: **[code.jefflaplante.com/cull](https://code.jefflaplante.com/cull/)**.
+[USAGE.md](USAGE.md). Project site: **[code.jefflaplante.com/cull](https://code.jefflaplante.com/cull/)**, with a [usage walkthrough](https://code.jefflaplante.com/cull/usage.html).
 
 - [Camera support](#camera-support)
 - [Install](#install)

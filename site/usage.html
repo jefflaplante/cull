@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cull · usage: card to catalogue</title>
+<meta name="description" content="cull is an open-source command-line tool that culls a shoot of DNG files before import. A vision model assesses each frame; deterministic Go rules decide keep, review or cull.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0a0b">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23d9261c'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://code.jefflaplante.com/cull/usage.html">
+<meta property="og:type" content="website">
+<meta property="og:title" content="cull · Card to catalogue, in eight steps">
+<meta property="og:description" content="Open-source culling for DNG shoots. Verified card offload, sharpness judged at the eyes at 100%, deterministic keep / review / cull, sidecars and keywords for Capture One.">
+<meta property="og:url" content="https://code.jefflaplante.com/cull/usage.html">
+<meta property="og:image" content="https://code.jefflaplante.com/cull/img/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>document.documentElement.classList.add('js');</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-head">
+  <div class="wrap">
+    <a class="mark" href="index.html" aria-label="cull, overview"><span class="dot" aria-hidden="true"></span>cull</a>
+    <nav class="top-nav eng" aria-label="Sections">
+      <ul>
+        <li><a href="index.html#principle">Principle</a></li>
+        <li><a href="index.html#pipeline">Pipeline</a></li>
+        <li><a href="index.html#offload">Offload</a></li>
+        <li><a href="index.html#judge">Judge</a></li>
+        <li><a href="index.html#review">Review</a></li>
+        <li><a href="index.html#delivery">Delivery</a></li>
+        <li><a href="index.html#specification">Specification</a></li>
+        <li><a href="index.html#install">Install</a></li>
+        <li><a href="usage.html" aria-current="page">Usage</a></li>
+      </ul>
+    </nav>
+    <a class="btn btn-ghost btn-sm head-cta" href="https://github.com/jefflaplante/cull">
+      <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      <span>GitHub<span class="lbl-long"> · source</span></span>
+    </a>
+  </div>
+  <div class="barrel" aria-hidden="true">
+    <div class="barrel-in">
+      <div class="lens-id"><span class="fl">35</span><span class="ap">1:1.4</span></div>
+      <svg class="scales" viewBox="0 0 900 80" preserveAspectRatio="xMidYMid meet"></svg>
+      <span class="mount" title=""></span>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- 30 · START -->
+<section class="hero" id="top" data-n="30" data-name="Start" aria-labelledby="h-hero">
+  <div class="wrap">
+    <div class="reveal">
+      <p class="kicker eng"><span class="dot" aria-hidden="true"></span>Usage · one real session</p>
+      <h1 id="h-hero"><span class="rf" data-text="Card to catalogue.">Card to catalogue<span class="rf-dot">.</span></span><span class="l2">Eight steps, real output.</span></h1>
+    </div>
+    <div class="hero-grid">
+      <div class="reveal">
+        <p class="lede">A 17-frame M11-P shoot, recorded on 3 October 2026: copied off the card, judged, checked, sorted and handed to Capture One. Every block below is what the terminal printed. Your numbers will differ.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#install">Start with step one</a>
+          <a class="btn btn-ghost" href="index.html">Back to the overview</a>
+        </div>
+      </div>
+      <div class="reveal">
+        <table class="spec steps">
+          <tbody>
+            <tr><th>Install</th><td><code>brew install jefflaplante/tap/cull</code></td></tr>
+            <tr><th>Copy the card</th><td><code>cull offload</code></td></tr>
+            <tr><th>Price it</th><td><code>cull judge --estimate</code></td></tr>
+            <tr><th>Judge</th><td><code>cull judge</code></td></tr>
+            <tr><th>Look</th><td><code>cull review</code></td></tr>
+            <tr><th>Tune</th><td><code>cull calibrate</code> · <code>cull decide</code></td></tr>
+            <tr><th>Before import</th><td><code>cull tag</code> · <code>cull decide --sort</code></td></tr>
+            <tr><th>After import</th><td><code>cull apply-c1</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 60 · INSTALL -->
+<section class="sec" id="install" data-n="60" data-name="Install" aria-labelledby="h-install">
+  <div class="wrap">
+    <div class="rule" aria-hidden="true"></div>
+    <header class="sec-head reveal">
+      <p class="sec-no eng"><b>60</b> Install</p>
+      <div><h2 id="h-install">One binary. <span>Apple silicon and Intel.</span></h2></div>
+    </header>
+    <div class="split">
+      <div class="reveal">
+        <div class="snippet">
+          <pre id="u-brew"><code><span class="p">$ </span>brew install jefflaplante/tap/cull</code></pre>
+          <button class="copy" type="button" data-copy="u-brew" aria-label="Copy the Homebrew command">Copy</button>
+        </div>
+        <p class="req">Or straight from the latest release:</p>
+        <div class="snippet">
+          <pre id="u-curl"><code><span class="p">$ </span>curl -fsSL https://github.com/jefflaplante/cull/releases/latest/download/cull_macos_universal.tar.gz | tar -xz &amp;&amp; sudo mv cull_macos_universal/cull /usr/local/bin/</code></pre>
+          <button class="copy" type="button" data-copy="u-curl" aria-label="Copy the download command">Copy</button>
+        </div>
+      </div>
+      <div class="reveal">
+        <table class="backends">
+          <thead><tr><th class="eng">Judging with</th><th class="eng">Needs</th></tr></thead>
+          <tbody>
+            <tr><td>Anthropic API</td><td>A key in <code>~/.anthropic/api_key</code> or <code>$ANTHROPIC_API_KEY</code></td></tr>
+            <tr><td>Your Claude subscription</td><td><code>--backend claude-code</code>, through the <code>claude</code> CLI</td></tr>
+            <tr><td>A local model</td><td><code>--backend openai</code>, any OpenAI-compatible server</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 125 · OFFLOAD -->
+<section class="sec" id="offload" data-n="125" data-name="Offload" aria-labelledby="h-offload">
+  <div class="wrap">
+    <div class="rule" aria-hidden="true"></div>
+    <header class="sec-head reveal">
+      <p class="sec-no eng"><b>125</b> Offload</p>
+      <div><h2 id="h-offload">Copy the card. <span>Every file checked.</span></h2></div>
+    </header>
+    <div class="split">
+      <div class="reveal">
+        <div class="snippet">
+          <pre id="u-offload"><code><span class="p">$ </span>cull offload /Volumes/LEICA\ M ~/Pictures --name "Forest portraits" --location "Forest Park, Portland"</code></pre>
+          <button class="copy" type="button" data-copy="u-offload" aria-label="Copy the offload command">Copy</button>
+        </div>
+        <ul class="notes">
+          <li>Plans first: the folder, where its date came from, every refusal before a byte is written.</li>
+          <li>Reads the card once, hashing as it goes; reads every copy back from the disk.</li>
+          <li><code>--backup</code> fills a second drive from the same read. <code>--dry-run</code> prints the plan.</li>
+          <li>Then scans the new folder, free: previews, faces, junk frames, sets.</li>
+        </ul>
+      </div>
+      <div class="reveal terminal">
+        <div class="term-bar"><span class="leds" aria-hidden="true"><i></i><i></i><i></i></span><span class="eng">When the copy is done</span></div>
+<pre class="term" tabindex="0"><code>copied 17, skipped 0 (already there), failed 0: 1.1 GB in 2s (624 MB/s, verified)
+<span class="k">all 17 files verified on Pictures/2025-12-28 Forest portraits: safe to format the card</span></code></pre>
+      </div>
+    </div>
+    <div class="plate shots-wide reveal">
+      <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
+      <figure class="shot">
+        <a class="zoom" href="img/offload-copying.png"><img src="img/offload-copying.png" width="972" height="106" decoding="async" loading="lazy" alt="cull offload copying: 17 of 17 DNGs, 1.1 GB, a progress bar at 545 MB of 1.0 GB, 591 MB/s, one second left."></a>
+        <figcaption><span class="eng">Copy</span><span>A real card over USB runs at about 140–216 MB/s; 992 frames took 8 minutes.</span></figcaption>
+      </figure>
+      <figure class="shot">
+        <a class="zoom" href="img/offload-scanning.png"><img src="img/offload-scanning.png" width="972" height="306" decoding="async" loading="lazy" alt="The scan after offload: frames listed with their 9504x6320 preview and a detected face score, ten of 17 done."></a>
+        <figcaption><span class="eng">Scan</span><span>Free. No model call.</span></figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- 250 · ESTIMATE AND JUDGE -->
+<section class="sec" id="judge" data-n="250" data-name="Judge" aria-labelledby="h-judge">
+  <div class="wrap">
+    <div class="rule" aria-hidden="true"></div>
+    <header class="sec-head reveal">
+      <p class="sec-no eng"><b>250</b> Judge</p>
+      <div><h2 id="h-judge">Price it, then judge it. <span>The model assesses; Go decides.</span></h2></div>
+    </header>
+    <div class="split">
+      <div class="reveal">
+        <div class="snippet">
+          <pre id="u-est"><code><span class="p">$ </span>cull judge --estimate "$SHOOT"</code></pre>
+          <button class="copy" type="button" data-copy="u-est" aria-label="Copy the estimate command">Copy</button>
+        </div>
+        <div class="terminal" style="margin:14px 0 26px">
+<pre class="term" tabindex="0"><code>estimate: 17 frames × ~6k in / ~1k out tokens ≈ $0.37 at list price (claude-sonnet-5-5)
+ranking ≈ 3 call(s), $0.09 at list price</code></pre>
+        </div>
+        <div class="snippet">
+          <pre id="u-judge"><code><span class="p">$ </span>cull judge --backend claude-code --write-xmp "$SHOOT"</code></pre>
+          <button class="copy" type="button" data-copy="u-judge" aria-label="Copy the judge command">Copy</button>
+        </div>
+        <ul class="notes">
+          <li>Sharpness at the eyes on a native-resolution crop; exposure, composition, eyes and expression; up to eight content keywords.</li>
+          <li>Near-identical frames are ranked side by side; the best of each set stay keep.</li>
+          <li><code>--batch</code> halves the API price. <code>--max-cost</code> caps it. <code>--resume</code> picks up after Ctrl-C.</li>
+        </ul>
+      </div>
+      <div class="reveal">
+        <dl class="figures">
+          <div><dt class="eng">Keep</dt><dd class="num" data-count="14">14</dd></div>
+          <div><dt class="eng">Review</dt><dd class="num" data-count="2">2</dd></div>
+          <div><dt class="eng">Cull</dt><dd class="num" data-count="1">1</dd></div>
+        </dl>
+        <p class="fig-note">1 minute 56 seconds. The cull: M1103817, missed focus, sharpness 2.5. Review: M1104110, soft with her eyes partly closed; M1103821, 0.50% of its raw highlights clipped.</p>
+      </div>
+    </div>
+    <div class="plate shots-wide reveal">
+      <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
+      <figure class="shot">
+        <a class="zoom" href="img/judge-running.png"><img src="img/judge-running.png" width="1026" height="386" decoding="async" loading="lazy" alt="cull judge mid-run: ten of 17 frames with their verdicts and scores, a progress bar with 44 seconds left, and the tally keep 7, review 2, cull 1."></a>
+        <figcaption><span class="eng">Judging</span><span>Each verdict as it lands, the running tally, and the time left.</span></figcaption>
+      </figure>
+      <figure class="shot">
+        <a class="zoom" href="img/judge-ranking.png"><img src="img/judge-ranking.png" width="1026" height="566" decoding="async" loading="lazy" alt="cull judge after every frame was judged: all 17 verdict lines, the judge bar done, and the rank bar starting on two sets; keep 14, review 2, cull 1."></a>
+        <figcaption><span class="eng">Ranking</span><span>Two near-identical pairs, compared side by side.</span></figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- 500 · REVIEW -->
+<section class="sec" id="review" data-n="500" data-name="Review" aria-labelledby="h-review">
+  <div class="wrap">
+    <div class="rule" aria-hidden="true"></div>
+    <header class="sec-head reveal">
+      <p class="sec-no eng"><b>500</b> Review</p>
+      <div><h2 id="h-review">Look for yourself. <span>Your labels win.</span></h2></div>
+    </header>
+    <div class="split">
+      <div class="reveal">
+        <div class="snippet">
+          <pre id="u-review"><code><span class="p">$ </span>cull review "$SHOOT"</code></pre>
+          <button class="copy" type="button" data-copy="u-review" aria-label="Copy the review command">Copy</button>
+        </div>
+        <p style="margin-top:18px">A contact sheet opens in your browser. Every key saves to <code>cull-labels.jsonl</code> and the frame&rsquo;s sidecar. Sets are boxed; <b>−</b> and <b>+</b> keep the top few by rank.</p>
+      </div>
+      <div class="reveal">
+        <table class="spec steps">
+          <tbody>
+            <tr><th>K · R · C · U</th><td>Keep, review, cull, clear</td></tr>
+            <tr><th>1–5 · 0</th><td>Stars</td></tr>
+            <tr><th>Z</th><td>100%, opened on the subject</td></tr>
+            <tr><th>S</th><td>The frame&rsquo;s set side by side</td></tr>
+            <tr><th>N · [ · ]</th><td>Next unlabelled frame; previous, next set</td></tr>
+            <tr><th>, · .</th><td>Exposure −/+ 0.1 EV, previewed on the page</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 1000 · TUNE -->
+<section class="sec" id="tune" data-n="1000" data-name="Tune" aria-labelledby="h-tune">
+  <div class="wrap">
+    <div class="rule" aria-hidden="true"></div>
+    <header class="sec-head reveal">
+      <p class="sec-no eng"><b>1000</b> Tune</p>
+      <div><h2 id="h-tune">Check it against you. <span>Free, no model calls.</span></h2></div>
+    </header>
+    <div class="split">
+      <div class="reveal">
+        <div class="snippet">
+          <pre id="u-cal"><code><span class="p">$ </span>cull calibrate "$SHOOT"</code></pre>
+          <button class="copy" type="button" data-copy="u-cal" aria-label="Copy the calibrate command">Copy</button>
+        </div>
+        <div class="snippet" style="margin-top:12px">
+          <pre id="u-dec"><code><span class="p">$ </span>cull decide --review-below-sharpness 7 "$SHOOT"</code></pre>
+          <button class="copy" type="button" data-copy="u-dec" aria-label="Copy the decide command">Copy</button>
+        </div>
+      </div>
+      <div class="reveal">
+        <ul class="notes">
+          <li><code>calibrate</code> reports false culls (you said keep, it culled), missed culls and the review rate, and sweeps the thresholds.</li>
+          <li><code>decide</code> re-applies the policy to the stored assessments. The policy is saved in the report; a flag you type overrides only its own setting.</li>
+          <li>Nothing should auto-apply until it&rsquo;s calibrated on your own frames.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2000 · BEFORE IMPORT -->
+<section class="sec" id="sort" data-n="2000" data-name="Before import" aria-labelledby="h-sort">
+  <div class="wrap">
+    <div class="rule" aria-hidden="true"></div>
+    <header class="sec-head reveal">
+      <p class="sec-no eng"><b>2000</b> Before import</p>
+      <div><h2 id="h-sort">Tag it, sort it. <span>Then import keep and review.</span></h2></div>
+    </header>
+    <div class="split">
+      <div class="reveal">
+        <div class="snippet">
+          <pre id="u-tag"><code><span class="p">$ </span>cull tag --event "Fall session" --keyword family "$SHOOT"</code></pre>
+          <button class="copy" type="button" data-copy="u-tag" aria-label="Copy the tag command">Copy</button>
+        </div>
+        <div class="terminal" style="margin:14px 0 26px">
+<pre class="term" tabindex="0"><code>event: Fall session
+location: Forest Park, Portland
+keywords: family</code></pre>
+        </div>
+        <div class="snippet">
+          <pre id="u-sort"><code><span class="p">$ </span>cull decide --write-xmp --sort "$SHOOT"</code></pre>
+          <button class="copy" type="button" data-copy="u-sort" aria-label="Copy the sort command">Copy</button>
+        </div>
+        <div class="terminal" style="margin-top:14px">
+<pre class="term" tabindex="0"><code>decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull/, 0 back into the shoot folder</code></pre>
+        </div>
+      </div>
+      <div class="reveal">
+        <dl class="figures">
+          <div><dt class="eng">keep/</dt><dd class="num">14</dd></div>
+          <div><dt class="eng">review/</dt><dd class="num">2</dd></div>
+          <div><dt class="eng">cull/</dt><dd class="num">1</dd></div>
+        </dl>
+        <ul class="notes">
+          <li>Each sidecar carries your stars, a colour label, <code>cull:keep</code>, and the keywords: <code>portrait</code>, <code>smile</code>, <code>woodpile</code>&hellip; plus <code>Fall session</code> and <code>Forest Park, Portland</code>, nested in Capture One.</li>
+          <li>Sort before importing: a catalogue loses track of frames moved afterwards. <code>cull restore</code> undoes it.</li>
+          <li><code>cull offload --verify "$SHOOT"</code> re-checks every copy, even after sorting: <code>17 verified, 0 missing or different</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4000 · CAPTURE ONE -->
+<section class="sec" id="capture-one" data-n="4000" data-name="Capture One" aria-labelledby="h-c1">
+  <div class="wrap">
+    <div class="rule" aria-hidden="true"></div>
+    <header class="sec-head reveal">
+      <p class="sec-no eng"><b>4000</b> Capture One</p>
+      <div><h2 id="h-c1">After import, <span>push changes in.</span></h2></div>
+    </header>
+    <div class="split">
+      <div class="reveal">
+        <div class="snippet">
+          <pre id="u-probe"><code><span class="p">$ </span>cull apply-c1 --probe "$SHOOT" | osascript -</code></pre>
+          <button class="copy" type="button" data-copy="u-probe" aria-label="Copy the probe command">Copy</button>
+        </div>
+        <div class="snippet" style="margin-top:12px">
+          <pre id="u-apply"><code><span class="p">$ </span>cull apply-c1 --run --exposure "$SHOOT"</code></pre>
+          <button class="copy" type="button" data-copy="u-apply" aria-label="Copy the apply command">Copy</button>
+        </div>
+      </div>
+      <div class="reveal">
+        <ul class="notes">
+          <li>Colour tags, keywords and your stars on images already in the catalogue. A dry run by default: read the AppleScript first.</li>
+          <li><code>--exposure</code> sets the EV you chose in review. Model suggestions apply only where Capture One still holds the default.</li>
+          <li>Your DNGs are never modified. Every move is recorded and undone by <code>cull restore</code>.</li>
+        </ul>
+        <div class="cta-row" style="margin-top:30px">
+          <a class="btn btn-primary" href="https://github.com/jefflaplante/cull/releases/latest">Download for macOS</a>
+          <a class="btn btn-ghost" href="https://github.com/jefflaplante/cull/blob/main/USAGE.md">The full guide</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+
+<footer class="site-foot">
+  <div class="wrap foot-grid">
+    <a class="mark" href="index.html" aria-label="cull, overview"><span class="dot" aria-hidden="true"></span>cull</a>
+    <p>cull is independent open-source software, not affiliated with or endorsed by Leica Camera AG. Leica and M11-P are trademarks of Leica Camera AG.</p>
+    <a class="foot-link eng" href="https://github.com/jefflaplante/cull" style="color:var(--text)"><span>Open source on GitHub</span><span aria-hidden="true">→</span></a>
+  </div>
+</footer>
+
+<!-- margin dial (desktop) -->
+<div class="dial-layer" id="dialLayer">
+  <nav class="dial" id="dial" aria-label="Section dial">
+    <div class="dial-knurl rot"></div>
+    <div class="dial-sheen"></div>
+    <div class="dial-face"></div>
+    <div class="dial-ticks rot"></div>
+    <div class="dial-nums rot" id="dialNums"></div>
+    <div class="dial-hub"></div>
+  </nav>
+  <span class="dial-index" id="dialIndex" aria-hidden="true"></span>
+  <p class="dial-cap eng" id="dialCap" aria-hidden="true"><b>30</b> · Start</p>
+</div>
+
+<!-- compact dial (phones, tablets) -->
+<div class="pill" id="pill">
+  <button class="pill-btn" id="pillBtn" type="button" aria-expanded="false" aria-controls="pillMenu">
+    <span class="pill-knurl" id="pillKnurl" aria-hidden="true"></span>
+    <span class="pill-idx" aria-hidden="true"></span>
+    <span class="pill-num" id="pillNum">30</span>
+    <span id="pillName">Start</span>
+    <span class="sr-only">, open section menu</span>
+  </button>
+  <ul class="pill-menu" id="pillMenu" hidden></ul>
+</div>
+
+<script src="site.js"></script>
+</body>
+</html>

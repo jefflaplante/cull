@@ -55,7 +55,6 @@ jobs:
             desc "Pre-import culling for DNG shoots: verified offload, focus checked at the eyes"
             homepage "https://code.jefflaplante.com/cull/"
             url "https://github.com/jefflaplante/cull/releases/download/${GITHUB_REF_NAME}/cull_macos_universal.tar.gz"
-            version "${VERSION}"
             sha256 "${SHA}"
 
             depends_on :macos

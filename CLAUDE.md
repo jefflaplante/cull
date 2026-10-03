@@ -31,8 +31,9 @@ make vet
 ## Layout
 
 - `cmd/cull` — main; signal-aware context into cobra (binary `cull`; module and repo `github.com/jefflaplante/cull`, first called gophotocull)
-- `internal/cli` — cobra tree: `scan`, `judge` (model; code in cull.go), `rank` (rank.go),
-  `decide`, `review`, `calibrate`, `apply-c1`, `restore`, `version` (+ built-in `completion`);
+- `internal/cli` — cobra tree: `offload`, `scan`, `judge` (model; code in cull.go), `rank` (rank.go),
+  `decide`, `review`, `calibrate`, `apply-c1`, `restore`, `status`, `tag`, `import-labels`,
+  `version` (+ built-in `completion`);
   backend.go (`--backend`/`--model`/credential flags shared by judge and rank)
 - `internal/dng` — pure-Go TIFF IFD/SubIFD walk for the largest reduced-resolution
   JPEG; reads IFDs + preview bytes only. `exiftool` fallback.

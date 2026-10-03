@@ -11,10 +11,14 @@ the decision. Its priorities:
   suggested crop.
 
 It also groups similar frames into sets and ranks each set side by side, so you keep
-the best few of a sequence. Results go to XMP sidecars and to Capture One.
+the best few of a sequence. Before any of that, it copies the card with every file
+verified. Afterwards it sorts frames into folders and writes sidecars with keywords, for
+Capture One or Lightroom.
 
-For a step-by-step walkthrough of a shoot, from folder to Capture One, see
-[WORKFLOW.md](WORKFLOW.md).
+![cull judge running: per-frame verdicts, progress, and keep/review/cull tallies](docs/images/judge-running.png)
+
+For a whole session with real output at every step, from the card to Capture One, see
+[USAGE.md](USAGE.md).
 
 - [Camera support](#camera-support)
 - [Install](#install)
@@ -82,18 +86,43 @@ go install github.com/jefflaplante/cull/cmd/cull@latest
 ## Quick start
 
 ```sh
-cull offload /Volumes/LEICA\ M ~/Pictures --name shoot   # card → verified copy → free scan
-cull scan ~/Pictures/shoot                # free: previews, faces, EXIF; no model calls
-cull judge --estimate ~/Pictures/shoot    # free: what judging would cost
-cull judge ~/Pictures/shoot               # model assessment + decisions + set ranking
-cull review ~/Pictures/shoot              # browser: check, label keep/review/cull, add stars
-cull decide --write-xmp --sort ~/Pictures/shoot   # sidecars; keep/ review/ cull/ for import
+cull offload /Volumes/LEICA\ M ~/Pictures --name "Forest portraits"   # card → verified copy → free scan
+S=~/Pictures/"2026-10-02 Forest portraits"   # the shoot folder offload created
+cull judge --estimate "$S"                    # free: what judging would cost
+cull judge "$S"                               # model assessment + decisions + set ranking
+cull review "$S"                              # browser: check, label keep/review/cull, add stars
+cull decide --write-xmp --sort "$S"           # sidecars; keep/ review/ cull/ for import
 ```
 
-Everything is recorded in `cull-report.json` beside the photos. `cull restore <dir>`
+Everything is recorded in `cull-report.json` in the shoot folder. `cull restore "$S"`
 undoes `--sort` and `--move-culled`.
 
+**A real run, 17 frames:**
+
+```
+$ cull offload LEICA_M Pictures --name "Forest portraits" --location "Forest Park, Portland"
+…
+copied 17, skipped 0 (already there), failed 0: 1.1 GB in 2s (624 MB/s, verified)
+all 17 files verified on Pictures/2025-12-28 Forest portraits: safe to format the card
+
+$ cull judge --backend claude-code --write-xmp "Pictures/2025-12-28 Forest portraits"
+…
+[1/17] M1103817.DNG CULL  sharp 2.5(missed_focus) exp 7.0(+0.3EV) comp 6.5(good)  [model: Woman's eyes with glasses]
+[3/17] M1103823.DNG KEEP  sharp 8.6(sharp) exp 6.5(+0.5EV) comp 6.5(croppable)  [face q=287]
+…
+ranked set 1 (2 frames): M1104115.DNG wins — … Sharpness at the eyes is the top priority, so Frame 2 wins narrowly.
+results: map[cull:1 keep:14 review:2]
+
+$ cull decide --write-xmp --sort "Pictures/2025-12-28 Forest portraits"
+decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull/, 0 back into the shoot folder
+```
+
+Every step, with its full output and screenshots of the live progress view, is in
+[USAGE.md](USAGE.md).
+
 ## Offload: card to shoot folder
+
+![cull offload copying with a live progress bar](docs/images/offload-copying.png)
 
 `cull offload <card>... <dest>` copies every DNG on the cards into one folder per run,
 `<dest>/<YYYY-MM-DD> <name>/`. It then scans that folder, which is free.
@@ -158,14 +187,16 @@ Junk frames get your tags but no content keywords, since the model never saw the
 
 | Command | What it does | Calls a model |
 |---|---|---|
-| `scan <dir>` | Extract previews, EXIF, faces and look fingerprints; write the report | no |
+| `offload <card>... <dest>` | Copy a card into a dated shoot folder, every file verified; then scan it (`--verify <folder>` re-checks later) | no |
+| `scan <dir>` | Extract previews, EXIF, faces and look fingerprints, flag junk frames; write the report | no |
 | `judge <dir>` | Assess every frame, decide keep/review/cull, then rank the sets | yes |
 | `rank <dir>` | Rank the sets in an existing report (after `judge --no-rank`, or after new frames) | yes |
-| `decide <dir>` | Re-apply the policy to stored assessments; regroup sets; write sidecars or move culls | no |
+| `decide <dir>` | Re-apply the policy to stored assessments; regroup sets; write sidecars; sort into keep/ review/ cull/ (`--sort`) or move culls | no |
 | `review <dir>` | Browser contact sheet for checking, labelling and rating frames | no |
 | `calibrate <report>...` | Compare a report's decisions with your labels; sweep thresholds | no |
 | `apply-c1 <dir>` | AppleScript that applies verdicts, stars and keywords in Capture One (dry run by default) | no |
-| `restore <dir>` | Move frames that `--move-culled` moved back where they were | no |
+| `tag <dir>` | Show or change the shoot's project, event, location and keywords | no |
+| `restore <dir>` | Move frames that `--sort` or `--move-culled` moved back where they were | no |
 | `status <dir>` | Where a shoot stands (judged, labelled, ranked, spent) and the next command to run | no |
 | `version`, `completion` | Build version; shell completion | no |
 

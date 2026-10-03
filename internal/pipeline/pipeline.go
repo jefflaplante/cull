@@ -502,6 +502,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 		stored = prev.Tags
 	}
 	rep.Tags = report.MergeTags(stored, cfg.Tags)
+	cfg.Tags = rep.Tags // every sidecar this run writes carries the merged tags
 	if cfg.Resume {
 		prev, err := report.Load(cfg.ReportPath)
 		if err == nil && prev.Relocate(cfg.ReportPath, cfg.Dir) {
@@ -650,7 +651,7 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 		o := DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP, Labels: lab}
 		for i := range rep.Results {
 			if changed[i] {
-				writeDecidedSidecar(&rep.Results[i], o)
+				writeDecidedSidecar(&rep.Results[i], o, rep.Tags)
 			}
 		}
 		// finish() (stages.go) writes each frame's sidecar during processing, before
@@ -662,7 +663,7 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 			if changed[i] || r.Evaluation == nil || r.Error != "" || r.Group == nil {
 				continue
 			}
-			writeDecidedSidecar(r, o)
+			writeDecidedSidecar(r, o, rep.Tags)
 		}
 	}
 	if cfg.pinner != nil {

@@ -215,7 +215,7 @@ func finish(cfg Config, res *report.Result, e *eval.Evaluation, orientation int)
 		return
 	}
 	p := xmp.Path(res.File)
-	switch err := xmp.Write(p, labels.Sidecar(*res, labels.Entry{}, orientation, cfg.XMPDevelop), cfg.OverwriteXMP); {
+	switch err := xmp.Write(p, labels.Sidecar(*res, labels.Entry{}, orientation, cfg.XMPDevelop, cfg.Tags), cfg.OverwriteXMP); {
 	case err == nil:
 		res.XMP = p
 	case errors.Is(err, xmp.ErrExists):

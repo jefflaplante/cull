@@ -27,7 +27,8 @@ var ErrExists = errors.New("sidecar already exists")
 type Sidecar struct {
 	Rating     int      // 1-5; 0 omits xmp:Rating
 	Label      string   // e.g. "Red"; empty to omit
-	Keywords   []string // dc:subject
+	Keywords   []string // dc:subject: plain keywords
+	Hierarchy  []string // lr:hierarchicalSubject: "parent|child" paths (Capture One and Lightroom nest them)
 	ExposureEV *float64 // crs:Exposure2012
 	Crop       *Box     // crs:Crop*, normalized, in the raw's stored (unrotated) orientation
 }
@@ -136,13 +137,19 @@ func Render(s Sidecar) []byte {
 			`crs:CropAngle="0"`,
 		)
 	}
-	var kw string
-	if len(s.Keywords) > 0 {
+	bag := func(tag string, items []string) string {
+		if len(items) == 0 {
+			return ""
+		}
 		var li strings.Builder
-		for _, k := range s.Keywords {
+		for _, k := range items {
 			fmt.Fprintf(&li, "\n     <rdf:li>%s</rdf:li>", esc(k))
 		}
-		kw = fmt.Sprintf("\n   <dc:subject>\n    <rdf:Bag>%s\n    </rdf:Bag>\n   </dc:subject>\n  ", li.String())
+		return fmt.Sprintf("\n   <%s>\n    <rdf:Bag>%s\n    </rdf:Bag>\n   </%s>", tag, li.String(), tag)
+	}
+	kw := bag("dc:subject", s.Keywords) + bag("lr:hierarchicalSubject", s.Hierarchy)
+	if kw != "" {
+		kw += "\n  "
 	}
 	body := "/>"
 	if kw != "" {
@@ -155,6 +162,7 @@ func Render(s Sidecar) []byte {
     xmlns:xmp="http://ns.adobe.com/xap/1.0/"
     xmlns:dc="http://purl.org/dc/elements/1.1/"
     xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+    xmlns:lr="http://ns.adobe.com/lightroom/1.0/"
     %s%s
  </rdf:RDF>
 </x:xmpmeta>

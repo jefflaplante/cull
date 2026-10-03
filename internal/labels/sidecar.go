@@ -25,7 +25,7 @@ var colors = map[eval.Decision]string{eval.Keep: "Green", eval.Review: "Yellow",
 // sets stars), the effective verdict as colour and keyword, plus
 // cull:labeled when the verdict is the user's and cull:best when it is the top
 // of its set (Group.Best). Develop settings only when asked, and never for a cull.
-func Sidecar(r report.Result, l Entry, orientation int, develop bool) xmp.Sidecar {
+func Sidecar(r report.Result, l Entry, orientation int, develop bool, tags *report.Tags) xmp.Sidecar {
 	d, yours := Effective(r, l)
 	sc := xmp.Sidecar{Rating: l.Stars, Label: colors[d]}
 	if d != "" {
@@ -37,6 +37,16 @@ func Sidecar(r report.Result, l Entry, orientation int, develop bool) xmp.Sideca
 	if r.Group != nil && r.Group.Best {
 		sc.Keywords = append(sc.Keywords, "cull:best")
 	}
+	// Content keywords (the model's; junk frames have none) and the shoot's tags: plain
+	// words in dc:subject, and paths that Capture One and Lightroom nest.
+	if r.Evaluation != nil {
+		for _, k := range r.Evaluation.Keywords {
+			sc.Keywords = append(sc.Keywords, k)
+			sc.Hierarchy = append(sc.Hierarchy, "content|"+k)
+		}
+	}
+	sc.Keywords = append(sc.Keywords, tags.Plain()...)
+	sc.Hierarchy = append(sc.Hierarchy, tags.Paths()...)
 	if l.EV != nil { // yours, from review: for Adobe tools (Capture One ignores it; apply-c1 carries it there)
 		v := *l.EV
 		sc.ExposureEV = &v
@@ -61,7 +71,7 @@ func Sidecar(r report.Result, l Entry, orientation int, develop bool) xmp.Sideca
 // cull's marker (xmp.Ours: its record was lost in a crash), is rewritten; any other
 // existing one is left alone (xmp.ErrExists) unless overwrite. On success the path
 // is recorded in r.XMP, and whether it carries develop settings in r.XMPDevelop.
-func WriteSidecar(r *report.Result, l Entry, develop, overwrite bool) error {
+func WriteSidecar(r *report.Result, l Entry, develop, overwrite bool, tags *report.Tags) error {
 	at := r.File
 	if r.MovedTo != "" {
 		at = r.MovedTo
@@ -71,7 +81,7 @@ func WriteSidecar(r *report.Result, l Entry, develop, overwrite bool) error {
 	if r.Preview != nil {
 		orientation = r.Preview.Orientation
 	}
-	if err := xmp.Write(p, Sidecar(*r, l, orientation, develop), r.XMP == p || overwrite || xmp.Ours(p)); err != nil {
+	if err := xmp.Write(p, Sidecar(*r, l, orientation, develop, tags), r.XMP == p || overwrite || xmp.Ours(p)); err != nil {
 		return err
 	}
 	r.XMP, r.XMPDevelop = p, develop

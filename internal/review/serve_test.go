@@ -233,7 +233,7 @@ func TestServerKeepsDevelopSettings(t *testing.T) {
 	rep, _ := report.Load(rp)
 	r := &rep.Results[1] // L2, keep
 	r.Evaluation.Exposure = eval.Exposure{Status: "fixable", EVAdjust: 0.5}
-	if err := labels.WriteSidecar(r, labels.Entry{}, true, false); err != nil {
+	if err := labels.WriteSidecar(r, labels.Entry{}, true, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	r.XMPDevelop = true // what WriteSidecar records once it knows to

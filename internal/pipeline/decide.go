@@ -132,7 +132,7 @@ func redecide(rep *report.Report, o DecideOptions, log io.Writer, between func()
 			if r.Error != "" || (r.Evaluation == nil && (r.Junk == nil || r.Decision == "")) {
 				continue
 			}
-			writeDecidedSidecar(r, o)
+			writeDecidedSidecar(r, o, rep.Tags)
 		}
 	}
 	if mode != placeNone {
@@ -145,8 +145,8 @@ func redecide(rep *report.Report, o DecideOptions, log io.Writer, between func()
 // from the effective verdict and the user's stars (o.Labels; nil = the model's
 // verdict alone). A sidecar the report records as ours is rewritten; any other
 // existing one is left alone unless OverwriteXMP.
-func writeDecidedSidecar(r *report.Result, o DecideOptions) {
-	switch err := labels.WriteSidecar(r, o.Labels[filepath.Base(r.File)], o.XMPDevelop, o.OverwriteXMP); {
+func writeDecidedSidecar(r *report.Result, o DecideOptions, tags *report.Tags) {
+	switch err := labels.WriteSidecar(r, o.Labels[filepath.Base(r.File)], o.XMPDevelop, o.OverwriteXMP, tags); {
 	case err == nil:
 	case errors.Is(err, xmp.ErrExists):
 		addFixup(r, "xmp: sidecar exists and is not ours; not overwritten")

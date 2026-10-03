@@ -101,3 +101,19 @@ func TestOursRecognisesOnlyCullSidecars(t *testing.T) {
 		t.Fatalf("mine=%v theirs=%v", Ours(mine), Ours(theirs))
 	}
 }
+
+func TestRenderHierarchy(t *testing.T) {
+	b := Render(Sidecar{Keywords: []string{"cull:keep", "Smith & Jones <2026>"}, Hierarchy: []string{"project|Smith & Jones <2026>", "content|forest"}})
+	s := string(b)
+	for _, want := range []string{`xmlns:lr="http://ns.adobe.com/lightroom/1.0/"`, "<lr:hierarchicalSubject>", "<rdf:li>project|Smith &amp; Jones &lt;2026&gt;</rdf:li>", "<rdf:li>content|forest</rdf:li>"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in\n%s", want, s)
+		}
+	}
+	if err := xml.Unmarshal(b[strings.Index(s, "<x:xmpmeta"):strings.Index(s, "<?xpacket end")], new(struct{})); err != nil {
+		t.Fatalf("not XML: %v", err)
+	}
+	if strings.Contains(string(Render(Sidecar{Keywords: []string{"a"}})), "hierarchicalSubject") {
+		t.Fatal("hierarchy bag written without paths")
+	}
+}

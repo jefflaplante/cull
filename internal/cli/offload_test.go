@@ -155,3 +155,38 @@ func TestDecideSortSaysSorted(t *testing.T) {
 		t.Fatalf("decide --sort summary:\n%s", out)
 	}
 }
+
+// Tags given to offload are stored even when no scan follows the copy, so --no-scan
+// doesn't silently drop them; a dry run says it stores nothing.
+func TestOffloadNoScanStoresTags(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cardDir, dest := fakeCard(t, "M1.DNG"), t.TempDir()
+	out, err := run(t, "offload", "--no-scan", "--name", "Test", "--date", "2026-10-02", "--location", "Forest Park, Portland", "--keyword", "family", cardDir, dest)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	folder := filepath.Join(dest, "2026-10-02 Test")
+	out, err = run(t, "tag", folder)
+	if err != nil || !strings.Contains(out, "location: Forest Park, Portland") || !strings.Contains(out, "keywords: family") {
+		t.Fatalf("tags not stored: %v\n%s", err, out)
+	}
+	// A later scan keeps them.
+	if out, err := run(t, "scan", folder); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, _ := run(t, "tag", folder); !strings.Contains(out, "location: Forest Park, Portland") {
+		t.Fatalf("scan dropped the tags:\n%s", out)
+	}
+}
+
+func TestOffloadDryRunSaysTagsNotStored(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cardDir, dest := fakeCard(t, "M1.DNG"), t.TempDir()
+	out, err := run(t, "offload", "--dry-run", "--name", "Test", "--event", "Ceremony", cardDir, dest)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "not stored") {
+		t.Fatalf("no note that the dry run stores no tags:\n%s", out)
+	}
+}

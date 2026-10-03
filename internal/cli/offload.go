@@ -3,6 +3,8 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -10,6 +12,7 @@ import (
 
 	"github.com/jefflaplante/cull/internal/offload"
 	"github.com/jefflaplante/cull/internal/pipeline"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 func newOffloadCmd(so *sharedOpts) *cobra.Command {
@@ -49,6 +52,10 @@ judge it next.`,
 				return runVerify(cmd, so, args[0])
 			}
 			o.Sources, o.Dest = args[:len(args)-1], args[len(args)-1]
+			tags, err := so.tags.tags() // checked before copying, not after
+			if err != nil {
+				return err
+			}
 			p, err := offload.MakePlan(o)
 			if err != nil {
 				if p != nil {
@@ -60,11 +67,19 @@ judge it next.`,
 			defer out.Close()
 			fmt.Fprintln(out.Log, p.Summary())
 			if dryRun {
+				if tags != nil {
+					fmt.Fprintln(out.Log, "tags not stored: --dry-run writes nothing")
+				}
 				return nil
 			}
 			res, runErr := offload.Run(cmd.Context(), p, out.UI)
 			out.Close()
 			w := cmd.ErrOrStderr()
+			if tags != nil {
+				if err := storeTags(so, p.Dests[0], tags); err != nil {
+					fmt.Fprintf(w, "warning: tags not stored (%v); set them with cull tag\n", err)
+				}
+			}
 			mbps := 0.0
 			if s := res.Elapsed.Seconds(); s > 0 {
 				mbps = float64(res.Bytes) / 1e6 / s
@@ -131,6 +146,28 @@ func runVerify(cmd *cobra.Command, so *sharedOpts, folder string) error {
 		return fmt.Errorf("%d file(s) in %s can't be vouched for", len(v.Unrecorded), folder)
 	}
 	return nil
+}
+
+// storeTags saves offload's tags in the shoot folder's report, creating one that holds
+// only them when the folder has none yet. The scan after the copy would store them
+// too, but it doesn't run with --no-scan or after an incomplete copy.
+func storeTags(so *sharedOpts, folder string, given *report.Tags) error {
+	if _, err := os.Stat(folder); err != nil {
+		return nil // nothing was copied, so there is no shoot folder to tag
+	}
+	cfg, err := so.base(folder)
+	if err != nil {
+		return err
+	}
+	rep, err := report.Load(cfg.ReportPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		rep, err = &report.Report{SchemaVersion: report.SchemaVersion, Dir: cfg.Dir}, nil
+	}
+	if err != nil {
+		return err
+	}
+	rep.Tags = report.MergeTags(rep.Tags, given)
+	return rep.Save(cfg.ReportPath)
 }
 
 // scanShoot runs the free scan on a freshly offloaded folder, as `cull scan` would.

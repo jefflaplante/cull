@@ -131,7 +131,7 @@ make vet
   the same visible detail as a macOS ImageIO raw render (`sips`) of the same crop
   (checked on 2 frames); the raw's extra high-frequency energy is mostly noise.
 - EXIF orientation handling is correct for 1 and 8 (matches Apple's raw render).
-  6 and 3 not yet seen.
+  6: one frame on the user's card (2026-10-02), not yet checked visually. 3 not yet seen.
 - **Top-k raw Laplacian-variance tiles do not find the subject.** They are
   contrast-driven: they picked sunlit out-of-focus foreground litter, bark, or fabric,
   and landed on the face in 1/12 frames. A contrast-normalized fine/coarse ratio did
@@ -362,6 +362,25 @@ balance`, but no run has tested them yet.
       re-cached page came from the device.
     - **The tests tolerate ≤ 1% resident** at verify start. Without eviction, 100% is
       resident, so they still catch a failure.
+
+### Junk filter (2026-10-02, the 992 frames copied to Grey and the 17 samples)
+
+Each frame's luma is measured: the share near-black (< 16), the share blown (≥ 250), and
+the contrast (std) of a 64 px thumbnail.
+
+| Rule | Threshold | Real frames |
+|---|---|---|
+| black | ≥ 98% near-black | max 74% (an underground scene) |
+| white | ≥ 95% blown | the blank M1103546 99.95%; next 82% (the high-key Smith Tower) |
+| uniform | contrast < 3 | M1103546 0.31; every real frame ≥ 10.0 (low-key portraits in shade: M1103899, M1103879, M1104048) |
+
+- **Fine detail doesn't work as a rule.** The 90th-percentile cell and the most-structured
+  cell both rank sharp shallow-focus portraits (M1103914, M1103917, M1103568) and a
+  soft-sky building (M1103502) below the blank frame. Don't reintroduce it.
+- **`cull scan` on all 992 (read-only, `-o` to a temp folder):** 9 min 50 s at `-j 4`,
+  1.88 GB peak. Junk: 1 (M1103546, white), decided cull. The 17 samples: 0.
+- **One frame has EXIF orientation 6** (the first seen): 492 have 1, 499 have 8. Its
+  display hasn't been checked visually.
 
 ### Sequences: look distances on the 17 sample frames (2026-09-28)
 

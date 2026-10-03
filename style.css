@@ -679,3 +679,46 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
   .cmds .copy{padding:0 12px}
   .cmd-out{padding:10px 14px;font-size:12px}
 }
+
+/* usage: command reference */
+.ref-intro{max-width:72ch;color:var(--muted);margin:0 0 18px}
+.ref-intro code,.ref-cmd code,.flag dd code{font-size:.86em}
+.ref-index{display:flex;flex-wrap:wrap;gap:8px;margin:26px 0 clamp(40px,5vw,64px);padding:0;list-style:none}
+.ref-index a{display:inline-block;padding:7px 12px;border:1px solid var(--line-2);border-radius:3px;font:500 14px/1 var(--mono);color:var(--text);text-decoration:none;background:rgba(255,255,255,.02);transition:border-color .2s,background .2s}
+.ref-index a:hover{border-color:var(--red);background:rgba(217,38,28,.08)}
+.ref-index a span{color:var(--dim)}
+.ref-cmd{border-top:1px solid var(--line-2);padding:clamp(34px,4vw,52px) 0 10px;scroll-margin-top:96px}
+@media (min-width:760px){.ref-cmd{scroll-margin-top:170px}}
+.ref-cmd h3{margin:0 0 6px;font-size:clamp(24px,2.4vw,32px);font-weight:600;letter-spacing:-.01em}
+.ref-cmd h3 code{font:500 1em/1.2 var(--mono);color:#f6f1e6;background:none;padding:0}
+.ref-cmd h3 code b{color:var(--red-text);font-weight:500}
+.ref-sum{margin:0 0 18px;font-size:clamp(18px,1.5vw,20px);color:var(--text)}
+.ref-syn{margin:0 0 20px;font:14.5px/1.6 var(--mono);color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
+.ref-syn b{color:var(--text);font-weight:500}
+.ref-body{max-width:78ch;color:var(--muted)}
+.ref-body p{margin:0 0 14px}
+.ref-body strong{color:var(--text);font-weight:600}
+.ref-cmd .cmds{margin:22px 0 30px}
+.ref-cmd h4{margin:30px 0 4px;font:600 11px/1 var(--sans);letter-spacing:.22em;text-transform:uppercase;font-variation-settings:"wdth" 125;color:var(--dim)}
+.flags{margin:0;border-top:1px solid var(--line)}
+.flag{display:grid;gap:6px 28px;padding:16px 0 18px;border-bottom:1px solid var(--line)}
+@media (min-width:900px){.flag{grid-template-columns:minmax(0,290px) minmax(0,1fr)}}
+.flag dt{margin:0}
+.flag dt code{display:inline;font:500 15px/1.5 var(--mono);color:#f6f1e6;background:none;padding:0;overflow-wrap:anywhere}
+.flag dt .ty{display:block;margin-top:4px;font:12.5px/1.4 var(--mono);color:var(--dim)}
+.flag dd{margin:0;color:var(--muted);font-size:16.5px}
+.flag dd p{margin:0 0 8px}
+.flag dd p:last-child{margin-bottom:0}
+.ex{position:relative;display:flex;align-items:stretch;margin:10px 0 2px;border:1px solid var(--line);border-left:2px solid rgba(217,38,28,.6);border-radius:3px;background:rgba(0,0,0,.35)}
+.ex pre{margin:0;flex:1;min-width:0;padding:9px 14px;font:13.5px/1.55 var(--mono);color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
+.ex pre .p{color:var(--red-text);user-select:none;-webkit-user-select:none}
+.ex pre .c{color:var(--dim)}
+.ex .copy{padding:0 12px;font-size:9px}
+.ref-out{margin:6px 0 2px;padding:9px 14px;border:1px solid var(--line);border-radius:3px;background:rgba(0,0,0,.25);font:12.5px/1.55 var(--mono);color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
+.ref-note{margin:18px 0 0;padding:12px 16px;border-left:2px solid var(--feet);background:rgba(233,192,58,.05);color:var(--muted);font-size:16px}
+.ref-note b{color:var(--text)}
+@media (max-width:640px){
+  .flag dt code{font-size:14px}
+  .flag dd{font-size:15.5px}
+  .ex pre{font-size:12px;padding:8px 10px}
+}

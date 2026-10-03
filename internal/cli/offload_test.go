@@ -190,3 +190,13 @@ func TestOffloadDryRunSaysTagsNotStored(t *testing.T) {
 		t.Fatalf("no note that the dry run stores no tags:\n%s", out)
 	}
 }
+
+// A dry run's plan is its whole output, so -q still prints it.
+func TestOffloadQuietDryRunPrintsPlan(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cardDir, dest := fakeCard(t, "M1.DNG"), t.TempDir()
+	out, err := run(t, "offload", "-q", "--dry-run", "--name", "Test", cardDir, dest)
+	if err != nil || !strings.Contains(out, "1 of 1 DNGs to copy") {
+		t.Fatalf("%v\n%q", err, out)
+	}
+}

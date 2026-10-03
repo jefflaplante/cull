@@ -63,15 +63,17 @@ judge it next.`,
 				}
 				return err
 			}
-			out := so.out.newOutput(cmd, !dryRun)
-			defer out.Close()
-			fmt.Fprintln(out.Log, p.Summary())
 			if dryRun {
+				// The plan is a dry run's whole output, so -q doesn't hide it.
+				fmt.Fprintln(cmd.ErrOrStderr(), p.Summary())
 				if tags != nil {
-					fmt.Fprintln(out.Log, "tags not stored: --dry-run writes nothing")
+					fmt.Fprintln(cmd.ErrOrStderr(), "tags not stored: --dry-run writes nothing")
 				}
 				return nil
 			}
+			out := so.out.newOutput(cmd, true)
+			defer out.Close()
+			fmt.Fprintln(out.Log, p.Summary())
 			res, runErr := offload.Run(cmd.Context(), p, out.UI)
 			out.Close()
 			w := cmd.ErrOrStderr()

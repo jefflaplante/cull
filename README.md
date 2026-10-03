@@ -68,13 +68,32 @@ Tested on 22 sample files from [raw.pixls.us](https://raw.pixls.us) with
 
 ## Install
 
-Requires Go 1.26+ (Bubble Tea v2, the live progress view, needs it).
+**Pre-built for macOS** (one universal binary for Apple silicon and Intel), from the
+[latest release](https://github.com/jefflaplante/cull/releases/latest):
+
+```sh
+curl -fsSL https://github.com/jefflaplante/cull/releases/latest/download/cull_macos_universal.tar.gz | tar -xz
+sudo mv cull_macos_universal/cull /usr/local/bin/
+cull version
+```
+
+Each release also has a `.sha256` file to check the download against.
+
+**The binary isn't notarized by Apple.** Downloaded with `curl` as above, it runs as is.
+Downloaded in a browser, macOS quarantines it ("cannot be opened"). Clear that once with
+`xattr -d com.apple.quarantine cull`.
+
+**From source** (Go 1.26+; Bubble Tea v2, the live progress view, needs it):
 
 ```sh
 make build                                            # bin/cull, version stamped from git
 make install                                          # $GOPATH/bin/cull
 go install github.com/jefflaplante/cull/cmd/cull@latest
 ```
+
+**Releases** are built by `.github/workflows/release.yml` when a `v*` tag is pushed. A
+macOS runner runs vet and the tests, then `make dist`, then publishes the release.
+`make dist` also builds the same tarball locally.
 
 - **Optional:** `exiftool`, which finds previews in unusual locations.
 - **For the `claude-code` backend:** the `claude` CLI, logged in to your Claude

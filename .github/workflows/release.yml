@@ -1,0 +1,41 @@
+# Release: push a tag like v0.1.0 and this builds a universal macOS binary (Apple
+# silicon + Intel), runs the tests on macOS first, and publishes a GitHub release
+# with the tarball and its SHA-256.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet and test
+        run: |
+          go vet ./...
+          go test -count=1 ./...
+      - name: Build
+        run: make dist VERSION="${GITHUB_REF_NAME}"
+      - name: Check the binary
+        run: |
+          tar -xzf dist/cull_macos_universal.tar.gz -C dist
+          lipo -archs dist/cull_macos_universal/cull
+          dist/cull_macos_universal/cull version
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/cull_macos_universal.tar.gz \
+            dist/cull_macos_universal.tar.gz.sha256 \
+            --title "cull ${GITHUB_REF_NAME}" --generate-notes --verify-tag

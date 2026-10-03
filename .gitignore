@@ -9,3 +9,4 @@ cull-review/
 *.DNG
 *.dng
 .DS_Store
+dist/

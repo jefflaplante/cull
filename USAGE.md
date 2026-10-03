@@ -12,12 +12,20 @@ text says so.
 
 ## 0. Setup (once)
 
+**Pre-built for macOS** (one universal binary for Apple silicon and Intel):
+
+```sh
+curl -fsSL https://github.com/jefflaplante/cull/releases/latest/download/cull_macos_universal.tar.gz | tar -xz
+sudo mv cull_macos_universal/cull /usr/local/bin/
+```
+
+**From source** (Go 1.26 or newer):
+
 ```sh
 make build      # bin/cull
 make install    # optional: $GOPATH/bin/cull, so `cull` is on your PATH
 ```
-
-You need Go 1.26 or newer. Judging needs one of these:
+ Judging needs one of these:
 
 | Backend | How it authenticates |
 |---|---|

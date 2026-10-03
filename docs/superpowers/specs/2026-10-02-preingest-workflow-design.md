@@ -253,32 +253,55 @@ previews, faces, sets. Then it prints the next step, `cull judge --estimate <fol
 
 ## Part 3: Junk pre-filter
 
-**Where:** in frame preparation (scan and judge), from measurements already taken (luma
-statistics, fine/coarse detail). It needs no model call.
+**Where:** in frame preparation (scan and judge), from the preview's luma, which is
+already decoded. No model call.
 
-**What counts as junk:**
+**What counts as junk.** These were measured 2026-10-02 on all 992 frames of the user's
+card (on Grey) and on the 17 samples, so the rules rest on data, not guesses:
 
-| Kind | Rule (starting values, recorded in the report) |
-|---|---|
-| near-black (lens cap, misfire) | ≥ 98% of preview pixels at luma < 16 |
-| near-white (blown or flash misfire) | ≥ 95% at luma ≥ 250 |
-| featureless (pocket shot, ground blur) | the frame's best detail cell is below a floor, *and* coarse structure is nearly flat |
+| Kind | Rule | On the 992 real frames |
+|---|---|---|
+| `black` (lens cap, misfire) | ≥ 98% of preview pixels at luma < 16 | max 74% (an underground scene): none flagged |
+| `white` (blown, flash misfire) | ≥ 95% at luma ≥ 250 | one blank frame at 99.95%; next is 82% (a high-key building): 1 flagged |
+| `uniform` (any flat frame) | the luma std of a 64 px thumbnail < 3 | the blank frame scores 0.3; every real frame ≥ 10.0: 1 flagged |
+
+**Dropped:** "featureless" by fine detail (the spec's first draft). Using the "focus landed"
+cell measures, the least-structured real frames were **sharp shallow-depth-of-field
+portraits** (M1103914, M1103917, M1103568) and a soft-sky building (M1103502). Both
+the 90th-percentile cell and the single most-structured cell put real keepers below a
+blank frame. Whole-frame contrast at thumbnail scale is what separates them (0.3 against
+≥ 10.0). The nearest real frames are low-key portraits in shade (M1103899, M1103879,
+M1104048), at 10–12.
+
+**Not caught:** motion-blurred ground shots and pocket shots with some contrast left.
+The model judges those as usual. The filter only saves calls on frames that are
+unmistakably empty.
 
 **What happens:**
-- A junk frame records `junk: <kind>` with the measured values. `judge` doesn't send it to
-  the model, which saves the call, and the policy decides it.
-- The new policy action `--junk cull|review|ignore` defaults to `cull`, and is stored in
-  the report's policy like the other actions.
+- The measurements (`dark_pct`, `bright_pct`, `contrast`) go into the result's `stats`.
+  A junk frame also records `junk: {kind, ...}`.
+- `judge` doesn't send a junk frame to the model, and skips face detection and locate.
+  The policy decides it.
+- **The policy action `--junk cull|review|ignore`** defaults to `cull`, stored in the
+  report's policy. With `ignore`, frames are judged by the model as normal; the `junk`
+  record stays, for information.
+- **Sets:** junk frames join no set.
+- **Resume:** a resumed judge keeps junk frames, unless the action is `ignore`.
+- **Your label overrides it,** as with every verdict.
 
 **Safety:**
-- The starting thresholds must flag **none** of the 17 real sample frames. Low-key frames
-  like M1103865 (dark woodshed) must pass. Synthetic black, white and blank frames must be
-  flagged.
-- `calibrate` reports junk frames you labelled keep, so a false junk shows up.
-- `scan` prints a junk count.
+- The thresholds flag none of the 17 samples, and exactly M1103546 on the 992-frame card.
+  Both runs are re-checked through `cull scan` and recorded in CLAUDE.md.
+- `calibrate` includes junk frames in the confusion matrix, and lists junk frames you
+  labelled keep.
+- `scan` prints a junk count by kind.
 
-**Testing:** synthetic frames of each kind are flagged; low-key, high-key and
-low-contrast synthetic portraits aren't; the real-sample check is recorded in CLAUDE.md.
+**Testing:**
+- synthetic black, white and flat-grey frames are flagged;
+- a low-key synthetic portrait (dark background, a mid-tone subject) and a high-key one
+  aren't;
+- a frame just inside each threshold is flagged, and one just outside isn't.
+- The real-sample results are recorded.
 
 ---
 

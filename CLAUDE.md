@@ -212,6 +212,12 @@ make vet
 
 - Lean decoding: peak RSS 1.49 GB → 0.47 GB at `-j1`, 2.32 → 0.66 GB with 3 in flight;
   same speed. Frame luma is now the JPEG Y (BT.601), which is what pigo expects.
+- **A regression from the same day (3d450ff), found 2026-10-02:** `res.Stats = &p.stats`
+  kept every frame's ~190 MB decoded preview alive through the report.
+  - The 17-frame sample hid it. 60 frames peaked at 11.5 GB.
+  - A 992-frame scan reached a 57.7 GB footprint and was killed (twice) near frame 290.
+  - Fixed by copying the stats; `TestResultDoesNotRetainFrame` guards it.
+  - Now, at the default `-j 4`: 60 frames 1.78 GB, 244 frames 1.84 GB (flat).
 - M11-P EXIF: no `FNumber` (no aperture coupling); APEX `ApertureValue` is the camera's
   estimate. `DateTimeOriginal` has 1 s resolution, no SubSec. Coded lenses report
   focal length and `LensModel`. On this sample all 17 timestamps fall within 2 s

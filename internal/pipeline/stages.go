@@ -53,7 +53,8 @@ func prepareFrame(cfg Config, path string) (*prepared, error) {
 		return p, err
 	}
 	p.stats = imageprep.Measure(p.frame)
-	res.Stats = &p.stats
+	st := p.stats   // the result gets its own copy: a pointer into p would keep p, and its
+	res.Stats = &st // ~190 MB decoded frame, alive for as long as the report holds the result
 	if kind := imageprep.Junk(p.stats); kind != "" {
 		res.Junk = &report.JunkInfo{Kind: kind, DarkPct: p.stats.DarkPct, BrightPct: p.stats.BrightPct, Contrast: p.stats.Contrast}
 	}

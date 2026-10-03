@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/group"
+	"github.com/jefflaplante/cull/internal/imageprep"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 func TestPrepareRecordsJunk(t *testing.T) {
@@ -138,4 +141,33 @@ func TestJunkOutsideSets(t *testing.T) {
 			}
 		}
 	}
+}
+
+// A result must not keep its decoded frame alive: the report holds every result for
+// the whole run, and a 60 MP frame is ~190 MB (a 1000-frame scan reached 57 GB and
+// was killed when res.Stats pointed into the prepared struct).
+func TestResultDoesNotRetainFrame(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "L1.DNG")
+	dngWith(t, path, gradientImage(1600, 1067))
+	freed := make(chan struct{})
+	res := func() report.Result {
+		p, err := prepareFrame(cfg(dir), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runtime.SetFinalizer(p.frame, func(*imageprep.Frame) { close(freed) })
+		return p.res
+	}()
+	for i := 0; i < 50; i++ {
+		runtime.GC()
+		select {
+		case <-freed:
+			runtime.KeepAlive(res)
+			return
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	runtime.KeepAlive(res)
+	t.Fatal("the decoded frame is still reachable from its result")
 }

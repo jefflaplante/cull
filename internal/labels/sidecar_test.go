@@ -161,3 +161,13 @@ func TestSidecarKeywordsAndTags(t *testing.T) {
 		t.Fatalf("junk keywords %q", got)
 	}
 }
+
+// A tag repeating a content keyword is written once.
+func TestSidecarKeywordsDeduplicated(t *testing.T) {
+	tags := &report.Tags{Keywords: []string{"portrait", "family"}}
+	r := report.Result{File: "/s/L1.DNG", Decision: eval.Keep, Evaluation: &eval.Evaluation{Keywords: []string{"portrait"}}}
+	sc := Sidecar(r, Entry{}, 1, false, tags)
+	if got := strings.Join(sc.Keywords, ","); got != "cull:keep,portrait,family" {
+		t.Fatalf("keywords %q", got)
+	}
+}

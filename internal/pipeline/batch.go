@@ -382,7 +382,7 @@ func collect(ctx context.Context, cfg Config, client BatchClient, st *batchState
 			if strings.HasPrefix(id, "L-") {
 				return eval.LocateSchema()
 			}
-			return eval.EvaluationSchema()
+			return eval.EvaluationResultSchema() // answers from before keywords existed still count
 		}
 		err = client.BatchResults(ctx, status.ResultsURL, schemaFor, func(r llm.BatchResult) { applyResult(cfg, st, r) })
 		if err != nil {

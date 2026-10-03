@@ -202,4 +202,7 @@ func TestScanTagsFlagsAndTagCommand(t *testing.T) {
 	if _, err := run(t, "scan", "--project", "a|b", dir); err == nil {
 		t.Fatal("a tag with | accepted")
 	}
+	if _, err := run(t, "scan", "--keyword", "cull:labeled", dir); err == nil {
+		t.Fatal("a tag faking cull's own keyword accepted")
+	}
 }

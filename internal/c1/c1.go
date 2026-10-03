@@ -152,16 +152,31 @@ on isFullFrame(cr, w, h)
 	return ((item 3 of cr) ≥ w - 1) and ((item 4 of cr) ≥ h - 1)
 end isFullFrame
 
+-- Keywords already found or made this run: each distinct keyword is looked up in the
+-- catalog once, not once per frame (a lookup scans every keyword in the document).
+property kwNames : {}
+property kwRefs : {}
+
 on ensureKeyword(doc, kname)
+	repeat with i from 1 to count of kwNames
+		if item i of kwNames is kname then return item i of kwRefs
+	end repeat
+	set k to missing value
 	tell application "Capture One"
 		try
-			return first keyword of doc whose name is kname
+			set k to first keyword of doc whose name is kname
 		end try
-		try
-			return make new keyword at doc with properties {name:kname}
-		end try
-		return missing value
+		if k is missing value then
+			try
+				set k to make new keyword at doc with properties {name:kname}
+			end try
+		end if
 	end tell
+	if k is not missing value then
+		set end of kwNames to kname
+		set end of kwRefs to k
+	end if
+	return k
 end ensureKeyword
 
 ` + joinListHelper

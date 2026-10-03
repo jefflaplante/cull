@@ -131,12 +131,16 @@ undoes `--sort` and `--move-culled`.
 
 ## Keywords and tags
 
-Every judged frame gets 3–8 **content keywords** from the model, such as `portrait`,
-`forest`, `red dress` or `laughing`. Every frame also gets the **shoot's tags**:
+Every judged frame gets up to 8 **content keywords** from the model, such as `portrait`,
+`forest`, `red dress` or `laughing`. The model is asked for 3–8, and Go cleans them. Every frame also gets the **shoot's tags**:
 - **Set them** with `--project`, `--event`, `--location` and `--keyword` (repeatable) on
   `offload`, `scan` or `judge`.
-- **They're stored in the report,** so later runs keep them. Flags given again replace
-  them field by field.
+- **They're stored in the report,** so later runs keep them, including `judge --fresh`
+  (tags describe the shoot). Flags given again replace them field by field.
+- **Tags belong to the report,** not the folder: a run with `-o other.json` starts
+  without them.
+- **Values can't contain `|`** (it separates keyword levels) or start with `cull:`
+  (cull's own markers).
 - **`cull tag <dir>`** shows them or changes them (`--clear-location` and so on). Then
   run `cull decide --write-xmp <dir>` to rewrite the sidecars.
 

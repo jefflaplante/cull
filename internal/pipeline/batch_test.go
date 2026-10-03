@@ -35,6 +35,7 @@ type fakeBatch struct {
 	hold        bool              // batches stay in progress
 	holdID      string            // with this set: only this batch ID stays in progress; others end normally regardless of hold
 	onStatus    func(id string)   // called on every status check
+	evalJSON    string            // the evaluate answer ("" = evalOK)
 	resultsErr  error             // BatchResults fails with this
 	rankOrder   func(n int) []int // rank answers, 1-based, best first; nil = reverse capture order
 	calls       int
@@ -103,7 +104,14 @@ func (f *fakeBatch) BatchResults(_ context.Context, id string, schemaFor func(st
 				res.Err = fmt.Errorf("model output does not match schema: %w", err)
 			}
 		case strings.HasPrefix(r.CustomID, "E-"):
-			res.Response = &llm.Response{JSON: json.RawMessage(evalOK), Usage: llm.Usage{InputTokens: 100}}
+			answer := evalOK
+			if f.evalJSON != "" {
+				answer = f.evalJSON
+			}
+			res.Response = &llm.Response{JSON: json.RawMessage(answer), Usage: llm.Usage{InputTokens: 100}}
+			if err := llm.Validate(schemaFor(r.CustomID), res.Response.JSON); err != nil { // as the real client does
+				res.Err = fmt.Errorf("model output does not match schema: %w", err)
+			}
 		case f.locate[r.Req.Parts[len(r.Req.Parts)-2].Text] != "":
 			res.Response = &llm.Response{JSON: json.RawMessage(f.locate[r.Req.Parts[len(r.Req.Parts)-2].Text]), Usage: llm.Usage{InputTokens: 50}}
 		default:
@@ -381,5 +389,27 @@ func TestBatchSkipsJunk(t *testing.T) {
 	}
 	if r := result(t, rep, "L0000000.DNG"); r.Decision != eval.Cull || r.Error != "" || r.CostUSD != 0 {
 		t.Fatalf("junk frame: decision %q error %q cost %v", r.Decision, r.Error, r.CostUSD)
+	}
+}
+
+// A batch submitted before content keywords existed answers without "keywords":
+// re-attaching after an upgrade must still take every paid evaluation.
+func TestBatchAcceptsAnswersWithoutKeywords(t *testing.T) {
+	_, c := batchShoot(t)
+	old := strings.Replace(evalOK, `,"keywords":["portrait","forest"]`, "", 1)
+	if old == evalOK {
+		t.Fatal("fixture has no keywords to remove")
+	}
+	fb := &fakeBatch{evalJSON: old, locate: map[string]string{
+		locatePrompt: `{"confident":true,"kind":"eye","subject":"eye","box":{"left":0.4,"top":0.3,"right":0.45,"bottom":0.35}}`,
+	}}
+	rep, _, err := RunBatch(context.Background(), c, fb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rep.Results {
+		if r.Error != "" || r.Evaluation == nil {
+			t.Fatalf("%s: error %q (a paid answer was thrown away)", r.File, r.Error)
+		}
 	}
 }

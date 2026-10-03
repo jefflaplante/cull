@@ -45,8 +45,8 @@ func Sidecar(r report.Result, l Entry, orientation int, develop bool, tags *repo
 			sc.Hierarchy = append(sc.Hierarchy, "content|"+k)
 		}
 	}
-	sc.Keywords = append(sc.Keywords, tags.Plain()...)
-	sc.Hierarchy = append(sc.Hierarchy, tags.Paths()...)
+	sc.Keywords = dedupe(append(sc.Keywords, tags.Plain()...))
+	sc.Hierarchy = dedupe(append(sc.Hierarchy, tags.Paths()...))
 	if l.EV != nil { // yours, from review: for Adobe tools (Capture One ignores it; apply-c1 carries it there)
 		v := *l.EV
 		sc.ExposureEV = &v
@@ -102,4 +102,18 @@ func Duplicates(results []report.Result) []string {
 		seen[b] = r.File
 	}
 	return dups
+}
+
+// dedupe keeps each keyword's first occurrence, in order: a tag can repeat one of the
+// model's content keywords.
+func dedupe(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := in[:0]
+	for _, k := range in {
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return out
 }

@@ -31,9 +31,13 @@ func (t *tagFlags) tags() (*report.Tags, error) {
 			out.Keywords = append(out.Keywords, k)
 		}
 	}
+	out.Project, out.Event, out.Location = strings.TrimSpace(out.Project), strings.TrimSpace(out.Event), strings.TrimSpace(out.Location)
 	for _, v := range append([]string{out.Project, out.Event, out.Location}, out.Keywords...) {
 		if strings.Contains(v, "|") {
 			return nil, fmt.Errorf("tag %q: \"|\" separates keyword levels, so it can't be part of a value", v)
+		}
+		if strings.HasPrefix(strings.ToLower(v), "cull:") {
+			return nil, fmt.Errorf("tag %q: cull: keywords are cull's own verdict markers", v)
 		}
 	}
 	if out.Project == "" && out.Event == "" && out.Location == "" && len(out.Keywords) == 0 {

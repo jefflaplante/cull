@@ -74,8 +74,27 @@ func Evaluate(ctx context.Context, b llm.Backend, in Input) (*Evaluation, Usage,
 	return e, resp.Usage, err
 }
 
-// EvaluationSchema is the evaluation call's JSON Schema (for validating batch results).
+// EvaluationSchema is the evaluation call's JSON Schema.
 func EvaluationSchema() map[string]any { return evaluationSchema }
+
+// EvaluationResultSchema validates collected batch answers: the request schema with
+// keywords optional. A batch submitted before keywords existed answers without them,
+// and re-attaching to it after an upgrade must not throw paid evaluations away;
+// DecodeEvaluation leaves Keywords empty then.
+func EvaluationResultSchema() map[string]any {
+	s := make(map[string]any, len(evaluationSchema))
+	for k, v := range evaluationSchema {
+		s[k] = v
+	}
+	var req []string
+	for _, r := range evaluationSchema["required"].([]string) {
+		if r != "keywords" {
+			req = append(req, r)
+		}
+	}
+	s["required"] = req
+	return s
+}
 
 // DecodeEvaluation parses an evaluation answer.
 func DecodeEvaluation(raw []byte) (*Evaluation, error) {

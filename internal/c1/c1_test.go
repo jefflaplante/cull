@@ -210,3 +210,19 @@ func TestScriptAppliesKeywordsAndTags(t *testing.T) {
 		t.Fatal("keywords applied without --keyword")
 	}
 }
+
+// Each distinct keyword is looked up in the catalog once per run, not once per frame:
+// a 1000-frame run applies ~14 keywords a frame, and every lookup scans every keyword
+// in the document.
+func TestScriptCachesKeywordLookups(t *testing.T) {
+	s := Script(testReport(), Options{Keyword: true})
+	i := strings.Index(s, "on ensureKeyword(doc, kname)")
+	if !strings.Contains(s, "property kwNames : {}") || i < 0 {
+		t.Fatalf("no keyword cache:\n%s", s)
+	}
+	body := s[i:]
+	cache, lookup := strings.Index(body, "kwNames"), strings.Index(body, "whose name is kname")
+	if cache < 0 || lookup < 0 || cache > lookup {
+		t.Fatalf("ensureKeyword doesn't check the cache before searching the catalog:\n%s", body[:min(len(body), 800)])
+	}
+}

@@ -239,3 +239,19 @@ itself hasn't been driven in a browser yet, because the Chrome extension wasn't 
   two offloads into one folder at once could race.
 - **Speedup, not built:** overlap file N's verify with file N+1's card read. The engine
   runs at 82% of `cp`'s speed.
+
+## Part 3 junk filter (2026-10-02): deferred minors
+
+- **Misleading line for junk frames:** during judge, a junk frame's per-frame line reads
+  "[no subject: ]". `ScanSummary` also counts junk frames in the faces denominator.
+- **`Policy.Junk` is `omitempty`, unlike its siblings.** Resolve treats "" as "stored
+  before the field existed".
+- **`junked()` probes `DecideJunk("")`,** which allocates. A `JudgesJunk()` method would
+  read better.
+- **Misplaced comment:** in `report.go`, the `MovedTo` comment now trails the `Junk` field.
+- **Batch resume after switching `--junk`:** `judge --batch --resume --junk ignore` keeps
+  junk frames marked done in the batch state, whereas a sync resume re-judges them.
+- **A loose residency tolerance:** the offload residency tests allow 1% (40 pages of a
+  16 MB file). The evidence was 2 pages, so a fixed cap (≤ 4) would be tighter.
+- **`Junk()` trusts `Contrast == 0`.** It only ever runs on a fresh `Measure`, but a guard
+  would protect future callers working from old stored stats.

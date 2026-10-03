@@ -1454,3 +1454,13 @@ func blackTinyDNG(t *testing.T, path string) {
 	}
 	writeDNGWith(t, path, img)
 }
+
+// The openai backend has no effort setting, as escalation target too.
+func TestEffortRefusedOnOpenAIEscalation(t *testing.T) {
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	_, err := run(t, "judge", "--effort", "high", "--escalate-backend", "openai", "--escalate-model", "m", "--estimate", dir)
+	if err == nil || !strings.Contains(err.Error(), "effort") {
+		t.Fatalf("want an effort error, got %v", err)
+	}
+}

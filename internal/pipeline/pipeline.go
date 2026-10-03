@@ -152,6 +152,11 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 	if b != nil {
 		b = withEffort(b, cfg)
 	}
+	if cfg.Escalate != nil { // escalated evaluations are evaluations: same effort
+		e := *cfg.Escalate
+		e.Backend = withEffort(e.Backend, cfg)
+		cfg.Escalate = &e
+	}
 
 	jobs := make(chan string)
 	results := make(chan report.Result)

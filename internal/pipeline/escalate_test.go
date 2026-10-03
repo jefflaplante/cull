@@ -75,3 +75,18 @@ func TestResumeRefusesDifferentEscalation(t *testing.T) {
 		t.Fatalf("want refusal, got %v", err)
 	}
 }
+
+// --effort applies to escalated evaluations too: they are evaluations, and the report
+// records one effort for all of them.
+func TestEscalationCarriesEffort(t *testing.T) {
+	dir, primary := shoot(t)
+	esc := &effortRecorder{}
+	c := escalateCfg(dir, esc)
+	c.Effort = "high"
+	if _, _, err := Run(context.Background(), c, primary); err != nil {
+		t.Fatal(err)
+	}
+	if esc.seen["evaluation"] != "high" {
+		t.Fatalf("escalation saw effort %q", esc.seen["evaluation"])
+	}
+}

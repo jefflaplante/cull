@@ -114,6 +114,9 @@ Backends (--backend):
 				if o.escalateModel == "" {
 					return fmt.Errorf("--escalate-backend requires --escalate-model")
 				}
+				if o.escalateBackend == "openai" && (o.effort != "" || o.locateEffort != "") {
+					return fmt.Errorf("--effort applies to escalated evaluations too, and the openai backend has no effort setting")
+				}
 				for _, s := range strings.Split(o.escalateOnList, ",") {
 					if !escalateOn[strings.TrimSpace(s)] {
 						return fmt.Errorf("--escalate-on %q: want a comma list of acceptable, soft, missed_focus, motion_blur, eyes_closed", s)

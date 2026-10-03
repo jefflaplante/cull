@@ -172,7 +172,7 @@ func Verify(ctx context.Context, folder string, sink ui.Sink) (v Verified, err e
 		if err := ctx.Err(); err != nil {
 			return v, err
 		}
-		p := filepath.Join(folder, e.Name)
+		p := locate(folder, e.Name)
 		problem := ""
 		if st, err := os.Stat(p); err != nil {
 			problem = "missing"
@@ -199,15 +199,20 @@ func Verify(ctx context.Context, folder string, sink ui.Sink) (v Verified, err e
 	for _, e := range man {
 		recorded[e.Name] = true
 	}
-	ents, err := os.ReadDir(folder)
-	if err != nil {
-		return v, err
-	}
-	for _, d := range ents {
-		// Dot-files are skipped as the card walk skips them: macOS writes AppleDouble
-		// "._" files beside frames on exFAT when they're opened.
-		if d.Type().IsRegular() && !strings.HasPrefix(d.Name(), ".") && strings.EqualFold(filepath.Ext(d.Name()), ".dng") && !recorded[d.Name()] {
-			v.Unrecorded = append(v.Unrecorded, d.Name())
+	for _, sub := range append([]string{""}, MovedDirs...) {
+		ents, err := os.ReadDir(filepath.Join(folder, sub))
+		if err != nil {
+			if sub == "" {
+				return v, err
+			}
+			continue
+		}
+		for _, d := range ents {
+			// Dot-files are skipped as the card walk skips them: macOS writes AppleDouble
+			// "._" files beside frames on exFAT when they're opened.
+			if d.Type().IsRegular() && !strings.HasPrefix(d.Name(), ".") && strings.EqualFold(filepath.Ext(d.Name()), ".dng") && !recorded[d.Name()] {
+				v.Unrecorded = append(v.Unrecorded, filepath.Join(sub, d.Name()))
+			}
 		}
 	}
 	return v, nil
@@ -218,3 +223,25 @@ func Verify(ctx context.Context, folder string, sink ui.Sink) (v Verified, err e
 func destinationFull(err error) bool {
 	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)
 }
+
+// MovedDirs are the folders, inside a shoot folder, that cull moves frames into:
+// --move-culled's culled/ and --sort's keep/, review/, cull/ (pipeline's placeDirs; a
+// test there keeps the two lists the same). Verify finds copies there too.
+var MovedDirs = []string{"culled", "keep", "review", "cull"}
+
+// locate is where a recorded copy is now: in the shoot folder, or moved into one of
+// MovedDirs (the first that has it).
+func locate(folder, name string) string {
+	p := filepath.Join(folder, name)
+	if _, err := os.Lstat(p); err == nil {
+		return p
+	}
+	for _, d := range MovedDirs {
+		if q := filepath.Join(folder, d, name); fileExists(q) {
+			return q
+		}
+	}
+	return p
+}
+
+func fileExists(p string) bool { _, err := os.Lstat(p); return err == nil }

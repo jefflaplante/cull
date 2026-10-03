@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/offload"
 	"github.com/jefflaplante/cull/internal/report"
 )
 
@@ -171,5 +172,12 @@ func TestSortNeedsJudgedFrames(t *testing.T) {
 	}
 	if _, err := Decide(context.Background(), c.ReportPath, DecideOptions{Policy: c.Policy, Sort: true}, io.Discard); err == nil || !strings.Contains(err.Error(), "judge") {
 		t.Fatalf("sorting a scan-only report: %v", err)
+	}
+}
+
+// offload --verify looks for copies in the same folders frames are moved into.
+func TestOffloadKnowsThePlaceDirs(t *testing.T) {
+	if strings.Join(offload.MovedDirs, ",") != strings.Join(placeDirs, ",") {
+		t.Fatalf("offload.MovedDirs %v != placeDirs %v", offload.MovedDirs, placeDirs)
 	}
 }

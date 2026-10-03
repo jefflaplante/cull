@@ -74,7 +74,7 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.ErrOrStderr(), describeDecide(sum))
+			fmt.Fprintln(cmd.ErrOrStderr(), describeDecide(sum, sortF))
 			return nil
 		},
 	}
@@ -90,7 +90,7 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 	return cmd
 }
 
-func describeDecide(s pipeline.DecideSummary) string {
+func describeDecide(s pipeline.DecideSummary, sorted bool) string {
 	var changes []string
 	for k, n := range s.Changed {
 		changes = append(changes, fmt.Sprintf("%s %d", k, n))
@@ -102,7 +102,11 @@ func describeDecide(s pipeline.DecideSummary) string {
 	} else {
 		msg += "changed: " + strings.Join(changes, ", ")
 	}
-	if s.Moved+s.Restored > 0 {
+	switch {
+	case s.Moved+s.Restored == 0:
+	case sorted:
+		msg += fmt.Sprintf("; sorted %d into keep/, review/ and cull/, %d back into the shoot folder", s.Moved, s.Restored)
+	default:
 		msg += fmt.Sprintf("; moved %d into culled/, restored %d", s.Moved, s.Restored)
 	}
 	return msg

@@ -152,3 +152,23 @@ func TestFreeSpacePerVolume(t *testing.T) {
 		t.Fatalf("room for both refused: %v", err)
 	}
 }
+
+// After --sort (or --move-culled) moves copies into keep/ review/ cull/ culled/,
+// --verify still finds and checks them, instead of calling them missing.
+func TestVerifyFindsSortedCopies(t *testing.T) {
+	_, o := threeFiles(t)
+	p, _ := MakePlan(o)
+	Run(context.Background(), p, nil)
+	d := p.Dests[0]
+	for name, sub := range map[string]string{"M1.DNG": "keep", "M2.DNG": "review"} {
+		os.MkdirAll(filepath.Join(d, sub), 0o755)
+		os.Rename(filepath.Join(d, name), filepath.Join(d, sub, name))
+	}
+	os.WriteFile(filepath.Join(d, "cull", "X.DNG"), nil, 0o644) // a stray, unrecorded, inside a sort folder
+	os.MkdirAll(filepath.Join(d, "cull"), 0o755)
+	os.WriteFile(filepath.Join(d, "cull", "X.DNG"), []byte("x"), 0o644)
+	v, err := Verify(context.Background(), d, nil)
+	if err != nil || v.OK != 3 || v.Bad != 0 || len(v.Unrecorded) != 1 || v.Unrecorded[0] != filepath.Join("cull", "X.DNG") {
+		t.Fatalf("%+v %v", v, err)
+	}
+}

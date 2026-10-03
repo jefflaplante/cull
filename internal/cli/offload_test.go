@@ -137,3 +137,21 @@ func TestSortFlags(t *testing.T) {
 		t.Fatalf("restore: %v\n%s", err, out)
 	}
 }
+
+func TestDecideSortSaysSorted(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := run(t, "decide", "--sort", dir)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "sorted 1 into keep/, review/ and cull/") || strings.Contains(out, "culled/") {
+		t.Fatalf("decide --sort summary:\n%s", out)
+	}
+}

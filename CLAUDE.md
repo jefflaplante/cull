@@ -118,6 +118,15 @@ make vet
   `photos/c1-ev-test/set-ev-A.applescript`): `set exposure of adjustments of v to 1.0`
   on an imported image's variant read back 0.0 → 1.0. An image's `name` includes the
   extension ("EVTEST_A.DNG").
+- **Capture One 16.7.2 builds keyword hierarchies from sidecars** (user-tested 2026-10-02,
+  `photos/c1-kw-test/`, two clones of M1103823). Each test frame showed its keywords both
+  flat and nested, and both kept their stars and green label.
+  - KWTEST_A had paths straight in `dc:subject` (`content|forest`).
+  - KWTEST_B had plain words in `dc:subject` and paths in `lr:hierarchicalSubject`.
+
+  cull writes B, the Adobe convention: Lightroom reads it too, and would show A's paths as
+  literal `content|forest` keywords. The AppleScript dictionary's `keyword` has a
+  read-only `parent`, so `apply-c1` applies plain words only.
 - Lightroom Classic ignores sidecars for DNG files (uses embedded XMP).
 - Sidecar naming convention is `L1000123.xmp`, not `L1000123.DNG.xmp`.
 

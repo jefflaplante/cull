@@ -92,7 +92,8 @@
         'M' + (x + w) + ' ' + (y + h - a) + 'V' + (y + h) + 'H' + (x + w - a) +
         'M' + (x + a) + ' ' + (y + h) + 'H' + x + 'V' + (y + h - a);
     }
-    var EDGE = 64, CLEAR_X = 40, CLEAR_Y = 24; // from the window's edge; from the contents
+    var EDGE = 64, CLEAR_X = 40, CLEAR_Y = 18; // from the window's edge; from the contents
+    var dial = document.getElementById('dial'), dialLayer = document.getElementById('dialLayer');
     function layout() {
       var k = box(hero.querySelector('.kicker')), q = box(hero.querySelector('.req')), r = box(hero.querySelector('.readout'));
       var left = k.x, right = r.x + r.w, top = k.y, bottom = Math.max(q.y + q.h, r.y + r.h);
@@ -100,7 +101,9 @@
       var cx = (left + right) / 2, cy = (top + bottom) / 2;
       // Keep the left line off the window's edge; give way to the right if there's room.
       cx = Math.max(cx, EDGE + W / 2);
-      var fits = window.innerWidth >= 980 && cx - W / 2 <= left - 16 && cx + W / 2 <= window.innerWidth - 16;
+      var limit = window.innerWidth - 16, d = dial && dial.getBoundingClientRect();
+      if (d && d.width > 0 && dialLayer && getComputedStyle(dialLayer).display !== 'none') limit = Math.min(limit, d.left - 12); // clear of the shutter dial
+      var fits = window.innerWidth >= 980 && cx - W / 2 <= left - 16 && cx + W / 2 <= limit;
       vf.hidden = ghost.hidden = !fits;
       document.documentElement.classList.toggle('vf-off', !fits); // the headline keeps its own patch then
       if (!fits) return;

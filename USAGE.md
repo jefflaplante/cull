@@ -12,6 +12,8 @@ text says so.
 
 ## 0. Setup (once)
 
+**Homebrew:** `brew install jefflaplante/tap/cull`
+
 **Pre-built for macOS** (one universal binary for Apple silicon and Intel):
 
 ```sh

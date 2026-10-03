@@ -68,6 +68,12 @@ Tested on 22 sample files from [raw.pixls.us](https://raw.pixls.us) with
 
 ## Install
 
+**Homebrew** (macOS):
+
+```sh
+brew install jefflaplante/tap/cull
+```
+
 **Pre-built for macOS** (one universal binary for Apple silicon and Intel), from the
 [latest release](https://github.com/jefflaplante/cull/releases/latest):
 
@@ -91,8 +97,13 @@ make install                                          # $GOPATH/bin/cull
 go install github.com/jefflaplante/cull/cmd/cull@latest
 ```
 
-**Releases** are built by `.github/workflows/release.yml` when a `v*` tag is pushed. A
-macOS runner runs vet and the tests, then `make dist`, then publishes the release.
+**Releases** are built by `.github/workflows/release.yml` when a `v*` tag is pushed:
+1. A macOS runner runs vet and the tests, then `make dist`.
+2. It publishes the release.
+3. It updates `Formula/cull.rb` in
+   [jefflaplante/homebrew-tap](https://github.com/jefflaplante/homebrew-tap), through a
+   deploy key stored as the `TAP_DEPLOY_KEY` secret.
+
 `make dist` also builds the same tarball locally.
 
 - **Optional:** `exiftool`, which finds previews in unusual locations.

@@ -39,3 +39,39 @@ jobs:
             dist/cull_macos_universal.tar.gz \
             dist/cull_macos_universal.tar.gz.sha256 \
             --title "cull ${GITHUB_REF_NAME}" --generate-notes --verify-tag
+      - name: Update the Homebrew tap
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA=$(cut -d' ' -f1 dist/cull_macos_universal.tar.gz.sha256)
+          mkdir -p ~/.ssh && printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap_key && chmod 600 ~/.ssh/tap_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes"
+          git clone git@github.com:jefflaplante/homebrew-tap.git tap
+          cat > tap/Formula/cull.rb <<FORMULA
+          class Cull < Formula
+            desc "Pre-import culling for DNG shoots: verified offload, focus checked at the eyes"
+            homepage "https://code.jefflaplante.com/cull/"
+            url "https://github.com/jefflaplante/cull/releases/download/${GITHUB_REF_NAME}/cull_macos_universal.tar.gz"
+            version "${VERSION}"
+            sha256 "${SHA}"
+
+            depends_on :macos
+
+            def install
+              bin.install "cull"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/cull version")
+            end
+          end
+          FORMULA
+          cd tap
+          git config user.name "cull release"
+          git config user.email "jeff@laplante.dev"
+          git add Formula/cull.rb
+          git commit -m "cull ${VERSION}"
+          git push origin HEAD

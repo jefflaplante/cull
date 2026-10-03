@@ -83,7 +83,7 @@ make vet
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default
 - `internal/config` — API key resolution
 - `site/` — the GitHub Pages site (one self-contained `index.html`, `img/`), deployed to the
-  `gh-pages` branch with `git subtree split --prefix site`; https://jefflaplante.github.io/cull/
+  `gh-pages` branch with `git subtree split --prefix site`; https://code.jefflaplante.com/cull/
 
 ## Invariants — do not break
 

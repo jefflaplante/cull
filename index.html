@@ -10,7 +10,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23d9261c'/%3E%3C/svg%3E">
 <link rel="canonical" href="https://code.jefflaplante.com/cull/">
 <meta property="og:type" content="website">
-<meta property="og:title" content="cull · Sharpness gates. The rest is an edit.">
+<meta property="og:title" content="cull · Cull on focus. Fix the rest in the edit.">
 <meta property="og:description" content="Open-source culling for DNG shoots. Verified card offload, sharpness judged at the eyes at 100%, deterministic keep / review / cull, sidecars and keywords for Capture One.">
 <meta property="og:url" content="https://code.jefflaplante.com/cull/">
 <meta property="og:image" content="https://code.jefflaplante.com/cull/img/og.png">
@@ -60,24 +60,24 @@
 <section class="hero" id="top" data-n="30" data-name="Index" aria-labelledby="h-hero">
   <div class="wrap">
     <div class="reveal">
-      <p class="kicker eng"><span class="dot" aria-hidden="true"></span>A culling instrument for DNG shoots</p>
-      <h1 id="h-hero"><span class="rf" data-text="Sharpness gates.">Sharpness gates<span class="rf-dot">.</span></span><span class="l2">The rest is an edit.</span></h1>
+      <p class="kicker eng"><span class="dot" aria-hidden="true"></span>Open-source culling for DNG shoots</p>
+      <h1 id="h-hero"><span class="rf" data-text="Cull on focus.">Cull on focus<span class="rf-dot">.</span></span><span class="l2">Fix the rest in the edit.</span></h1>
     </div>
     <div class="hero-grid">
       <div class="reveal">
-        <p class="lede"><strong>cull</strong> is a command-line tool that culls a shoot of DNG files before you import it into Capture One or Lightroom. A vision model assesses each frame&rsquo;s full-resolution preview. Deterministic Go rules decide keep, review or cull: code you can read, audit and tune.</p>
+        <p class="lede"><strong>cull</strong> is a command-line tool that culls a shoot of DNG files before you import it into Capture One or Lightroom. A vision model assesses each frame&rsquo;s full-resolution preview for focus, exposure and composition. Fixed rules in Go turn that into keep, review or cull.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://github.com/jefflaplante/cull">
             <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
             View on GitHub
           </a>
-          <a class="btn btn-ghost" href="usage.html">See it work</a>
+          <a class="btn btn-ghost" href="usage.html">See a session</a>
         </div>
         <div class="snippet">
           <pre id="snip-hero" aria-label="Install command"><code><span class="p">$ </span>brew install jefflaplante/tap/cull</code></pre>
           <button class="copy" type="button" data-copy="snip-hero" aria-label="Copy install command">Copy</button>
         </div>
-        <p class="req">macOS, Apple silicon and Intel. Or <a href="#install">download the binary, or build from source</a>.</p>
+        <p class="req">macOS, Apple silicon and Intel. Or <a href="#install">download the binary or build from source</a>.</p>
       </div>
 
       <aside class="plate readout reveal" aria-labelledby="h-readout">
@@ -111,19 +111,19 @@
     </header>
     <ol class="creed">
       <li class="reveal">
-        <span class="roman eng"><b>I</b>Gate</span>
-        <h3>Sharpness gates.</h3>
-        <p>Judged at the eyes, on a native-resolution crop of the full preview.</p>
+        <span class="roman eng"><b>I</b>Cull</span>
+        <h3>Missed focus <em>is culled.</em></h3>
+        <p>Focus is judged at the eyes, on a native-resolution crop of the full preview. Soft frames go to review.</p>
       </li>
       <li class="reveal">
         <span class="roman eng"><b>II</b>Correct</span>
         <h3>Exposure gets fixed, <em>not culled.</em></h3>
-        <p>Exposure is assessed with a suggested correction in stops. It is never a reason to discard a frame.</p>
+        <p>The model suggests a correction in stops. Exposure alone never culls a frame; clipped highlights send it to review.</p>
       </li>
       <li class="reveal">
         <span class="roman eng"><b>III</b>Crop</span>
         <h3>Composition gets cropped, <em>never culled.</em></h3>
-        <p>&ldquo;Croppable&rdquo; is a note on a keeper, not a verdict.</p>
+        <p>A suggested crop is a note on a keeper, not a reason to cull it.</p>
       </li>
     </ol>
 
@@ -147,7 +147,7 @@
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>125</b> Pipeline</p>
       <div>
-        <h2 id="h-pipeline">From card to catalogue, <span>in six stations.</span></h2>
+        <h2 id="h-pipeline">From card to catalogue, <span>in six steps.</span></h2>
       </div>
     </header>
 
@@ -157,42 +157,42 @@
         <span class="node" aria-hidden="true"></span>
         <code class="cmd">cull offload</code>
         <h3>Offload</h3>
-        <p>Card to a dated shoot folder. Hashed, written, read back, verified.</p>
+        <p>Copies the card into a dated shoot folder and checks every file against it.</p>
         <span class="phase eng">Local · no model</span>
       </li>
       <li class="station" style="--i:1">
         <span class="node" aria-hidden="true"></span>
         <code class="cmd">cull scan</code>
         <h3>Scan</h3>
-        <p>Extracts each full-resolution preview and finds faces. No model call.</p>
+        <p>Reads each frame&rsquo;s full-resolution preview, finds faces and sets aside blank frames.</p>
         <span class="phase eng">Local · no model</span>
       </li>
       <li class="station" style="--i:2">
         <span class="node" aria-hidden="true"></span>
         <code class="cmd">cull judge</code>
         <h3>Judge</h3>
-        <p>The model assesses each frame; Go rules decide. Near-identical sets are ranked.</p>
+        <p>The model assesses each frame and ranks near-identical frames together; Go rules decide.</p>
         <span class="phase eng">Model assesses · Go decides</span>
       </li>
       <li class="station" style="--i:3">
         <span class="node" aria-hidden="true"></span>
         <code class="cmd">cull review</code>
         <h3>Review</h3>
-        <p>A keyboard-driven contact sheet in your browser. Your labels win.</p>
+        <p>You check the verdicts on a contact sheet in your browser. Your labels override the model&rsquo;s.</p>
         <span class="phase eng">Your call</span>
       </li>
       <li class="station" style="--i:4">
         <span class="node" aria-hidden="true"></span>
         <code class="cmd">cull decide</code>
         <h3>Sort</h3>
-        <p>XMP sidecars written; frames moved into keep/, review/ and cull/.</p>
+        <p>Writes XMP sidecars and moves the frames into keep/, review/ and cull/.</p>
         <span class="phase eng">Your call</span>
       </li>
       <li class="station" style="--i:5">
         <span class="node" aria-hidden="true"></span>
         <code class="cmd">cull apply-c1</code>
         <h3>Capture One</h3>
-        <p>Import keep and review. Later changes are pushed in by AppleScript.</p>
+        <p>Import keep/ and review/. Changes made after import go in by AppleScript.</p>
         <span class="phase eng">Your call</span>
       </li>
     </ol>
@@ -267,7 +267,7 @@
     <div class="split wide-r">
       <div class="reveal">
         <p class="lede">cull reads the embedded JPEG preview inside each DNG: <strong>9504 × 6320</strong> on the M11-P. Sharpness is judged on a native-resolution crop at the eyes, not on a downscaled frame.</p>
-        <p class="lede">Face detection finds the subject. When there is no face, the model locates the intended focus target. And it knows how a rangefinder is used: manual focus, fast lenses shot wide open.</p>
+        <p class="lede">Face detection finds the subject. Without a face, the model first locates what was meant to be sharp. The prompt names the camera, so for a Leica M it expects manual focus and fast lenses shot wide open.</p>
       </div>
       <figure class="plate diagram reveal" style="margin:0">
         <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
@@ -341,19 +341,19 @@
       <div class="fact reveal">
         <span class="eng">Sets</span>
         <h3>Best of a burst, side by side.</h3>
-        <p>Near-identical frames, a burst or a repeated pose, are grouped and ranked side by side by the model. You keep the best few of each set.</p>
+        <p>Frames with near-identical framing, such as a burst, form a set, and the model ranks each set side by side. The best three keep their verdicts; the rest go to review.</p>
       </div>
       <div class="fact reveal">
         <span class="eng">Junk filter</span>
-        <h3>The lens cap costs nothing.</h3>
+        <h3>Blank frames cost nothing.</h3>
         <div>
           <p>Lens-cap, blown-white and blank frames are set aside without a model call.</p>
-          <p>Measured on 992 real frames: the thresholds clear every real frame by a wide margin, and they caught the one blank frame.</p>
+          <p>Tested on 992 real frames: every real frame cleared the thresholds by a wide margin, and the one blank frame was caught.</p>
         </div>
       </div>
       <div class="fact reveal">
         <span class="eng">Backends</span>
-        <h3>Your model, your bill.</h3>
+        <h3>Choose who runs the model.</h3>
         <div>
           <table class="backends">
             <caption class="sr-only">Model backends</caption>
@@ -363,7 +363,7 @@
               <tr><th scope="row">Local model</th><td>OpenAI-compatible</td></tr>
             </tbody>
           </table>
-          <p style="margin-top:14px"><code>--estimate</code> prices a run for free before anything is spent, and a cost cap stops it. On a 17-frame shoot the estimate was $0.37 at list price.</p>
+          <p style="margin-top:14px"><code>--estimate</code> prices a run before anything is spent, and <code>--max-cost</code> stops it at a limit. The 17-frame shoot was estimated at $0.37 at list price.</p>
         </div>
       </div>
     </div>
@@ -377,13 +377,13 @@
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>1000</b> Review</p>
       <div>
-        <h2 id="h-review">A contact sheet <span>that answers to you.</span></h2>
+        <h2 id="h-review">Check every verdict <span>on a contact sheet.</span></h2>
       </div>
     </header>
 
     <div class="split wide-r">
       <div class="reveal">
-        <p class="pull">Your labels always win over the model&rsquo;s.</p>
+        <p class="pull">Your labels override the model&rsquo;s.</p>
         <p class="lede" style="margin-bottom:28px"><code style="color:var(--text);font-size:.9em">cull review</code> opens a keyboard-driven contact sheet in your browser.</p>
         <dl class="legend">
           <div><dt class="eng">Verdict</dt><dd>Keep, review or cull, frame by frame</dd></div>
@@ -410,7 +410,7 @@
       <span class="eng">Calibrate</span>
       <div>
         <h3>Calibrate before you trust it.</h3>
-        <p>Label a sample. <code style="color:var(--text);font-size:.9em">cull calibrate</code> reports the false-cull rate against your judgement and sweeps the thresholds.</p>
+        <p>Label a sample of frames. <code style="color:var(--text);font-size:.9em">cull calibrate</code> then reports how often cull culled a frame you&rsquo;d keep, and what each threshold would change.</p>
       </div>
       <p>Nothing should auto-apply until it&rsquo;s calibrated. The rules are code, so tuning them means moving a threshold, not rewording a prompt.</p>
     </div>
@@ -424,7 +424,7 @@
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>2000</b> Delivery</p>
       <div>
-        <h2 id="h-delivery">Into Capture One <span>as metadata.</span></h2>
+        <h2 id="h-delivery">Into Capture One <span>as sidecars and keywords.</span></h2>
       </div>
     </header>
 
@@ -447,7 +447,7 @@
             <li>portrait</li><li>forest</li><li>smile</li>
             <li class="you">project</li><li class="you">event</li><li class="you">location</li>
           </ul>
-          <p style="margin-top:14px;font-size:15px">The model&rsquo;s content keywords, plus your project, event and location, nested as a keyword hierarchy in Capture One 16.7. Verified.</p>
+          <p style="margin-top:14px;font-size:15px">The model&rsquo;s content keywords, plus your project, event and location, which Capture One 16.7 shows as a nested keyword hierarchy (tested).</p>
         </div>
       </div>
 
@@ -463,7 +463,7 @@
         </div>
         <div class="sub">
           <h3>After import</h3>
-          <p><code>apply-c1</code> pushes later changes into Capture One by AppleScript. It is a dry run by default.</p>
+          <p><code>apply-c1</code> pushes changes made after import into Capture One by AppleScript. By default it only prints the script.</p>
         </div>
         <div class="plate safety">
           <span class="dot" aria-hidden="true" style="margin-top:8px;flex:none"></span>
@@ -481,7 +481,7 @@
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>4000</b> Specification</p>
       <div>
-        <h2 id="h-spec">Measured, <span>not promised.</span></h2>
+        <h2 id="h-spec">Measured <span>on real M11-P files.</span></h2>
       </div>
     </header>
 
@@ -561,17 +561,17 @@
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>&rarr;</b> Usage</p>
-      <div><h2 id="h-walk">See it work. <span>One real session, seven steps.</span></h2></div>
+      <div><h2 id="h-walk">The walkthrough. <span>One shoot, from card to Capture One.</span></h2></div>
     </header>
     <div class="walk-grid reveal">
       <ol class="walk-steps">
         <li><span class="eng">60</span>Install</li>
         <li><span class="eng">125</span>Copy the card</li>
-        <li><span class="eng">250</span>Price it, then judge it</li>
-        <li><span class="eng">500</span>Look for yourself</li>
-        <li><span class="eng">1000</span>Check it against you</li>
+        <li><span class="eng">250</span>Estimate, then judge</li>
+        <li><span class="eng">500</span>Check the verdicts</li>
+        <li><span class="eng">1000</span>Measure and tune</li>
         <li><span class="eng">2000</span>Tag and sort</li>
-        <li><span class="eng">4000</span>Into Capture One</li>
+        <li><span class="eng">4000</span>Push changes into Capture One</li>
       </ol>
       <div>
         <p class="lede" style="margin-bottom:26px">A 17-frame M11-P shoot taken from the card to Capture One, with the commands and what the terminal printed at every step.</p>
@@ -588,7 +588,7 @@
       <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
       <div>
         <p class="sec-no eng" style="margin-bottom:22px"><b>4000</b> Install</p>
-        <h2 id="h-install">Install it, then read it.</h2>
+        <h2 id="h-install">Install cull.</h2>
         <p>One universal binary for Apple silicon and Intel Macs. Open source, written in Go: every rule that keeps or culls a frame is in the repository.</p>
         <div class="snippet">
           <pre id="snip-brew"><code><span class="p">$ </span>brew install jefflaplante/tap/cull</code></pre>
@@ -604,7 +604,7 @@
           <pre id="snip-install"><code><span class="p">$ </span>git clone https://github.com/jefflaplante/cull &amp;&amp; cd cull &amp;&amp; make build</code></pre>
           <button class="copy" type="button" data-copy="snip-install" aria-label="Copy build command">Copy</button>
         </div>
-        <p class="req" style="margin-bottom:28px">macOS, for the Capture One parts. Every release lists its SHA-256.</p>
+        <p class="req" style="margin-bottom:28px">Releases are built for macOS. Each one lists its SHA-256 checksum.</p>
         <div class="cta-row">
         <a class="btn btn-primary" href="https://github.com/jefflaplante/cull/releases/latest">
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" d="M8 2v8m-3.5-3.5L8 10l3.5-3.5M3 13.5h10"/></svg>

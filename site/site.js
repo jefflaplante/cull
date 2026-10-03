@@ -124,7 +124,7 @@
       ghost.style.width = wb.w + 'px';
       ghost.style.height = wb.h + 'px';
       var it = pt - wb.y, il = pl - wb.x;
-      ghost.style.clipPath = 'inset(' + it + 'px ' + (wb.w - il - pw) + 'px ' + (wb.h - it - ph) + 'px ' + il + 'px round 3px)';
+      ghost.style.clipPath = 'inset(' + it + 'px ' + (wb.w - il - pw) + 'px ' + (wb.h - it - ph) + 'px ' + il + 'px round 10px)';
     }
     layout();
     window.addEventListener('resize', layout);

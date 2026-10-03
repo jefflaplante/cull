@@ -82,6 +82,8 @@ make vet
   live view on an interactive terminal (live.go); `-q`/`-v`/`--debug`/`--plain` in cli/output.go
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default
 - `internal/config` — API key resolution
+- `site/` — the GitHub Pages site (one self-contained `index.html`, `img/`), deployed to the
+  `gh-pages` branch with `git subtree split --prefix site`; https://jefflaplante.github.io/cull/
 
 ## Invariants — do not break
 

@@ -473,6 +473,32 @@ func withEffort(b llm.Backend, cfg Config) llm.Backend {
 	return effortBackend{b, cfg}
 }
 
+// kept is whether --resume keeps a stored result instead of processing its frame again.
+func kept(r report.Result, dryRun bool, p eval.Policy) bool {
+	return r.Error == "" && (r.Evaluation != nil || dryRun || junked(r, p))
+}
+
+// Pending is the files a judge --resume would still process, given the stored report
+// (nil: all of them): what --estimate prices on a resume.
+func Pending(files []string, prev *report.Report, p eval.Policy) []string {
+	done := map[string]bool{}
+	if prev != nil {
+		for _, r := range prev.Results {
+			if kept(r, false, p) {
+				done[r.Key()] = true
+			}
+		}
+	}
+	var todo []string
+	for _, f := range files {
+		st, err := os.Stat(f)
+		if err != nil || !done[report.Key(f, st.Size(), st.ModTime())] {
+			todo = append(todo, f)
+		}
+	}
+	return todo
+}
+
 // startRun discovers the frames, applies the resume guard, and returns the report
 // (holding resumed results) and the frames still to process.
 func startRun(cfg *Config) (*report.Report, []string, error) {
@@ -555,7 +581,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 			rep.ResolvedModel = prev.ResolvedModel
 			rep.DiscardedCostUSD = prev.DiscardedCostUSD
 			for _, r := range prev.Results {
-				if r.Error == "" && (r.Evaluation != nil || cfg.DryRun || junked(r, cfg.Policy)) {
+				if kept(r, cfg.DryRun, cfg.Policy) {
 					rep.Results = append(rep.Results, r)
 					done[r.Key()] = true
 					continue

@@ -140,3 +140,18 @@ func TestShellQuote(t *testing.T) {
 		}
 	}
 }
+
+// On --resume the estimate prices only the frames still to judge, not the folder.
+func TestEstimateOnResumeCountsOnlyWhatsLeft(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := statusShoot(t) // 3 judged
+	tinyDNG(t, filepath.Join(dir, "L4.DNG"))
+	out, err := run(t, "judge", "--estimate", "--resume", "--backend", "claude-code", dir)
+	if err != nil || !strings.Contains(out, "estimate: 1 frames") || !strings.Contains(out, "3 already judged") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	out, err = run(t, "judge", "--estimate", "--backend", "claude-code", dir)
+	if err != nil || !strings.Contains(out, "estimate: 4 frames") {
+		t.Fatalf("without --resume: err=%v\n%s", err, out)
+	}
+}

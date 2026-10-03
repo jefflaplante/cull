@@ -150,6 +150,17 @@ Backends (--backend):
 				if err != nil {
 					return err
 				}
+				if o.resume { // only what's left costs anything
+					if prev, err := report.Load(cfg.ReportPath); err == nil {
+						p, _ := o.policy.policy()
+						if rp, _, err := o.policy.resolve(cmd.Flags(), prev.Policy); err == nil {
+							p = rp
+						}
+						todo := pipeline.Pending(files, prev, p)
+						fmt.Fprintf(cmd.ErrOrStderr(), "resume: %d already judged, %d to go\n", len(files)-len(todo), len(todo))
+						files = todo
+					}
+				}
 				usd := printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch, !o.noRank, o.rankTwice)
 				if o.second {
 					fmt.Fprintln(cmd.ErrOrStderr(), "second opinions: one more evaluation per soft-or-worse frame, on top of the estimate")

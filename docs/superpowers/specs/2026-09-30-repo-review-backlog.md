@@ -255,3 +255,20 @@ itself hasn't been driven in a browser yet, because the Chrome extension wasn't 
   16 MB file). The evidence was 2 pages, so a fixed cap (≤ 4) would be tighter.
 - **`Junk()` trusts `Contrast == 0`.** It only ever runs on a fresh `Measure`, but a guard
   would protect future callers working from old stored stats.
+
+## Part 4 keywords (2026-10-02): deferred minors
+
+- **`cull tag` during a running sync judge** is overwritten by the run's next checkpoint.
+  It should refuse or warn when a run looks active.
+- **`NormalizeKeywords` counts bytes, not characters,** for its 30 limit, so CJK
+  keywords are dropped early.
+- **A model answering `keywords` as a string or null** fails that frame after the retry.
+  This is likely only with weak local models.
+- **Docs:**
+  - CLAUDE.md's cobra-tree line lacks `tag`, `offload`, `status` and `import-labels`;
+  - the README's commands table lacks `tag`;
+  - the review server's header tags go stale after `cull tag`.
+- **`startRun` loads the report up to three times** (the overwrite guard, the tag merge,
+  resume).
+- **`apply-c1` issues one `apply keyword` per keyword per frame.** Grouping frames by
+  keyword (`apply keyword k to {v1, v2, …}`) would cut Apple events further.

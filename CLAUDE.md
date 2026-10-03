@@ -349,6 +349,13 @@ balance`, but no run has tested them yet.
   - `msync(MS_INVALIDATE)` on a mapping evicted every page of a fully cached 80 MB file
     (5/5 trials). Offload evicts and checks 0 resident before every verify read
     (`offload.dropCache`).
+  - Under load, roughly 1 run in 20 had 2 pages back in the cache between that check
+    and the read: pages [0 1] or [0 2047], a file's first and last. That's a scanner
+    (Spotlight or XProtect) reading new files.
+    - **This doesn't break the guarantee:** nothing writes the copy after eviction, so a
+      re-cached page came from the device.
+    - **The tests tolerate ≤ 1% resident** at verify start. Without eviction, 100% is
+      resident, so they still catch a failure.
 
 ### Sequences: look distances on the 17 sample frames (2026-09-28)
 

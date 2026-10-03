@@ -116,6 +116,26 @@ main,.site-foot{padding-right:var(--gutter)}
   border-bottom:1px solid var(--line);
 }
 .site-head .wrap{display:flex;align-items:center;gap:24px;height:62px;max-width:none}
+/* Lens barrel: a focusing ring and depth-of-field scale, unrolled under the nav. The
+   distance scale turns with the page (close focus at the top, infinity at the end). */
+:root{--feet:#e9c03a}
+.barrel{display:none;border-top:1px solid var(--line);
+  background:linear-gradient(180deg,#121214,#0b0b0c 60%,#101012);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03),inset 0 -1px 0 rgba(0,0,0,.6)}
+.barrel-in{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:28px;
+  max-width:1240px;margin:0 auto;padding:6px 32px 4px;height:84px}
+.lens-id{display:flex;flex-direction:column;align-items:flex-start;line-height:1}
+.lens-id .fl{color:var(--feet);font-size:30px;font-weight:600;letter-spacing:.02em;
+  font-variation-settings:"wdth" 108;text-shadow:0 1px 0 rgba(0,0,0,.7)}
+.lens-id .ap{color:var(--text);font-size:10.5px;letter-spacing:.24em;margin-top:6px;opacity:.85;
+  font-variation-settings:"wdth" 125}
+.scales{width:100%;height:76px;display:block;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 9%,#000 91%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 9%,#000 91%,transparent)}
+.scales text{font-family:var(--sans);font-variation-settings:"wdth" 100;font-variant-numeric:tabular-nums}
+.mount{width:11px;height:11px;border-radius:50%;background:var(--red);
+  box-shadow:inset 0 -1px 1px rgba(0,0,0,.4),0 0 0 3px rgba(217,38,28,.12)}
+@media (min-width:760px){.barrel{display:block}}
 .mark{display:inline-flex;align-items:center;gap:10px;text-decoration:none;font-weight:700;font-size:21px;letter-spacing:-.01em;font-variation-settings:"wdth" 112}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:inset 0 -1px 1px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.4)}
 .top-nav{display:none;margin-left:auto}
@@ -187,6 +207,7 @@ main,.site-foot{padding-right:var(--gutter)}
 
 /* sections */
 section{scroll-margin-top:72px}
+@media (min-width:760px){section{scroll-margin-top:158px}}
 .sec{padding:clamp(80px,11vw,150px) 0 0}
 .rule{
   height:9px;margin-bottom:28px;
@@ -637,12 +658,19 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
       <span>GitHub<span class="lbl-long"> · source</span></span>
     </a>
   </div>
+  <div class="barrel" aria-hidden="true">
+    <div class="barrel-in">
+      <div class="lens-id"><span class="fl">35</span><span class="ap">1:1.4</span></div>
+      <svg class="scales" viewBox="0 0 900 80" preserveAspectRatio="xMidYMid meet"></svg>
+      <span class="mount" title=""></span>
+    </div>
+  </div>
 </header>
 
 <main id="main">
 
 <!-- 1 · INDEX -->
-<section class="hero" id="top" data-n="1" data-name="Index" aria-labelledby="h-hero">
+<section class="hero" id="top" data-n="30" data-name="Index" aria-labelledby="h-hero">
   <div class="wrap">
     <div class="reveal">
       <p class="kicker eng"><span class="dot" aria-hidden="true"></span>A culling instrument for DNG shoots</p>
@@ -687,11 +715,11 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 </section>
 
 <!-- 2 · PRINCIPLE -->
-<section class="sec" id="principle" data-n="2" data-name="Principle" aria-labelledby="h-principle">
+<section class="sec" id="principle" data-n="60" data-name="Principle" aria-labelledby="h-principle">
   <div class="wrap">
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
-      <p class="sec-no eng"><b>2</b> Principle</p>
+      <p class="sec-no eng"><b>60</b> Principle</p>
       <h2 id="h-principle">Three priorities, in order.</h2>
     </header>
     <ol class="creed">
@@ -726,11 +754,11 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 </section>
 
 <!-- 4 · PIPELINE -->
-<section class="sec" id="pipeline" data-n="4" data-name="Pipeline" aria-labelledby="h-pipeline">
+<section class="sec" id="pipeline" data-n="125" data-name="Pipeline" aria-labelledby="h-pipeline">
   <div class="wrap">
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
-      <p class="sec-no eng"><b>4</b> Pipeline</p>
+      <p class="sec-no eng"><b>125</b> Pipeline</p>
       <div>
         <h2 id="h-pipeline">From card to catalogue, <span>in six stations.</span></h2>
       </div>
@@ -793,11 +821,11 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 </section>
 
 <!-- 8 · OFFLOAD -->
-<section class="sec" id="offload" data-n="8" data-name="Offload" aria-labelledby="h-offload">
+<section class="sec" id="offload" data-n="250" data-name="Offload" aria-labelledby="h-offload">
   <div class="wrap">
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
-      <p class="sec-no eng"><b>8</b> Offload</p>
+      <p class="sec-no eng"><b>250</b> Offload</p>
       <div>
         <h2 id="h-offload">Read the card once. <span>Verify every file.</span></h2>
       </div>
@@ -845,11 +873,11 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 </section>
 
 <!-- 15 · JUDGE -->
-<section class="sec" id="judge" data-n="15" data-name="Judge" aria-labelledby="h-judge">
+<section class="sec" id="judge" data-n="500" data-name="Judge" aria-labelledby="h-judge">
   <div class="wrap">
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
-      <p class="sec-no eng"><b>15</b> Judge</p>
+      <p class="sec-no eng"><b>500</b> Judge</p>
       <div>
         <h2 id="h-judge">Judged at the eyes, <span>at full resolution.</span></h2>
       </div>
@@ -964,11 +992,11 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 </section>
 
 <!-- 30 · REVIEW -->
-<section class="sec" id="review" data-n="30" data-name="Review" aria-labelledby="h-review">
+<section class="sec" id="review" data-n="1000" data-name="Review" aria-labelledby="h-review">
   <div class="wrap">
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
-      <p class="sec-no eng"><b>30</b> Review</p>
+      <p class="sec-no eng"><b>1000</b> Review</p>
       <div>
         <h2 id="h-review">A contact sheet <span>that answers to you.</span></h2>
       </div>
@@ -1011,11 +1039,11 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 </section>
 
 <!-- 60 · DELIVERY -->
-<section class="sec" id="delivery" data-n="60" data-name="Delivery" aria-labelledby="h-delivery">
+<section class="sec" id="delivery" data-n="2000" data-name="Delivery" aria-labelledby="h-delivery">
   <div class="wrap">
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
-      <p class="sec-no eng"><b>60</b> Delivery</p>
+      <p class="sec-no eng"><b>2000</b> Delivery</p>
       <div>
         <h2 id="h-delivery">Into Capture One <span>as metadata.</span></h2>
       </div>
@@ -1068,11 +1096,11 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 </section>
 
 <!-- 125 · SPECIFICATION -->
-<section class="sec" id="specification" data-n="125" data-name="Specification" aria-labelledby="h-spec">
+<section class="sec" id="specification" data-n="4000" data-name="Specification" aria-labelledby="h-spec">
   <div class="wrap">
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
-      <p class="sec-no eng"><b>125</b> Specification</p>
+      <p class="sec-no eng"><b>4000</b> Specification</p>
       <div>
         <h2 id="h-spec">Measured, <span>not promised.</span></h2>
       </div>
@@ -1149,24 +1177,35 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 </section>
 
 <!-- 250 · INSTALL -->
-<section class="sec" id="install" data-n="250" data-name="Install" aria-labelledby="h-install">
+<section class="sec" id="install" data-n="4000" data-name="Install" aria-labelledby="h-install">
   <div class="wrap">
     <div class="rule" aria-hidden="true"></div>
     <div class="plate install reveal">
       <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
       <div>
-        <p class="sec-no eng" style="margin-bottom:22px"><b>250</b> Install</p>
-        <h2 id="h-install">Build it, then read it.</h2>
-        <p>Open source, written in Go. Every rule that keeps or culls a frame is in the repository.</p>
+        <p class="sec-no eng" style="margin-bottom:22px"><b>4000</b> Install</p>
+        <h2 id="h-install">Download it, then read it.</h2>
+        <p>One universal binary for Apple silicon and Intel Macs. Open source, written in Go: every rule that keeps or culls a frame is in the repository.</p>
+        <div class="snippet">
+          <pre id="snip-download"><code><span class="p">$ </span>curl -fsSL https://github.com/jefflaplante/cull/releases/latest/download/cull_macos_universal.tar.gz | tar -xz &amp;&amp; sudo mv cull_macos_universal/cull /usr/local/bin/</code></pre>
+          <button class="copy" type="button" data-copy="snip-download" aria-label="Copy download command">Copy</button>
+        </div>
+        <p class="req">Or build from source with Go 1.26:</p>
         <div class="snippet">
           <pre id="snip-install"><code><span class="p">$ </span>git clone https://github.com/jefflaplante/cull &amp;&amp; cd cull &amp;&amp; make build</code></pre>
-          <button class="copy" type="button" data-copy="snip-install" aria-label="Copy install command">Copy</button>
+          <button class="copy" type="button" data-copy="snip-install" aria-label="Copy build command">Copy</button>
         </div>
-        <p class="req" style="margin-bottom:28px">Requires Go 1.26. The Capture One parts need macOS.</p>
-        <a class="btn btn-primary" href="https://github.com/jefflaplante/cull">
+        <p class="req" style="margin-bottom:28px">macOS, for the Capture One parts. Every release lists its SHA-256.</p>
+        <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/jefflaplante/cull/releases/latest">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" d="M8 2v8m-3.5-3.5L8 10l3.5-3.5M3 13.5h10"/></svg>
+          Download for macOS
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/jefflaplante/cull">
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
           View on GitHub
         </a>
+        </div>
       </div>
       <div class="terminal">
         <div class="term-bar"><span class="leds" aria-hidden="true"><i></i><i></i><i></i></span><span class="eng">A session · card to Capture One</span></div>
@@ -1208,7 +1247,7 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
     <div class="dial-hub"></div>
   </nav>
   <span class="dial-index" id="dialIndex" aria-hidden="true"></span>
-  <p class="dial-cap eng" id="dialCap" aria-hidden="true"><b>1</b> · Index</p>
+  <p class="dial-cap eng" id="dialCap" aria-hidden="true"><b>30</b> · Index</p>
 </div>
 
 <!-- compact dial (phones, tablets) -->
@@ -1216,7 +1255,7 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
   <button class="pill-btn" id="pillBtn" type="button" aria-expanded="false" aria-controls="pillMenu">
     <span class="pill-knurl" id="pillKnurl" aria-hidden="true"></span>
     <span class="pill-idx" aria-hidden="true"></span>
-    <span class="pill-num" id="pillNum">1</span>
+    <span class="pill-num" id="pillNum">30</span>
     <span id="pillName">Index</span>
     <span class="sr-only">, open section menu</span>
   </button>
@@ -1261,6 +1300,86 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
     }
   })();
 
+  // Lens barrel. A 35 mm focusing ring: distance marks spaced by 1/distance (feet in
+  // yellow above, metres in white below), turned by the page from 1.2 m at the top to
+  // infinity at the end. Under the index, the depth-of-field scale: each
+  // aperture's marks sit where a 35 mm lens's depth of field ends (circle of confusion
+  // 0.03 mm), with lines flaring out beneath them. Drawn to the strip's real width.
+  (function () {
+    var svg = document.querySelector('.barrel .scales');
+    if (!svg) return;
+    var NS = 'http://www.w3.org/2000/svg', H = 80, S = 560, UMAX = 1 / 0.7;
+    var white = '#ece6da';
+    var yellow = getComputedStyle(document.documentElement).getPropertyValue('--feet').trim() || '#e9c03a';
+    var still = reduce.matches, ring = null, CX = 0;
+    function el(name, attrs, text) {
+      var e = document.createElementNS(NS, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    function build() {
+      var r = svg.getBoundingClientRect();
+      if (!r.width) return false;
+      var W = Math.round(r.width * H / r.height);
+      CX = W / 2;
+      svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      ring = el('g', {});
+      // u is in dioptres (1/metres); infinity is u = 0, the near end is u = UMAX.
+      var feet = [[2.5, '2.5'], [3, '3'], [4, '4'], [5, '5'], [7, '7'], [10, '10'], [15, '15'], [30, '30']];
+      var metres = [[0.7, '0.7'], [0.8, '0.8'], [1, '1'], [1.2, '1.2'], [1.5, '1.5'], [2, '2'], [3, '3'], [5, '5']];
+      function mark(u, y, label, colour) {
+        var x = u * S;
+        ring.appendChild(el('line', { x1: x, x2: x, y1: y + 3, y2: y + 8, stroke: colour, 'stroke-width': 1.1 }));
+        ring.appendChild(el('text', { x: x, y: y, fill: colour, 'font-size': 12.5, 'font-weight': 500, 'text-anchor': 'middle' }, label));
+      }
+      feet.forEach(function (f) { mark(1 / (f[0] * 0.3048), 14, f[1], yellow); });
+      metres.forEach(function (m) { mark(1 / m[0], 35, m[1], white); });
+      [[14, yellow, 'ft'], [35, white, 'm']].forEach(function (row) {
+        ring.appendChild(el('text', { x: 0, y: row[0] + 1.5, fill: row[1], 'font-size': 16, 'text-anchor': 'middle' }, '∞'));
+        ring.appendChild(el('text', { x: -26, y: row[0], fill: row[1], 'font-size': 10, 'letter-spacing': '0.12em', 'text-anchor': 'middle', opacity: 0.85 }, row[2]));
+      });
+      for (var u = 0.05; u < UMAX; u += 0.05) {
+        ring.appendChild(el('line', { x1: u * S, x2: u * S, y1: 39, y2: 41, stroke: white, opacity: 0.3 }));
+      }
+      svg.appendChild(ring);
+      // fixed: the focusing index and the depth-of-field scale beneath it
+      svg.appendChild(el('line', { x1: CX, x2: CX, y1: 41, y2: 53, stroke: white, 'stroke-width': 1.4 }));
+      var stops = [[16, '16'], [11, '11'], [8, '8'], [5.6, ''], [4, '4'], [2.8, '']];
+      stops.forEach(function (st) {
+        var off = st[0] * 0.03 / (35 * 35) * 1000 * S; // N·c/f² in dioptres, to px
+        [-1, 1].forEach(function (side) {
+          var x = CX + side * off;
+          svg.appendChild(el('line', { x1: x, x2: x, y1: 46, y2: 53, stroke: white, 'stroke-width': 1, opacity: st[1] ? 0.95 : 0.45 }));
+          if (st[1]) svg.appendChild(el('text', { x: x, y: 64, fill: white, 'font-size': 11, 'text-anchor': 'middle', opacity: 0.92 }, st[1]));
+          // depth-of-field line, flaring out beneath its aperture
+          svg.appendChild(el('path', {
+            d: 'M' + x + ' 67 Q ' + (x + side * off * 0.15) + ' 73 ' + (CX + side * off * 1.6) + ' 80',
+            fill: 'none', stroke: white, 'stroke-width': 0.9, opacity: st[1] ? 0.34 : 0.16
+          }));
+        });
+      });
+      return true;
+    }
+    function turn() {
+      if (!ring) return;
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      var p = still ? 0.6 : (max > 0 ? Math.min(1, window.scrollY / max) : 0);
+      var u = (1 / 1.2) * (1 - p); // 1.2 m at the top of the page, infinity at the end
+      ring.setAttribute('transform', 'translate(' + (CX - u * S).toFixed(2) + ' 0)');
+    }
+    function redraw() { if (build()) turn(); }
+    redraw();
+    window.addEventListener('resize', redraw);
+    if (!still) {
+      var queued = false;
+      window.addEventListener('scroll', function () {
+        if (!queued) { queued = true; requestAnimationFrame(function () { queued = false; turn(); }); }
+      }, { passive: true });
+    }
+  })();
+
   // The phone pill tucks away while scrolling down (it would cover text), and comes
   // back on the way up, at the top and at the end of the page.
   (function () {
@@ -1273,7 +1392,7 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
       last = y;
     }, { passive: true });
   })();
-  var NUMS = [1,2,4,8,15,30,60,125,250,500,1000,2000,4000];
+  var NUMS = [1,2,4,8,15,30,60,125,250,500,1000,2000,4000,'B']; // B (bulb) closes the dial between 4000 and 1
   var STEP = 360 / NUMS.length;
 
   /* ---------- contact-sheet schematic: the recorded run ---------- */

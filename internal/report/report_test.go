@@ -146,3 +146,31 @@ func TestRelocateOnlyWhenTheFolderMoved(t *testing.T) {
 		t.Fatal("nothing under the old folder: nothing to change, Dir kept")
 	}
 }
+
+func TestMergeTags(t *testing.T) {
+	stored := &Tags{Project: "A", Location: "Forest Park, Portland", Keywords: []string{"x"}}
+	if got := MergeTags(stored, nil); got != stored {
+		t.Fatalf("no flags: %+v", got)
+	}
+	got := MergeTags(stored, &Tags{Project: "B"})
+	if got.Project != "B" || got.Location != "Forest Park, Portland" || len(got.Keywords) != 1 {
+		t.Fatalf("project only: %+v", got)
+	}
+	if got := MergeTags(stored, &Tags{Keywords: []string{"y", "z"}}); len(got.Keywords) != 2 || got.Project != "A" {
+		t.Fatalf("keywords replace: %+v", got)
+	}
+	if MergeTags(nil, nil) != nil || MergeTags(nil, &Tags{}) != nil {
+		t.Fatal("empty tags should be nil")
+	}
+	tg := &Tags{Project: "Smith wedding", Event: "Ceremony", Location: "Forest Park", Keywords: []string{"family"}}
+	if p := strings.Join(tg.Plain(), ","); p != "Smith wedding,Ceremony,Forest Park,family" {
+		t.Fatalf("plain %q", p)
+	}
+	if p := strings.Join(tg.Paths(), ","); p != "project|Smith wedding,event|Ceremony,location|Forest Park" {
+		t.Fatalf("paths %q", p)
+	}
+	var none *Tags
+	if none.Plain() != nil || none.Paths() != nil {
+		t.Fatal("nil tags must be safe")
+	}
+}

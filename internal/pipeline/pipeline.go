@@ -41,6 +41,7 @@ type Config struct {
 	OverwriteXMP   bool
 	MoveCulled     bool                    // move cull decisions (and sidecars) into CulledDir after processing
 	Sort           bool                    // move every judged frame (and sidecar) into keep/, review/ or cull/
+	Tags           *report.Tags            // given on this command; merged over the folder's stored tags
 	Labels         map[string]labels.Entry // your labels by base name: drive moves and sidecar rewrites at the end; nil = the model's
 	XMPDevelop     bool                    // also write crs:Exposure2012 / crs:Crop*
 	MinPreviewEdge int
@@ -494,6 +495,13 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 	rep := &report.Report{SchemaVersion: report.SchemaVersion, Backend: cfg.Backend, Model: cfg.Model,
 		Effort: cfg.Effort, LocateEffort: cfg.LocateEffort, Escalation: cfg.Escalate.Label(), Dir: cfg.Dir}
 	done := map[string]bool{}
+	// Tags carry over from whatever report the folder has (an offload's scan, an
+	// earlier judge), resumed or not; tags given now override them field by field.
+	var stored *report.Tags
+	if prev, err := report.Load(cfg.ReportPath); err == nil {
+		stored = prev.Tags
+	}
+	rep.Tags = report.MergeTags(stored, cfg.Tags)
 	if cfg.Resume {
 		prev, err := report.Load(cfg.ReportPath)
 		if err == nil && prev.Relocate(cfg.ReportPath, cfg.Dir) {

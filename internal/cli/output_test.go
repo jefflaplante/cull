@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 func TestVerbosityFlagConflicts(t *testing.T) {
@@ -172,5 +174,32 @@ func TestStatusCountsJunk(t *testing.T) {
 	}
 	if !strings.Contains(out, "assessed 1 · junk 1 · errors 0 · not yet judged 0") || !strings.Contains(out, "cull 2") {
 		t.Fatalf("status miscounts junk:\n%s", out)
+	}
+}
+
+func TestScanTagsFlagsAndTagCommand(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	if out, err := run(t, "scan", "--project", "Smith wedding", "--location", "Forest Park, Portland", "--keyword", "family", "--keyword", "outdoor", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	rep, _ := report.Load(filepath.Join(dir, "cull-report.json"))
+	if rep.Tags == nil || rep.Tags.Project != "Smith wedding" || rep.Tags.Location != "Forest Park, Portland" || strings.Join(rep.Tags.Keywords, ",") != "family,outdoor" {
+		t.Fatalf("scan tags %+v", rep.Tags)
+	}
+	if out, err := run(t, "tag", "--event", "Ceremony", "--clear-location", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	rep, _ = report.Load(filepath.Join(dir, "cull-report.json"))
+	if rep.Tags.Event != "Ceremony" || rep.Tags.Location != "" || rep.Tags.Project != "Smith wedding" {
+		t.Fatalf("after cull tag %+v", rep.Tags)
+	}
+	out, err := run(t, "tag", dir)
+	if err != nil || !strings.Contains(out, "project: Smith wedding") || !strings.Contains(out, "event: Ceremony") {
+		t.Fatalf("cull tag prints: %v\n%s", err, out)
+	}
+	if _, err := run(t, "scan", "--project", "a|b", dir); err == nil {
+		t.Fatal("a tag with | accepted")
 	}
 }

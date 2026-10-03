@@ -189,6 +189,8 @@ type Report struct {
 	// and judge --resume regroup with it unless those flags are typed. Nil in older
 	// reports.
 	Seq *Sequences `json:"seq,omitempty"`
+	// Tags are the shoot's keywords; they carry over to every later run of the folder.
+	Tags *Tags `json:"tags,omitempty"`
 	// RankCostUSD is the list price of every rank call made for this report. It only
 	// grows: a regrouping or re-rank can drop a Set, but not what was paid for it.
 	RankCostUSD float64 `json:"rank_cost_usd,omitempty"`
@@ -356,4 +358,74 @@ func (r *Report) Relocate(reportPath, dir string) bool {
 // within reports whether path is inside dir.
 func within(dir, path string) bool {
 	return strings.HasPrefix(path, dir+string(filepath.Separator))
+}
+
+// Tags are the shoot's own keywords (--project, --event, --location, --keyword): every
+// frame's sidecar and apply-c1 carry them.
+type Tags struct {
+	Project  string   `json:"project,omitempty"`
+	Event    string   `json:"event,omitempty"`
+	Location string   `json:"location,omitempty"`
+	Keywords []string `json:"keywords,omitempty"`
+}
+
+func (t *Tags) empty() bool {
+	return t == nil || (t.Project == "" && t.Event == "" && t.Location == "" && len(t.Keywords) == 0)
+}
+
+// Plain is the tags as plain keywords: the project, event and location values, then
+// each keyword.
+func (t *Tags) Plain() []string {
+	if t.empty() {
+		return nil
+	}
+	var out []string
+	for _, v := range []string{t.Project, t.Event, t.Location} {
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return append(out, t.Keywords...)
+}
+
+// Paths is the tags as keyword hierarchy paths: project|v, event|v, location|v.
+func (t *Tags) Paths() []string {
+	if t.empty() {
+		return nil
+	}
+	var out []string
+	for _, f := range []struct{ k, v string }{{"project", t.Project}, {"event", t.Event}, {"location", t.Location}} {
+		if f.v != "" {
+			out = append(out, f.k+"|"+f.v)
+		}
+	}
+	return out
+}
+
+// MergeTags applies tags given on a command over the stored ones, field by field;
+// given keywords replace the stored list. Empty is nil.
+func MergeTags(stored, given *Tags) *Tags {
+	if given.empty() {
+		if stored.empty() {
+			return nil
+		}
+		return stored
+	}
+	t := Tags{}
+	if stored != nil {
+		t = *stored
+	}
+	if given.Project != "" {
+		t.Project = given.Project
+	}
+	if given.Event != "" {
+		t.Event = given.Event
+	}
+	if given.Location != "" {
+		t.Location = given.Location
+	}
+	if len(given.Keywords) > 0 {
+		t.Keywords = given.Keywords
+	}
+	return &t
 }

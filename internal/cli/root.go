@@ -32,6 +32,7 @@ type sharedOpts struct {
 	seqGap            time.Duration
 	seqLook           float64
 	out               outputOpts
+	tags              tagFlags // offload, scan, judge
 }
 
 func NewRootCmd() *cobra.Command {
@@ -66,11 +67,12 @@ then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.`,
 	scan, judge, rank, decide := newScanCmd(&so), newCullCmd(&so), newRankCmd(&so), newDecideCmd(&so)
 	for _, c := range []*cobra.Command{scan, judge} {
 		so.registerPrep(c.Flags())
+		so.tags.register(c.Flags())
 	}
 	for _, c := range []*cobra.Command{scan, judge, rank, decide} {
 		so.registerSeq(c.Flags())
 	}
-	root.AddCommand(newOffloadCmd(&so), scan, judge, rank, decide, newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newStatusCmd(&so), newImportLabelsCmd(&so), newVersionCmd())
+	root.AddCommand(newOffloadCmd(&so), newTagCmd(&so), scan, judge, rank, decide, newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newStatusCmd(&so), newImportLabelsCmd(&so), newVersionCmd())
 	return root
 }
 
@@ -120,6 +122,10 @@ func (so *sharedOpts) base(arg string) (pipeline.Config, error) {
 			return pipeline.Config{}, fmt.Errorf("refusing to write inputs into the shoot directory %s; pick another --save-inputs", dir)
 		}
 	}
+	tags, err := so.tags.tags()
+	if err != nil {
+		return pipeline.Config{}, err
+	}
 	report := so.report
 	if report == "" {
 		report = filepath.Join(dir, "cull-report.json")
@@ -141,6 +147,7 @@ func (so *sharedOpts) base(arg string) (pipeline.Config, error) {
 		// Commands without policy flags (scan, offload's scan) still flag junk, as
 		// judge would by default; judge and decide replace the policy from flags.
 		Policy: eval.Policy{Junk: eval.ActionCull},
+		Tags:   tags,
 	}, nil
 }
 

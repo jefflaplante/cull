@@ -107,6 +107,7 @@ judge it next.`,
 	f.BoolVar(&o.Checksum, "checksum", false, "decide what's already copied by SHA-256, not size and time")
 	f.BoolVar(&dryRun, "dry-run", false, "print the plan and exit; write nothing")
 	f.BoolVar(&noScan, "no-scan", false, "stop after copying (don't scan the shoot folder)")
+	so.tags.register(f)
 	f.BoolVar(&verify, "verify", false, "re-check a shoot folder's copies against the checksums recorded when they were made")
 	return cmd
 }

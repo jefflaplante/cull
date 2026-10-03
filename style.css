@@ -122,6 +122,7 @@ main,.site-foot{padding-right:var(--gutter)}
 .top-nav ul{display:flex;gap:22px;list-style:none;margin:0;padding:0}
 .top-nav a{text-decoration:none;color:var(--dim);transition:color .2s}
 .top-nav a:hover,.top-nav a[aria-current="true"]{color:var(--text)}
+.top-nav a[aria-current="page"]{color:var(--text);box-shadow:0 2px 0 -0.5px var(--red);padding-bottom:3px}
 .head-cta{margin-left:auto}
 @media (min-width:1340px){.top-nav{display:block}.head-cta .lbl-long{display:none}}
 
@@ -343,6 +344,7 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 .split{display:grid;gap:clamp(36px,5vw,64px)}
 @media (min-width:980px){
   .split{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}
+  .split.solo{grid-template-columns:minmax(0,1fr)}
   .split.wide-r{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr)}
 }
 .procedure{list-style:none;margin:0 0 30px;padding:0;counter-reset:s}
@@ -652,3 +654,28 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 .walk-steps{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
 .walk-steps li{display:flex;gap:18px;align-items:baseline;padding:12px 0;border-bottom:1px solid var(--line);font-size:clamp(19px,1.6vw,22px)}
 .walk-steps .eng{flex:none;width:4.6em;text-align:right;color:var(--dim);font-size:12px}
+
+/* usage: full-width commands */
+.cmds{display:grid;gap:14px;margin:0 0 clamp(34px,4.5vw,56px)}
+.cmd-lead{margin:6px 0 8px;font-size:15.5px;color:var(--dim)}
+.cmds .snippet{
+  border-color:var(--line-2);border-left:2px solid var(--red);
+  background:linear-gradient(180deg,#121214,#0c0c0d);
+  box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 18px 34px -22px rgba(0,0,0,.95);
+}
+.cmds .snippet pre{padding:18px 22px;font-size:16px;line-height:1.55;color:#f6f1e6}
+.cmds .snippet .p{color:var(--red-text)}
+.cmds .copy{color:var(--muted);padding:0 22px}
+.cmd-out{
+  margin:0;padding:12px 22px 13px 24px;
+  border:1px solid var(--line);border-top:0;border-radius:0 0 4px 4px;
+  background:rgba(0,0,0,.35);
+  font-size:13.5px;line-height:1.6;color:var(--muted);
+  white-space:pre-wrap;overflow-wrap:anywhere;
+}
+.cmd .snippet:has(+ .cmd-out){border-bottom-left-radius:0;border-bottom-right-radius:0}
+@media (max-width:640px){
+  .cmds .snippet pre{padding:14px 14px;font-size:13.5px}
+  .cmds .copy{padding:0 12px}
+  .cmd-out{padding:10px 14px;font-size:12px}
+}

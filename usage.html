@@ -97,18 +97,22 @@
       <p class="sec-no eng"><b>60</b> Install</p>
       <div><h2 id="h-install">One binary. <span>Apple silicon and Intel.</span></h2></div>
     </header>
-    <div class="split">
-      <div class="reveal">
+    <div class="cmds reveal">
+      <div class="cmd">
         <div class="snippet">
           <pre id="u-brew"><code><span class="p">$ </span>brew install jefflaplante/tap/cull</code></pre>
           <button class="copy" type="button" data-copy="u-brew" aria-label="Copy the Homebrew command">Copy</button>
         </div>
-        <p class="req">Or straight from the latest release:</p>
+      </div>
+      <div class="cmd">
+        <p class="cmd-lead">Or straight from the latest release:</p>
         <div class="snippet">
           <pre id="u-curl"><code><span class="p">$ </span>curl -fsSL https://github.com/jefflaplante/cull/releases/latest/download/cull_macos_universal.tar.gz | tar -xz &amp;&amp; sudo mv cull_macos_universal/cull /usr/local/bin/</code></pre>
           <button class="copy" type="button" data-copy="u-curl" aria-label="Copy the download command">Copy</button>
         </div>
       </div>
+    </div>
+    <div class="split solo">
       <div class="reveal">
         <table class="backends">
           <thead><tr><th class="eng">Judging with</th><th class="eng">Needs</th></tr></thead>
@@ -131,12 +135,16 @@
       <p class="sec-no eng"><b>125</b> Offload</p>
       <div><h2 id="h-offload">Copy the card. <span>Every file checked.</span></h2></div>
     </header>
-    <div class="split">
-      <div class="reveal">
+    <div class="cmds reveal">
+      <div class="cmd">
         <div class="snippet">
           <pre id="u-offload"><code><span class="p">$ </span>cull offload /Volumes/LEICA\ M ~/Pictures --name "Forest portraits" --location "Forest Park, Portland"</code></pre>
           <button class="copy" type="button" data-copy="u-offload" aria-label="Copy the offload command">Copy</button>
         </div>
+      </div>
+    </div>
+    <div class="split">
+      <div class="reveal">
         <ul class="notes">
           <li>Plans first: the folder, where its date came from, every refusal before a byte is written.</li>
           <li>Reads the card once, hashing as it goes; reads every copy back from the disk.</li>
@@ -168,20 +176,24 @@
       <p class="sec-no eng"><b>250</b> Judge</p>
       <div><h2 id="h-judge">Price it, then judge it. <span>The model assesses; Go decides.</span></h2></div>
     </header>
-    <div class="split">
-      <div class="reveal">
+    <div class="cmds reveal">
+      <div class="cmd">
         <div class="snippet">
           <pre id="u-est"><code><span class="p">$ </span>cull judge --estimate "$SHOOT"</code></pre>
           <button class="copy" type="button" data-copy="u-est" aria-label="Copy the estimate command">Copy</button>
         </div>
-        <div class="terminal" style="margin:14px 0 26px">
-<pre class="term" tabindex="0"><code>estimate: 17 frames × ~6k in / ~1k out tokens ≈ $0.37 at list price (claude-sonnet-5-5)
+        <pre class="cmd-out"><code>estimate: 17 frames × ~6k in / ~1k out tokens ≈ $0.37 at list price (claude-sonnet-5-5)
 ranking ≈ 3 call(s), $0.09 at list price</code></pre>
-        </div>
+      </div>
+      <div class="cmd">
         <div class="snippet">
           <pre id="u-judge"><code><span class="p">$ </span>cull judge --backend claude-code --write-xmp "$SHOOT"</code></pre>
           <button class="copy" type="button" data-copy="u-judge" aria-label="Copy the judge command">Copy</button>
         </div>
+      </div>
+    </div>
+    <div class="split">
+      <div class="reveal">
         <ul class="notes">
           <li>Sharpness at the eyes on a native-resolution crop; exposure, composition, eyes and expression; up to eight content keywords.</li>
           <li>Near-identical frames are ranked side by side; the best of each set stay keep.</li>
@@ -215,12 +227,16 @@ ranking ≈ 3 call(s), $0.09 at list price</code></pre>
       <p class="sec-no eng"><b>500</b> Review</p>
       <div><h2 id="h-review">Look for yourself. <span>Your labels win.</span></h2></div>
     </header>
-    <div class="split">
-      <div class="reveal">
+    <div class="cmds reveal">
+      <div class="cmd">
         <div class="snippet">
           <pre id="u-review"><code><span class="p">$ </span>cull review "$SHOOT"</code></pre>
           <button class="copy" type="button" data-copy="u-review" aria-label="Copy the review command">Copy</button>
         </div>
+      </div>
+    </div>
+    <div class="split">
+      <div class="reveal">
         <p style="margin-top:18px">A contact sheet opens in your browser. Every key saves to <code>cull-labels.jsonl</code> and the frame&rsquo;s sidecar. Sets are boxed; <b>−</b> and <b>+</b> keep the top few by rank.</p>
       </div>
       <div class="reveal">
@@ -247,17 +263,21 @@ ranking ≈ 3 call(s), $0.09 at list price</code></pre>
       <p class="sec-no eng"><b>1000</b> Tune</p>
       <div><h2 id="h-tune">Check it against you. <span>Free, no model calls.</span></h2></div>
     </header>
-    <div class="split">
-      <div class="reveal">
+    <div class="cmds reveal">
+      <div class="cmd">
         <div class="snippet">
           <pre id="u-cal"><code><span class="p">$ </span>cull calibrate "$SHOOT"</code></pre>
           <button class="copy" type="button" data-copy="u-cal" aria-label="Copy the calibrate command">Copy</button>
         </div>
-        <div class="snippet" style="margin-top:12px">
+      </div>
+      <div class="cmd">
+        <div class="snippet">
           <pre id="u-dec"><code><span class="p">$ </span>cull decide --review-below-sharpness 7 "$SHOOT"</code></pre>
           <button class="copy" type="button" data-copy="u-dec" aria-label="Copy the decide command">Copy</button>
         </div>
       </div>
+    </div>
+    <div class="split solo">
       <div class="reveal">
         <ul class="notes">
           <li><code>calibrate</code> reports false culls (you said keep, it culled), missed culls and the review rate, and sweeps the thresholds.</li>
@@ -277,31 +297,33 @@ ranking ≈ 3 call(s), $0.09 at list price</code></pre>
       <p class="sec-no eng"><b>2000</b> Before import</p>
       <div><h2 id="h-sort">Tag it, sort it. <span>Then import keep and review.</span></h2></div>
     </header>
-    <div class="split">
-      <div class="reveal">
+    <div class="cmds reveal">
+      <div class="cmd">
         <div class="snippet">
           <pre id="u-tag"><code><span class="p">$ </span>cull tag --event "Fall session" --keyword family "$SHOOT"</code></pre>
           <button class="copy" type="button" data-copy="u-tag" aria-label="Copy the tag command">Copy</button>
         </div>
-        <div class="terminal" style="margin:14px 0 26px">
-<pre class="term" tabindex="0"><code>event: Fall session
+        <pre class="cmd-out"><code>event: Fall session
 location: Forest Park, Portland
 keywords: family</code></pre>
-        </div>
+      </div>
+      <div class="cmd">
         <div class="snippet">
           <pre id="u-sort"><code><span class="p">$ </span>cull decide --write-xmp --sort "$SHOOT"</code></pre>
           <button class="copy" type="button" data-copy="u-sort" aria-label="Copy the sort command">Copy</button>
         </div>
-        <div class="terminal" style="margin-top:14px">
-<pre class="term" tabindex="0"><code>decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull/, 0 back into the shoot folder</code></pre>
-        </div>
+        <pre class="cmd-out"><code>decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull/, 0 back into the shoot folder</code></pre>
       </div>
+    </div>
+    <div class="split">
       <div class="reveal">
         <dl class="figures">
           <div><dt class="eng">keep/</dt><dd class="num">14</dd></div>
           <div><dt class="eng">review/</dt><dd class="num">2</dd></div>
           <div><dt class="eng">cull/</dt><dd class="num">1</dd></div>
         </dl>
+      </div>
+      <div class="reveal">
         <ul class="notes">
           <li>Each sidecar carries your stars, a colour label, <code>cull:keep</code>, and the keywords: <code>portrait</code>, <code>smile</code>, <code>woodpile</code>&hellip; plus <code>Fall session</code> and <code>Forest Park, Portland</code>, nested in Capture One.</li>
           <li>Sort before importing: a catalogue loses track of frames moved afterwards. <code>cull restore</code> undoes it.</li>
@@ -320,17 +342,21 @@ keywords: family</code></pre>
       <p class="sec-no eng"><b>4000</b> Capture One</p>
       <div><h2 id="h-c1">After import, <span>push changes in.</span></h2></div>
     </header>
-    <div class="split">
-      <div class="reveal">
+    <div class="cmds reveal">
+      <div class="cmd">
         <div class="snippet">
           <pre id="u-probe"><code><span class="p">$ </span>cull apply-c1 --probe "$SHOOT" | osascript -</code></pre>
           <button class="copy" type="button" data-copy="u-probe" aria-label="Copy the probe command">Copy</button>
         </div>
-        <div class="snippet" style="margin-top:12px">
+      </div>
+      <div class="cmd">
+        <div class="snippet">
           <pre id="u-apply"><code><span class="p">$ </span>cull apply-c1 --run --exposure "$SHOOT"</code></pre>
           <button class="copy" type="button" data-copy="u-apply" aria-label="Copy the apply command">Copy</button>
         </div>
       </div>
+    </div>
+    <div class="split solo">
       <div class="reveal">
         <ul class="notes">
           <li>Colour tags, keywords and your stars on images already in the catalogue. A dry run by default: read the AppleScript first.</li>

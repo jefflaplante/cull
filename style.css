@@ -220,10 +220,11 @@ section{scroll-margin-top:72px}
 /* HERO */
 .hero{padding:clamp(48px,8vw,104px) 0 0}
 .hero-grid{display:grid;gap:clamp(40px,6vw,72px)}
-@media (min-width:980px){.hero-grid{grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);align-items:start}}
+@media (min-width:980px){.hero-grid{grid-template-columns:minmax(0,1.25fr) minmax(0,.75fr);align-items:start;column-gap:40px}}
+@media (min-width:1200px){.readout-head>*,.readout-foot .row>*{white-space:nowrap}}
 .kicker{display:flex;align-items:center;gap:12px;margin:0 0 28px}
 .hero h1{
-  font-size:clamp(42px,7.4vw,104px);
+  font-size:clamp(44px,8vw,114px);
   line-height:.96;letter-spacing:-.035em;font-weight:650;
   font-variation-settings:"wdth" 92;
   margin-bottom:clamp(28px,4vw,56px);
@@ -240,7 +241,7 @@ section{scroll-margin-top:72px}
 .rf-dot{transition:color .5s ease}
 .rf.focused .rf-dot{color:var(--red)}
 .rf.focused::after{opacity:0;transition:opacity .9s ease .25s}
-.hero .lede{margin-bottom:34px}
+.hero .lede{margin-bottom:34px;font-size:clamp(21px,2vw,28px);line-height:1.5}
 .cta-row{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:22px}
 .req{margin:14px 0 0;font-size:15.5px;color:var(--dim)}
 .req code{color:var(--muted);font-size:13px}
@@ -730,10 +731,10 @@ html[data-vf]:not(.vf-off) .rf::before,html[data-vf]:not(.vf-off) .rf::after{dis
 .vf{position:absolute;inset:0;z-index:3;pointer-events:none;opacity:0}
 .vf.on{animation:vf-on 1.2s ease-out forwards}
 @keyframes vf-on{0%{opacity:0}10%{opacity:.75}16%{opacity:.2}28%{opacity:.95}100%{opacity:1}}
-.vf-lines{position:absolute;overflow:visible;filter:drop-shadow(0 0 4px var(--vf-glow)) drop-shadow(0 0 12px var(--vf-glow))}
-.vf-lines .f{fill:none;stroke:var(--vf-line);stroke-width:2;stroke-linecap:butt;opacity:.95}
-.vf-lines .f135{stroke-width:1.8}
-.vf-patch{position:absolute;border-radius:3px;
+.vf-lines{position:absolute;overflow:visible;filter:drop-shadow(0 0 3px var(--vf-glow)) drop-shadow(0 0 9px var(--vf-glow)) drop-shadow(0 0 22px rgba(255,248,230,.28))}
+.vf-lines .f{fill:none;stroke:var(--vf-line);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;opacity:.96}
+.vf-lines .f135{stroke-width:2.3}
+.vf-patch{position:absolute;border-radius:10px;
   background:rgba(255,248,232,.05);
   box-shadow:inset 0 0 0 1px rgba(255,248,232,.16),inset 0 0 12px rgba(255,246,226,.12),0 0 18px rgba(255,246,226,.08);
   -webkit-backdrop-filter:brightness(1.25) contrast(1.06);backdrop-filter:brightness(1.25) contrast(1.06)}

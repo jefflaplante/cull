@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/imageprep"
 	"github.com/jefflaplante/cull/internal/pipeline"
@@ -137,6 +138,9 @@ func (so *sharedOpts) base(arg string) (pipeline.Config, error) {
 		Concurrency:       4,
 		CheckpointN:       25,
 		Log:               os.Stderr,
+		// Commands without policy flags (scan, offload's scan) still flag junk, as
+		// judge would by default; judge and decide replace the policy from flags.
+		Policy: eval.Policy{Junk: eval.ActionCull},
 	}, nil
 }
 

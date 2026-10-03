@@ -241,6 +241,10 @@ func processOne(ctx context.Context, cfg Config, b llm.Backend, path string) (re
 		return p.res, escUsage, nil
 	}
 	res := &p.res
+	if junked(*res, cfg.Policy) { // unmistakably empty: no faces to find, nothing for a model to judge
+		cfg.note(ui.Verbose, "  %s junk: %s; not sent to the model", filepath.Base(path), JunkDetail(res.Junk))
+		return *res, escUsage, nil
+	}
 	target, needLocate := faceTarget(cfg, p.frame, res.FocusTarget)
 	var stopErr error
 	if needLocate {
@@ -542,7 +546,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 			rep.ResolvedModel = prev.ResolvedModel
 			rep.DiscardedCostUSD = prev.DiscardedCostUSD
 			for _, r := range prev.Results {
-				if r.Error == "" && (r.Evaluation != nil || cfg.DryRun) {
+				if r.Error == "" && (r.Evaluation != nil || cfg.DryRun || junked(r, cfg.Policy)) {
 					rep.Results = append(rep.Results, r)
 					done[r.Key()] = true
 					continue

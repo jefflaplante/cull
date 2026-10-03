@@ -171,8 +171,14 @@ func TestCullHasMoveCulledFlag(t *testing.T) {
 // tinyDNG writes a minimal DNG: IFD0 marked reduced-resolution, strip = a JPEG.
 func tinyDNG(t *testing.T, path string) {
 	t.Helper()
+	writeDNGWith(t, path, cliGradient(1600, 1067)) // a blank frame would be junk and skip the model
+}
+
+// writeDNGWith writes a minimal DNG whose IFD0 strip is img as a JPEG preview.
+func writeDNGWith(t *testing.T, path string, img image.Image) {
+	t.Helper()
 	var j bytes.Buffer
-	jpeg.Encode(&j, image.NewRGBA(image.Rect(0, 0, 1600, 1067)), nil)
+	jpeg.Encode(&j, img, nil)
 	le := binary.LittleEndian
 	var b bytes.Buffer
 	b.WriteString("II")
@@ -1422,4 +1428,29 @@ func TestCalibrateRefusesReportAndRecursiveFlags(t *testing.T) {
 			t.Errorf("%v: got %v", args, err)
 		}
 	}
+}
+
+func cliGradient(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			v := uint8(40 + x*160/w)
+			i := img.PixOffset(x, y)
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = v, v, v, 255
+		}
+	}
+	return img
+}
+
+// blackTinyDNG writes a frame the junk filter flags as black.
+func blackTinyDNG(t *testing.T, path string) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 1600, 1067))
+	for i := range img.Pix {
+		img.Pix[i] = 4
+		if i%4 == 3 {
+			img.Pix[i] = 255
+		}
+	}
+	writeDNGWith(t, path, img)
 }

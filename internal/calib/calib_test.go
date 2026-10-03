@@ -111,3 +111,19 @@ func TestSweepUsesTheDecideFunction(t *testing.T) {
 		t.Fatalf("counts %+v thresholds seen %v", rows[0].Matrix.Counts, seen)
 	}
 }
+
+func TestJunkFramesCountAndAreListed(t *testing.T) {
+	rep := testReport()
+	rep.Results = append(rep.Results, report.Result{File: "/shoot/J.DNG", Decision: eval.Cull,
+		Junk: &report.JunkInfo{Kind: "white", BrightPct: 99.95}, Reasons: []string{"junk: white"}})
+	labels := map[string]string{"A.DNG": "keep", "J.DNG": "keep"}
+	m := Compare(rep, labels)
+	if m.N != 2 || m.Counts["keep"]["cull"] != 1 {
+		t.Fatalf("junk frame not in the matrix: n=%d counts=%v", m.N, m.Counts)
+	}
+	var out bytes.Buffer
+	Format(&out, "r.json", rep, m)
+	if !strings.Contains(out.String(), "junk filter: 1 of 1 junk frame(s) you labelled are keeps: J.DNG") {
+		t.Fatalf("no junk line:\n%s", out.String())
+	}
+}

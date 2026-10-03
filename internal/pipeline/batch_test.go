@@ -129,7 +129,7 @@ func batchShoot(t *testing.T) (string, Config) {
 	t.Helper()
 	dir := t.TempDir()
 	for i, w := range []int{1600, 1601, 1602} {
-		dngWith(t, filepath.Join(dir, fmt.Sprintf("L100000%d.DNG", i+1)), image.NewRGBA(image.Rect(0, 0, w, 1067)))
+		dngWith(t, filepath.Join(dir, fmt.Sprintf("L100000%d.DNG", i+1)), gradientImage(w, 1067))
 	}
 	c := cfg(dir)
 	c.WriteXMP, c.Locate, c.FaceMinQ, c.Backend, c.Model = false, true, 80, "anthropic", "claude-sonnet-5"
@@ -357,5 +357,29 @@ func TestBatchStateFromRenamedFolderRefuses(t *testing.T) {
 	_, _, err := RunBatch(context.Background(), c, fb)
 	if err == nil || !strings.Contains(err.Error(), "rename the folder back") || len(fb.submitted) != 1 {
 		t.Fatalf("err=%v submitted=%d", err, len(fb.submitted))
+	}
+}
+
+// A junk frame is never sent in a batch: no request in any round, decided by policy.
+func TestBatchSkipsJunk(t *testing.T) {
+	dir, c := batchShoot(t)
+	blackDNG(t, filepath.Join(dir, "L0000000.DNG"))
+	c.Policy.Junk = eval.ActionCull
+	fb := &fakeBatch{locate: map[string]string{
+		locatePrompt: `{"confident":true,"kind":"eye","subject":"eye","box":{"left":0.4,"top":0.3,"right":0.45,"bottom":0.35}}`,
+	}}
+	rep, _, err := RunBatch(context.Background(), c, fb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for round, reqs := range fb.submitted {
+		for _, r := range reqs {
+			if strings.Contains(r.CustomID, frameID(filepath.Join(dir, "L0000000.DNG"))) {
+				t.Fatalf("junk frame sent in round %d: %s", round, r.CustomID)
+			}
+		}
+	}
+	if r := result(t, rep, "L0000000.DNG"); r.Decision != eval.Cull || r.Error != "" || r.CostUSD != 0 {
+		t.Fatalf("junk frame: decision %q error %q cost %v", r.Decision, r.Error, r.CostUSD)
 	}
 }

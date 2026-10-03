@@ -48,6 +48,29 @@ func ScanSummary(rep *report.Report) string {
 	for _, k := range ori {
 		ors = append(ors, fmt.Sprintf("%d=%d", k, orients[k]))
 	}
-	return fmt.Sprintf("previews: long edge min/median/max = %d/%d/%d px; sources: %s; orientation: %s; faces: %d/%d, eyes measured on %d",
+	out := fmt.Sprintf("previews: long edge min/median/max = %d/%d/%d px; sources: %s; orientation: %s; faces: %d/%d, eyes measured on %d",
 		edges[0], edges[len(edges)/2], edges[len(edges)-1], strings.Join(src, " "), strings.Join(ors, " "), faces, targets, eyes)
+	return out + junkSummary(rep)
+}
+
+// junkSummary is "; junk: N (black 1, white 2)" when the junk filter flagged frames.
+func junkSummary(rep *report.Report) string {
+	kinds := map[string]int{}
+	n := 0
+	for _, r := range rep.Results {
+		if r.Junk != nil {
+			kinds[r.Junk.Kind]++
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	var parts []string
+	for _, k := range []string{"black", "white", "uniform"} {
+		if kinds[k] > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", k, kinds[k]))
+		}
+	}
+	return fmt.Sprintf("; junk: %d (%s)", n, strings.Join(parts, ", "))
 }

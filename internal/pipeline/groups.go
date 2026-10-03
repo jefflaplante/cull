@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"fmt"
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/report"
@@ -27,7 +28,7 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 	for i := range rep.Results {
 		r := &rep.Results[i]
 		r.Group = nil
-		if r.Error != "" || r.Preview == nil {
+		if r.Error != "" || r.Preview == nil || junked(*r, p) {
 			continue
 		}
 		f := group.Frame{Key: r.File}
@@ -168,6 +169,17 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 	rep.Seq = report.SequencesOf(o)
 
 	var changed []int
+	for i := range rep.Results {
+		r := &rep.Results[i]
+		if r.Error != "" || !junked(*r, p) {
+			continue
+		}
+		d, rs, _ := p.DecideJunk(JunkDetail(r.Junk))
+		if r.Decision != d {
+			changed = append(changed, i)
+		}
+		r.Decision, r.Reasons = d, rs
+	}
 	for _, i := range idx {
 		d, ok := decisions[i]
 		if !ok {
@@ -213,4 +225,26 @@ func needsRanking(rep *report.Report) []int {
 		}
 	}
 	return out
+}
+
+// junked reports whether r is decided as junk under p: flagged, and the policy
+// doesn't say to judge junk anyway. A frame judged before (--junk ignore then) keeps
+// its assessment out of it.
+func junked(r report.Result, p eval.Policy) bool {
+	if r.Junk == nil {
+		return false
+	}
+	_, _, ok := p.DecideJunk("")
+	return ok
+}
+
+// JunkDetail describes why a frame is junk, with the number that decided it.
+func JunkDetail(j *report.JunkInfo) string {
+	switch j.Kind {
+	case "black":
+		return fmt.Sprintf("black (%.2f%% of pixels near-black)", j.DarkPct)
+	case "white":
+		return fmt.Sprintf("white (%.2f%% of pixels blown)", j.BrightPct)
+	}
+	return fmt.Sprintf("%s (thumbnail contrast %.2f)", j.Kind, j.Contrast)
 }

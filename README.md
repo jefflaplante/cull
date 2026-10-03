@@ -152,6 +152,14 @@ For each DNG:
 
 1. **Preview.** The largest embedded JPEG preview is read directly from the file's
    TIFF structure; the raw data isn't read for this. EXIF orientation is applied.
+   **Junk frames** are set aside here, with no model call and no cost: near-black (≥ 98%
+   of pixels), blown white (≥ 95%), or uniform (thumbnail contrast below 3), such as a
+   lens cap, a flash misfire, or a blank frame. `--junk` decides them (default cull;
+   `review`, or `ignore` to judge them anyway). The thresholds come from 992 real frames:
+   the darkest real frame was 74% near-black, the brightest 82% blown, and the flattest
+   (low-key portraits in shade) had contrast 10. A filter on fine detail was tried and
+   dropped, because sharp shallow-focus portraits have the least fine detail of all.
+   Motion-blurred or pocket shots with some contrast left still go to the model.
 2. **Focus target.** Face detection ([pigo](https://github.com/esimov/pigo)) finds the
    subject, centred on the eyes. With no confident face (`--face-min-q`, default 80),
    `judge` asks the model to locate the intended focus target (`--locate off` to skip).
@@ -469,6 +477,8 @@ plain lines. Ctrl-C works as before: in-flight frames finish, the report is save
 - `--cull-max-sharpness` (2.9; 0 = the status alone culls);
 - `--eyes-closed`, `--raw-clipped` and `--outranked` (each `ignore`, `review` or
   `cull`; default `review`);
+- `--junk` (`cull`, `review` or `ignore`; default `cull`): blank frames, decided without
+  a model call;
 - `--raw-clip-threshold` (0.5 % of raw samples);
 - `--min-crop-area` (0.6);
 - `--keep-best` (3).

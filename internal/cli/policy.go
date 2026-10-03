@@ -23,6 +23,7 @@ type policyFlags struct {
 	rawClipped           string
 	rawClipThreshold     float64
 	keepBest             int
+	junk                 string
 }
 
 func (pf *policyFlags) register(f *pflag.FlagSet) {
@@ -33,6 +34,7 @@ func (pf *policyFlags) register(f *pflag.FlagSet) {
 	f.StringVar(&pf.outranked, "outranked", "review", "what to do with frames ranked below --keep-best in their set: ignore, review, or cull")
 	f.StringVar(&pf.rawClipped, "raw-clipped", "review", "what to do when the raw's highlights are clipped: ignore, review, or cull")
 	f.Float64Var(&pf.rawClipThreshold, "raw-clip-threshold", 0.5, "percent of raw samples at the white level that counts as clipped")
+	f.StringVar(&pf.junk, "junk", "cull", "what to do with blank frames (near-black, blown white, uniform): cull, review, or ignore (judge them anyway)")
 	f.IntVar(&pf.keepBest, "keep-best", 3, "per set, keep this many best-ranked frames (0-5: a chunked final ranking round tops out at 8 frames)")
 }
 
@@ -49,10 +51,14 @@ func (pf *policyFlags) policy() (eval.Policy, error) {
 	if err != nil {
 		return eval.Policy{}, fmt.Errorf("--raw-clipped %w", err)
 	}
+	junk, err := eval.ParseAction(pf.junk)
+	if err != nil {
+		return eval.Policy{}, fmt.Errorf("--junk %w", err)
+	}
 	p := eval.Policy{
 		MinCropArea: pf.minCropArea, ReviewBelowSharpness: pf.reviewBelowSharpness, CullMaxSharpness: pf.cullMaxSharpness,
 		EyesClosed: eyes, Outranked: outranked,
-		RawClipped: raw, RawClipThreshold: pf.rawClipThreshold, KeepBest: pf.keepBest,
+		RawClipped: raw, RawClipThreshold: pf.rawClipThreshold, KeepBest: pf.keepBest, Junk: junk,
 	}
 	return p, validPolicy(p)
 }
@@ -72,7 +78,7 @@ func validPolicy(p eval.Policy) error {
 	for _, a := range []struct {
 		flag string
 		a    eval.Action
-	}{{"--eyes-closed", p.EyesClosed}, {"--outranked", p.Outranked}, {"--raw-clipped", p.RawClipped}} {
+	}{{"--eyes-closed", p.EyesClosed}, {"--outranked", p.Outranked}, {"--raw-clipped", p.RawClipped}, {"--junk", p.Junk}} {
 		if _, err := eval.ParseAction(string(a.a)); err != nil {
 			return fmt.Errorf("%s %w", a.flag, err)
 		}
@@ -109,6 +115,13 @@ func (pf *policyFlags) resolve(fs *pflag.FlagSet, saved *eval.Policy) (eval.Poli
 		{"raw-clipped", &p.RawClipped, saved.RawClipped},
 		{"raw-clip-threshold", &p.RawClipThreshold, saved.RawClipThreshold},
 		{"keep-best", &p.KeepBest, saved.KeepBest},
+	}
+	if saved.Junk != "" { // stored before the junk filter: the flag's default applies
+		fields = append(fields, struct {
+			flag string
+			dst  any
+			src  any
+		}{"junk", &p.Junk, saved.Junk})
 	}
 	var notes []string
 	for _, f := range fields {

@@ -29,8 +29,22 @@ import (
 )
 
 // minimalDNG: single IFD0 marked reduced-resolution + JPEG, strip = a black JPEG.
+// minimalDNG embeds a plain left-to-right gradient: a real-looking frame to the junk
+// filter (a blank one would be flagged and never reach the model).
 func minimalDNG(t *testing.T, path string) {
-	dngWith(t, path, image.NewRGBA(image.Rect(0, 0, 1600, 1067)))
+	dngWith(t, path, gradientImage(1600, 1067))
+}
+
+func gradientImage(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			v := uint8(40 + x*160/w)
+			i := img.PixOffset(x, y)
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = v, v, v, 255
+		}
+	}
+	return img
 }
 
 // texturedDNG embeds random 8px blocks so "focus landed" cells exist.

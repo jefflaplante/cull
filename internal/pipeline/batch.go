@@ -258,7 +258,10 @@ func prepareRound(cfg Config, files []string, st *batchState, build func(*prepar
 				stage := "error"
 				var req llm.BatchRequest
 				ok := false
-				if err == nil {
+				switch {
+				case err == nil && junked(p.res, cfg.Policy):
+					stage = "done" // unmistakably empty: decided by policy, never sent
+				case err == nil:
 					req, stage, ok = build(p)
 				}
 				mu.Lock()

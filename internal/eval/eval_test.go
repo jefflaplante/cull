@@ -322,3 +322,15 @@ func TestOldEvaluationWithStraightenLoads(t *testing.T) {
 		t.Fatalf("e=%+v err=%v", e, err)
 	}
 }
+func TestDecideJunk(t *testing.T) {
+	for _, c := range []struct {
+		a    Action
+		want Decision
+		ok   bool
+	}{{ActionCull, Cull, true}, {ActionReview, Review, true}, {"", Review, true}, {ActionIgnore, "", false}} {
+		d, reasons, ok := Policy{Junk: c.a}.DecideJunk("white (99.95% of pixels blown)")
+		if ok != c.ok || (ok && (d != c.want || len(reasons) != 1 || reasons[0] != "junk: white (99.95% of pixels blown)")) {
+			t.Errorf("%q: %v %v %v", c.a, d, reasons, ok)
+		}
+	}
+}

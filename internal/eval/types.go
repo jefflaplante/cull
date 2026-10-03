@@ -105,6 +105,17 @@ type Policy struct {
 	RawClipThreshold float64 `json:"raw_clip_threshold"` // percent of raw samples at white level; 0 = default 0.5
 	KeepBest         int     `json:"keep_best"`          // per set, keep this many best-ranked frames; 0 = rank only
 	Outranked        Action  `json:"outranked"`          // frames ranked below KeepBest in their set
+	Junk             Action  `json:"junk,omitempty"`     // frames flagged junk (black, white, uniform); ignore = judge them anyway
+}
+
+// DecideJunk decides a frame the junk filter flagged, from detail ("white (99.95% of
+// pixels blown)"). ok is false when the action is ignore: judge the frame normally.
+func (p Policy) DecideJunk(detail string) (Decision, []string, bool) {
+	d, act := p.Junk.decision()
+	if !act {
+		return "", nil, false
+	}
+	return d, []string{"junk: " + detail}, true
 }
 
 // Facts are measurements the policy uses beside the model's assessment.

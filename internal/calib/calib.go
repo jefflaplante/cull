@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/report"
@@ -18,6 +19,10 @@ type Matrix struct {
 	Counts  map[string]map[string]int
 	N       int // labeled frames with a decision
 	Missing int // labels with no decided frame in the report
+	// Junk: labelled frames the junk filter flagged; JunkKeeps: those you labelled
+	// keep (the filter was wrong about them).
+	Junk      int
+	JunkKeeps []string
 }
 
 func newMatrix() Matrix {
@@ -44,11 +49,18 @@ func compare(rep *report.Report, labels map[string]string, decide func(report.Re
 	for _, r := range rep.Results {
 		name := filepath.Base(r.File)
 		l, ok := labels[name]
-		if !ok || r.Evaluation == nil || r.Error != "" || r.Decision == "" {
+		// Junk frames are decided without an assessment, and count like any other.
+		if !ok || (r.Evaluation == nil && r.Junk == nil) || r.Error != "" || r.Decision == "" {
 			continue
 		}
 		matched[name] = true
 		m.add(l, decide(r))
+		if r.Junk != nil {
+			m.Junk++
+			if l == "keep" {
+				m.JunkKeeps = append(m.JunkKeeps, name)
+			}
+		}
 	}
 	m.Missing = len(labels) - len(matched)
 	return m
@@ -133,6 +145,13 @@ func Format(w io.Writer, name string, rep *report.Report, m Matrix) {
 	fmt.Fprintf(w, "  review rate:                     %d/%d = %.1f%%\n", colTotal(m, "review"), m.N, 100*rr)
 	if m.Missing > 0 {
 		fmt.Fprintf(w, "  %d labeled frames not in the report (or not evaluated)\n", m.Missing)
+	}
+	if m.Junk > 0 {
+		fmt.Fprintf(w, "  junk filter: %d of %d junk frame(s) you labelled are keeps", len(m.JunkKeeps), m.Junk)
+		if len(m.JunkKeeps) > 0 {
+			fmt.Fprintf(w, ": %s", strings.Join(m.JunkKeeps, ", "))
+		}
+		fmt.Fprintln(w)
 	}
 }
 

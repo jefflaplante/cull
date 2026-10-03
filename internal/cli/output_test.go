@@ -136,3 +136,20 @@ func TestQuietStillReportsMoves(t *testing.T) {
 		t.Fatalf("-q hid the move:\n%s", out)
 	}
 }
+
+func TestScanCountsJunkAndJunkFlag(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	blackTinyDNG(t, filepath.Join(dir, "L2.DNG"))
+	out, err := run(t, "scan", dir)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "junk: 1 (black 1)") {
+		t.Fatalf("no junk count:\n%s", out)
+	}
+	if _, err := run(t, "judge", "--junk", "bogus", dir); err == nil {
+		t.Fatal("--junk bogus accepted")
+	}
+}

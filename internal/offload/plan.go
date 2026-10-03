@@ -238,15 +238,21 @@ func (p *Plan) date(o Options) error {
 	return nil
 }
 
-// existing is what a destination folder already holds under one name.
-func existing(dir, name string) (os.FileInfo, bool) {
-	st, err := os.Lstat(filepath.Join(dir, name))
-	return st, err == nil
+// existing is what a destination folder already holds under one name: in the shoot
+// folder itself, or moved by --sort / --move-culled into one of MovedDirs.
+func existing(dir, name string) (string, os.FileInfo, bool) {
+	for _, sub := range append([]string{""}, MovedDirs...) {
+		p := filepath.Join(dir, sub, name)
+		if st, err := os.Lstat(p); err == nil {
+			return p, st, true
+		}
+	}
+	return "", nil, false
 }
 
-// same reports whether the file already at dir/name is f: by SHA-256 with checksum,
-// else by size and mtime within the window.
-func same(f File, dir, name string, st os.FileInfo, checksum bool) (bool, error) {
+// same reports whether the file already at path is f: by SHA-256 with checksum, else
+// by size and mtime within the window.
+func same(f File, path string, st os.FileInfo, checksum bool) (bool, error) {
 	if !st.Mode().IsRegular() || st.Size() != f.Size {
 		return false, nil
 	}
@@ -260,7 +266,7 @@ func same(f File, dir, name string, st os.FileInfo, checksum bool) (bool, error)
 	}
 	// The copy is checked from the disk, as the engine checks its own: a file copied
 	// minutes ago would otherwise be compared against the page cache.
-	b, err := hashFromDisk(context.Background(), filepath.Join(dir, name))
+	b, err := hashFromDisk(context.Background(), path)
 	return a == b, err
 }
 
@@ -303,17 +309,17 @@ func (p *Plan) cameraNames(o Options) error {
 		}
 		byName[key] = f.Src
 		for i, d := range p.Dests {
-			st, ok := existing(d, f.Name)
+			at, st, ok := existing(d, f.Name)
 			if !ok {
 				f.To = append(f.To, d)
 				continue
 			}
-			eq, err := same(*f, d, f.Name, st, o.Checksum)
+			eq, err := same(*f, at, st, o.Checksum)
 			if err != nil {
 				return err
 			}
 			if !eq {
-				return fmt.Errorf("%s exists with different content; use --rename to keep both", filepath.Join(d, f.Name))
+				return fmt.Errorf("%s exists with different content; use --rename to keep both", at)
 			}
 			if size, ok := verified[i][f.Name]; !o.Checksum && (!ok || size != f.Size) {
 				f.Unverified = true
@@ -368,21 +374,24 @@ func (p *Plan) renamed(o Options) error {
 			return fmt.Sprintf("%0*d", w, n)
 		})
 	}
-	// The counter continues from the largest n among names the pattern produced.
+	// The counter continues from the largest n among names the pattern produced, in the
+	// shoot folder and in the folders --sort and --move-culled move frames into.
 	re := patternRE(pat, date, name)
 	next := 1
 	recorded := make([]map[string]Entry, len(p.Dests)) // per destination: orig+size → manifest line
 	seenNames := map[string]bool{}
 	for i, d := range p.Dests {
-		ents, err := os.ReadDir(d)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-		for _, e := range ents {
-			seenNames[strings.ToLower(e.Name())] = true
-			if m := re.FindStringSubmatch(e.Name()); numbered && len(m) > 1 && m[1] != "" {
-				if n, err := strconv.Atoi(m[1]); err == nil && n >= next {
-					next = n + 1
+		for _, sub := range append([]string{""}, MovedDirs...) {
+			ents, err := os.ReadDir(filepath.Join(d, sub))
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			for _, e := range ents {
+				seenNames[strings.ToLower(e.Name())] = true
+				if m := re.FindStringSubmatch(e.Name()); numbered && len(m) > 1 && m[1] != "" {
+					if n, err := strconv.Atoi(m[1]); err == nil && n >= next {
+						next = n + 1
+					}
 				}
 			}
 		}
@@ -415,14 +424,14 @@ func (p *Plan) renamed(o Options) error {
 			// counts as verified only where that folder's manifest records it.
 			f.Name = rec.Name
 			for j, d := range p.Dests {
-				st, ok := existing(d, rec.Name)
+				at, st, ok := existing(d, rec.Name)
 				if !ok {
 					f.To = append(f.To, d)
 					continue
 				}
 				if !st.Mode().IsRegular() || st.Size() != f.Size {
 					return fmt.Errorf("%s isn't the copy the manifest records (size %d, the card's is %d); move it aside and rerun",
-						filepath.Join(d, rec.Name), st.Size(), f.Size)
+						at, st.Size(), f.Size)
 				}
 				if e, ok := recorded[j][key]; ok && e.Name == rec.Name && matches(e) {
 					continue
@@ -430,7 +439,7 @@ func (p *Plan) renamed(o Options) error {
 				eq := false
 				if o.Checksum {
 					var err error
-					if eq, err = same(*f, d, rec.Name, st, true); err != nil {
+					if eq, err = same(*f, at, st, true); err != nil {
 						return err
 					}
 				}

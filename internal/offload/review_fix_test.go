@@ -70,6 +70,8 @@ func TestVerifyChecksSizeAndUnrecorded(t *testing.T) {
 	p, _ := MakePlan(o)
 	Run(context.Background(), p, nil)
 	os.WriteFile(filepath.Join(p.Dests[0], "X9.DNG"), []byte("finder copy"), 0o644)
+	// macOS writes AppleDouble files on exFAT when a frame is opened: not a DNG.
+	os.WriteFile(filepath.Join(p.Dests[0], "._M1.DNG"), make([]byte, 4096), 0o644)
 	v, err := Verify(context.Background(), p.Dests[0], nil)
 	if err != nil || v.OK != 3 || v.Bad != 0 || len(v.Unrecorded) != 1 || v.Unrecorded[0] != "X9.DNG" {
 		t.Fatalf("%+v %v", v, err)

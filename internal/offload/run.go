@@ -204,7 +204,9 @@ func Verify(ctx context.Context, folder string, sink ui.Sink) (v Verified, err e
 		return v, err
 	}
 	for _, d := range ents {
-		if d.Type().IsRegular() && strings.EqualFold(filepath.Ext(d.Name()), ".dng") && !recorded[d.Name()] {
+		// Dot-files are skipped as the card walk skips them: macOS writes AppleDouble
+		// "._" files beside frames on exFAT when they're opened.
+		if d.Type().IsRegular() && !strings.HasPrefix(d.Name(), ".") && strings.EqualFold(filepath.Ext(d.Name()), ".dng") && !recorded[d.Name()] {
 			v.Unrecorded = append(v.Unrecorded, d.Name())
 		}
 	}

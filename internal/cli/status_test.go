@@ -110,3 +110,33 @@ func TestImportLabelsRefusesStrangers(t *testing.T) {
 		t.Fatal("imported part of a refused export")
 	}
 }
+
+// Suggested commands quote paths, so a shoot folder with spaces can be pasted as is.
+func TestStatusQuotesPaths(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "2026-10-02 Smith wedding")
+	os.MkdirAll(dir, 0o755)
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	out, err := run(t, "status", dir)
+	if err != nil || !strings.Contains(out, "next: cull scan '"+dir+"'") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	rep := filepath.Join(t.TempDir(), "it's.json")
+	out, _ = run(t, "status", "-o", rep, dir)
+	if !strings.Contains(out, `-o '`+strings.ReplaceAll(rep, "'", `'\''`)+`' '`+dir+`'`) {
+		t.Fatalf("report path not quoted:\n%s", out)
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	for in, want := range map[string]string{
+		"/Users/a/Pictures/2026-10-02": "/Users/a/Pictures/2026-10-02",
+		"/a/b c":                       "'/a/b c'",
+		"/a/$HOME":                     "'/a/$HOME'",
+		"/a/it's":                      `'/a/it'\''s'`,
+		"":                             "''",
+	} {
+		if got := shellQuote(in); got != want {
+			t.Errorf("shellQuote(%q) = %s, want %s", in, got, want)
+		}
+	}
+}

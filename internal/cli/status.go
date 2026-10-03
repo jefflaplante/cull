@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -59,9 +61,9 @@ the next command to run. It changes nothing and calls no model.`,
 }
 
 func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.Report, lab map[string]labels.Entry) {
-	dir := cfg.Dir
+	dir := shellQuote(cfg.Dir)
 	if cfg.ReportPath != filepath.Join(cfg.Dir, "cull-report.json") {
-		dir = "-o " + cfg.ReportPath + " " + cfg.Dir // suggested commands keep the same report
+		dir = "-o " + shellQuote(cfg.ReportPath) + " " + dir // suggested commands keep the same report
 	}
 	if rep == nil {
 		fmt.Fprintf(w, "%s: %d DNGs; no report at %s\n", cfg.Dir, len(files), cfg.ReportPath)
@@ -167,6 +169,18 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 		next = "cull calibrate " + dir + ", then cull decide --write-xmp --move-culled " + dir
 	}
 	fmt.Fprintf(w, "next: %s\n", next)
+}
+
+// safeShell are the characters a shell argument can hold unquoted.
+var safeShell = regexp.MustCompile(`^[A-Za-z0-9_./:@%+=,-]+$`)
+
+// shellQuote makes a path safe to paste into a POSIX shell: single quotes unless it
+// needs none.
+func shellQuote(s string) string {
+	if safeShell.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }

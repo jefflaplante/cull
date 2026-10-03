@@ -295,3 +295,21 @@ func TestPageHasExposureControls(t *testing.T) {
 		}
 	}
 }
+
+func TestPageShowsKeywordsAndTags(t *testing.T) {
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	rep := &report.Report{Dir: dir, Tags: &report.Tags{Project: "Smith wedding", Location: "Forest Park"},
+		Results: []report.Result{{File: filepath.Join(dir, "L1.DNG"), Decision: eval.Keep,
+			Evaluation: &eval.Evaluation{Keywords: []string{"portrait", "forest"}}}}}
+	sheet, err := Build(rep, filepath.Join(dir, "r.json"), Options{Out: t.TempDir(), Concurrency: 1}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, _ := sheet.Page(false)
+	for _, want := range []string{`"keywords":["portrait","forest"]`, `"tags":{"project":"Smith wedding","location":"Forest Park"}`, `row(info, "keywords"`, `data.tags`} {
+		if !strings.Contains(string(html), want) {
+			t.Errorf("page lacks %s", want)
+		}
+	}
+}

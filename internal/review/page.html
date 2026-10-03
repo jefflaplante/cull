@@ -260,7 +260,8 @@ function fmtEV(ev) { return !ev ? "0" : (ev > 0 ? "+" : "") + (Math.round(ev * 1
   document.title = data.title + " · cull review";
   if (serve) document.getElementById("tools").hidden = true;
   document.getElementById("where").textContent =
-    (data.folder ? "folder: " + data.folder : "") + (data.labels_log ? " · labels: " + data.labels_log : "");
+    (data.folder ? "folder: " + data.folder : "") + (data.labels_log ? " · labels: " + data.labels_log : "") +
+    (data.tags ? " · tags: " + [data.tags.project, data.tags.event, data.tags.location].concat(data.tags.keywords || []).filter(Boolean).join(", ") : "");
 
   function group(id, name, items, current, set) {
     document.getElementById(id).replaceChildren(el("span", { cls: "group-name", text: name }), ...items.map(([v, label]) => {
@@ -384,6 +385,7 @@ function fmtEV(ev) { return !ev ? "0" : (ev > 0 ? "+" : "") + (Math.round(ev * 1
       row(info, "exposure", `${e.exposure.score} (${e.exposure.status}, ${e.exposure.ev_adjust >= 0 ? "+" : ""}${e.exposure.ev_adjust} EV)`);
       row(info, "composition", `${e.composition.score} (${e.composition.status})`);
       row(info, "notes", e.notes);
+      if (e.keywords && e.keywords.length) row(info, "keywords", e.keywords.join(", "));
     }
     if (c.first) row(info, "first pass", `${c.first.backend}/${c.first.model}: ${c.first.evaluation.sharpness.status} ${c.first.evaluation.sharpness.score}`);
     if (f) row(info, "subject", f.source === "none" ? "none: " + (f.reason || "") : f.source + (f.label ? ": " + f.label : "") + (f.face_q ? ` (face q ${f.face_q})` : ""));

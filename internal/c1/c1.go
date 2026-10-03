@@ -91,6 +91,12 @@ func Script(rep *report.Report, o Options) string {
 			if r.Group != nil && r.Group.Best {
 				kws = append(kws, "cull:best")
 			}
+			// Content keywords and the shoot's tags, as plain words: a keyword's parent is
+			// read-only in the dictionary, so nesting comes only from the sidecar on import.
+			if e != nil {
+				kws = append(kws, e.Keywords...)
+			}
+			kws = append(kws, rep.Tags.Plain()...)
 			for _, kw := range kws {
 				fmt.Fprintf(&b, "\t\t\tset k to my ensureKeyword(doc, %s)\n", quote(kw))
 				b.WriteString("\t\t\tif k is not missing value then apply keyword k to {v}\n")

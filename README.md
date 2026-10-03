@@ -129,6 +129,27 @@ undoes `--sort` and `--move-culled`.
   verified offload runs at about 216 MB/s, against 264 MB/s for plain `cp` with no
   checks: about 5 minutes for a 63 GB card.
 
+## Keywords and tags
+
+Every judged frame gets 3–8 **content keywords** from the model, such as `portrait`,
+`forest`, `red dress` or `laughing`. Every frame also gets the **shoot's tags**:
+- **Set them** with `--project`, `--event`, `--location` and `--keyword` (repeatable) on
+  `offload`, `scan` or `judge`.
+- **They're stored in the report,** so later runs keep them. Flags given again replace
+  them field by field.
+- **`cull tag <dir>`** shows them or changes them (`--clear-location` and so on). Then
+  run `cull decide --write-xmp <dir>` to rewrite the sidecars.
+
+**Sidecars** carry them as plain keywords in `dc:subject` and as paths in
+`lr:hierarchicalSubject`: `content|forest`, `project|Smith wedding`, `event|…`,
+`location|…`. Capture One 16.7.2 nests them on import (checked), and so does Lightroom.
+
+**`apply-c1 --keyword`** applies the same plain words to frames already in a catalog.
+Capture One's scripting can't nest keywords.
+
+**The review page** shows each frame's keywords and, in its header, the shoot's tags.
+Junk frames get your tags but no content keywords, since the model never saw them.
+
 ## Commands
 
 | Command | What it does | Calls a model |

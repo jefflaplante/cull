@@ -66,16 +66,17 @@ type card struct {
 }
 
 type pageData struct {
-	Title      string `json:"title"`
-	Report     string `json:"report"` // labels are stored per report path
-	Backend    string `json:"backend,omitempty"`
-	Model      string `json:"model,omitempty"`
-	Escalation string `json:"escalation,omitempty"`
-	Folder     string `json:"folder"`               // the shoot folder the frames are in
-	Serve      bool   `json:"serve,omitempty"`      // saving through a review server
-	LabelsLog  string `json:"labels_log,omitempty"` // where the server appends labels
-	KeepBest   int    `json:"keep_best"`            // Policy.KeepBest at the last judge or decide
-	Cards      []card `json:"cards"`
+	Title      string       `json:"title"`
+	Report     string       `json:"report"` // labels are stored per report path
+	Backend    string       `json:"backend,omitempty"`
+	Model      string       `json:"model,omitempty"`
+	Escalation string       `json:"escalation,omitempty"`
+	Folder     string       `json:"folder"`               // the shoot folder the frames are in
+	Serve      bool         `json:"serve,omitempty"`      // saving through a review server
+	LabelsLog  string       `json:"labels_log,omitempty"` // where the server appends labels
+	KeepBest   int          `json:"keep_best"`            // Policy.KeepBest at the last judge or decide
+	Tags       *report.Tags `json:"tags,omitempty"`       // the shoot's keywords (cull tag)
+	Cards      []card       `json:"cards"`
 }
 
 // Build renders the sheet's images and its static index.html into o.Out.
@@ -107,7 +108,7 @@ func Build(rep *report.Report, reportPath string, o Options, log io.Writer) (*Sh
 	}
 	sheet := &Sheet{Dir: o.Out, Index: filepath.Join(o.Out, "index.html"), data: pageData{
 		Title: filepath.Base(rep.Dir), Report: reportPath, Folder: folder, Backend: rep.Backend, Model: rep.Model,
-		Escalation: rep.Escalation, KeepBest: rep.KeepBest, Cards: cards,
+		Escalation: rep.Escalation, KeepBest: rep.KeepBest, Cards: cards, Tags: rep.Tags,
 	}}
 	page, err := sheet.Page(false)
 	if err != nil {

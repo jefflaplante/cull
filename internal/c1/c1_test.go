@@ -191,3 +191,22 @@ func TestScriptAppliesYourEVUnconditionally(t *testing.T) {
 		t.Errorf("model suggestion lost its guard:\n%s", b1)
 	}
 }
+
+func TestScriptAppliesKeywordsAndTags(t *testing.T) {
+	rep := testReport()
+	rep.Tags = &report.Tags{Project: `Smith "&" Jones`, Location: "Forest Park, Portland"}
+	rep.Results[0].Evaluation.Keywords = []string{"portrait", "forest"}
+	s := Script(rep, Options{Keyword: true})
+	b := block(s, "L1.DNG")
+	for _, want := range []string{`ensureKeyword(doc, "portrait")`, `ensureKeyword(doc, "forest")`, `ensureKeyword(doc, "Smith \"&\" Jones")`, `ensureKeyword(doc, "Forest Park, Portland")`} {
+		if !strings.Contains(b, want) {
+			t.Errorf("L1 block lacks %s:\n%s", want, b)
+		}
+	}
+	if strings.Contains(s, "content|") || strings.Contains(s, "project|") {
+		t.Error("AppleScript can't nest keywords (parent is read-only): plain words only")
+	}
+	if Script(rep, Options{}) == s {
+		t.Fatal("keywords applied without --keyword")
+	}
+}

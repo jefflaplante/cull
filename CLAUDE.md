@@ -75,7 +75,8 @@ make vet
   `cull-offload.jsonl`, F_FULLFSYNC per destination, `Safe`, `Verify`), sys_darwin.go
   (fcntl/msync/mincore; no-ops elsewhere). `go test -tags cardbench` benchmarks against
   `cp` on the LEICA M card.
-- `internal/report` — JSON source of truth (schema v4)
+- `internal/report` — JSON source of truth (schema v4); `Tags` (the shoot's project/event/
+  location/keywords, merged per run by `MergeTags`, changed by `cull tag`, cli/tags.go)
 - `internal/ui` — verbosity levels and progress events (`Sink`): plain lines, or the Bubble Tea
   live view on an interactive terminal (live.go); `-q`/`-v`/`--debug`/`--plain` in cli/output.go
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default

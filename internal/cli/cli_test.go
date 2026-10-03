@@ -203,7 +203,7 @@ func writeDNGWith(t *testing.T, path string, img image.Image) {
 const fakeClaudeCull = `#!/bin/sh
 cat > /dev/null
 echo '{"type":"system","subtype":"init","apiKeySource":"none"}'
-echo '{"type":"result","is_error":false,"structured_output":{"sharpness":{"score":2,"status":"missed_focus","focus_target":"x"},"exposure":{"score":7,"status":"good","ev_adjust":0,"clipping":"none","reason":""},"composition":{"score":6,"status":"good","issues":[],"crop":{"apply":false,"left":0,"top":0,"right":1,"bottom":1}},"people":{"present":true,"eyes":"open","expression":"good"},"notes":""},"usage":{"input_tokens":10,"output_tokens":5}}'
+echo '{"type":"result","is_error":false,"structured_output":{"sharpness":{"score":2,"status":"missed_focus","focus_target":"x"},"exposure":{"score":7,"status":"good","ev_adjust":0,"clipping":"none","reason":""},"composition":{"score":6,"status":"good","issues":[],"crop":{"apply":false,"left":0,"top":0,"right":1,"bottom":1}},"people":{"present":true,"eyes":"open","expression":"good"},"notes":"","keywords":["portrait","forest"]},"usage":{"input_tokens":10,"output_tokens":5}}'
 `
 
 func TestCullMoveCulledThenRestoreEndToEnd(t *testing.T) {

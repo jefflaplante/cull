@@ -1,6 +1,9 @@
 package eval
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Evaluation is the model's structured assessment (the forced tool call's input).
 type Evaluation struct {
@@ -9,6 +12,30 @@ type Evaluation struct {
 	Composition Composition `json:"composition"`
 	People      People      `json:"people"`
 	Notes       string      `json:"notes"`
+	Keywords    []string    `json:"keywords,omitempty"` // content keywords for the catalog; see NormalizeKeywords
+}
+
+// NormalizeKeywords cleans the model's content keywords for a catalog: trimmed,
+// lowercased, deduplicated in order of first appearance, at most 8, each at most 3
+// words and 30 characters. Empty ones, ones with "|" (a keyword hierarchy separator)
+// and ones that look like cull's own (cull:...) are dropped.
+func NormalizeKeywords(in []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, k := range in {
+		k = strings.ToLower(strings.Join(strings.Fields(k), " "))
+		switch {
+		case k == "", seen[k], len(k) > 30, strings.Count(k, " ") > 2,
+			strings.Contains(k, "|"), strings.HasPrefix(k, "cull:"):
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+		if len(out) == 8 {
+			break
+		}
+	}
+	return out
 }
 
 // People flags things sharpness can't see: blinks and unflattering moments.

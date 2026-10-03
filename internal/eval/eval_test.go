@@ -334,3 +334,39 @@ func TestDecideJunk(t *testing.T) {
 		}
 	}
 }
+
+func TestEvaluationSchemaHasKeywordsLast(t *testing.T) {
+	req := evaluationSchema["required"].([]string)
+	if req[len(req)-1] != "keywords" {
+		t.Fatalf("required %v: keywords must be last (description, not evidence)", req)
+	}
+	kw := evaluationSchema["properties"].(map[string]any)["keywords"].(map[string]any)
+	if kw["type"] != "array" || kw["items"].(map[string]any)["type"] != "string" {
+		t.Fatalf("keywords schema %v", kw)
+	}
+}
+
+func TestNormalizeKeywords(t *testing.T) {
+	in := []string{"Portrait", "", "  forest ", "FOREST", "cull:keep", "a|b", "red dress",
+		"a twelve word sentence that the model should never have written here at all",
+		"x", "y", "z", "w", "v", "u", "t", "s"}
+	got := NormalizeKeywords(in)
+	want := []string{"portrait", "forest", "red dress", "x", "y", "z", "w", "v"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+	if len(NormalizeKeywords([]string{strings.Repeat("a", 31)})) != 0 {
+		t.Fatal("a 31-character keyword kept")
+	}
+}
+
+func TestDecodeEvaluationNormalizesKeywords(t *testing.T) {
+	raw := []byte(`{"sharpness":{"focus_target":"eyes","status":"sharp","score":9},"exposure":{"reason":"","clipping":"none","status":"good","ev_adjust":0,"score":7},"composition":{"issues":[],"status":"good","crop":{"apply":false,"left":0,"top":0,"right":1,"bottom":1},"score":7},"people":{"present":true,"eyes":"open","expression":"good"},"notes":"","keywords":["Portrait","forest ","forest","cull:keep"]}`)
+	e, err := DecodeEvaluation(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(e.Keywords, ",") != "portrait,forest" {
+		t.Fatalf("keywords %q", e.Keywords)
+	}
+}

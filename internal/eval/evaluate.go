@@ -83,5 +83,6 @@ func DecodeEvaluation(raw []byte) (*Evaluation, error) {
 	if err := json.Unmarshal(raw, &e); err != nil {
 		return nil, fmt.Errorf("decode evaluation: %w", err)
 	}
+	e.Keywords = NormalizeKeywords(e.Keywords)
 	return &e, nil
 }

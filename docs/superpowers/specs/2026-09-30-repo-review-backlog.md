@@ -211,3 +211,31 @@ itself hasn't been driven in a browser yet, because the Chrome extension wasn't 
   hand under a pty.
 - `main` never releases its SIGINT handler, so a second Ctrl-C can't force-quit a hung run.
 - `judge --batch` has no progress bar, by ruling: results arrive at the end of each round.
+
+## Part 2 offload and sort (2026-10-02): deferred minors
+
+- **Temp-file cleanup:** stale temp files are found with `filepath.Glob` on the folder
+  path, so a shoot name containing `[ ] * ?` silently disables the cleanup.
+- **Symlinked card root:** a card root that is a symlink gives "no DNGs found", because
+  `WalkDir` doesn't follow the root.
+- **A torn manifest line** swallows the next append. In rename mode a frame could then be
+  numbered again, giving a duplicate.
+- **A crash in rename mode** between the copy landing on one destination and on the other
+  leaves an unrecorded verified copy on the first. The re-run numbers it again.
+- **Misleading clash message:** it says "different content" when only the modification
+  time is off (a Finder copy, or an exFAT timezone shift). It should suggest `--checksum`.
+- **exFAT permissions:** exFAT ignores `chmod 0644` (it reads back as `0700`), so the
+  spec's "0644" is wrong for exFAT backups.
+- **Unchecked folder sync:** the error from syncing the folder entry is ignored.
+- **Windows build:** `GOOS=windows` doesn't build (`syscall.Statfs` and `Stat_t`).
+- **Second Ctrl-C:** a hung USB read can't be interrupted, because `main` never releases
+  the SIGINT handler.
+- **Stale wording, and a skip to document:**
+  - `restore`'s help and the `moved_to` comment in the report code still mention only
+    `culled/`;
+  - recursive runs skip any subfolder named `keep`, `review` or `cull`, which the README
+    should say.
+- **exFAT rename race:** on exFAT backups the no-replace rename is check-then-rename. Only
+  two offloads into one folder at once could race.
+- **Speedup, not built:** overlap file N's verify with file N+1's card read. The engine
+  runs at 82% of `cp`'s speed.

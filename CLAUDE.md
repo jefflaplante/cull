@@ -326,6 +326,18 @@ balance`, but no run has tested them yet.
   - So EXIF times can't date or split folders, or order frames. Offload makes one folder
     per run (`--date` overrides) and numbers frames in file-name order.
   - The file times match EXIF exactly, offset by the time zone, so they're no better.
+- **A real offload, verified (2026-10-02):** the whole LEICA M card went to the user's `Grey` volume
+  (an exFAT SSD over USB, `/Volumes/Grey/test_cull`), with no backup.
+  - **Result:** 992 of 992 frames, 67.7 GB, in 8 min 5 s (140 MB/s), with "safe to format".
+    Peak memory was 52 MB.
+  - **The card was unchanged:** metadata of all 998 entries was identical before and after.
+  - **The destination held exactly what was expected:** 992 DNGs, a 992-line manifest, no
+    temp files, and the card's modification times. exFAT reports `rwx------` on card and
+    copy alike.
+  - **A re-run copied nothing:** all 992 skipped, still "safe to format".
+  - **`--verify` matched all 992 from disk.**
+  - **The rate (140 MB/s) is below the 216 MB/s measured to the internal SSD.** Two likely
+    causes: the verify re-read also goes over USB to Grey, and Grey's write speed.
 - Offload benchmark, 20 real frames per tool, read from the card uncached: the `cull`
   engine runs at 216 MB/s (hash, uncached write, evict, verify from disk, F_FULLFSYNC);
   `cp` runs at 264 MB/s. The gap is the verify re-read, which isn't overlapped with the

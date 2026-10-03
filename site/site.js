@@ -157,6 +157,200 @@
     tiles.appendChild(li);
   });
 
+  /* ---------- terminal replays ----------
+     Two real runs, recorded 2026-10-03 on 17 M11-P frames, played back when their
+     terminal comes into view. The text is what cull printed, verbatim, except that
+     local paths are shortened and each ranking reason is cut after its first
+     sentence. Time is compressed; the "left" figures are the run's own. */
+  var SCAN = [
+    '[1/17] M1103817.DNG preview 9504x6320 (tiff-ifd) [no subject: no face; scan does not call a model]',
+    '[2/17] M1103823.DNG preview 9504x6320 (tiff-ifd) [face q=287]',
+    '[3/17] M1103821.DNG preview 9504x6320 (tiff-ifd) [no subject: no face; scan does not call a model]',
+    '[4/17] M1103813.DNG preview 9504x6320 (tiff-ifd) [no subject: no face; scan does not call a model]',
+    '[5/17] M1103865.DNG preview 9504x6320 (tiff-ifd) [face q=141]',
+    '[6/17] M1103880.DNG preview 9504x6320 (tiff-ifd) [face q=155]',
+    '[7/17] M1103902.DNG preview 9504x6320 (tiff-ifd) [no subject: no face; scan does not call a model]',
+    '[8/17] M1103971.DNG preview 9504x6320 (tiff-ifd) [face q=124]',
+    '[9/17] M1103979.DNG preview 9504x6320 (tiff-ifd) [face q=179]',
+    '[10/17] M1104112.DNG preview 9504x6320 (tiff-ifd) [no subject: no face; scan does not call a model]',
+    '[11/17] M1104110.DNG preview 9504x6320 (tiff-ifd) [no subject: no face; scan does not call a model]',
+    '[12/17] M1104114.DNG preview 9504x6320 (tiff-ifd) [no subject: no face; scan does not call a model]',
+    '[13/17] M1104115.DNG preview 9504x6320 (tiff-ifd) [no subject: no face; scan does not call a model]',
+    '[14/17] M1104116.DNG preview 9504x6320 (tiff-ifd) [face q=105]',
+    '[15/17] M1104117.DNG preview 9504x6320 (tiff-ifd) [face q=132]',
+    '[16/17] M1104118.DNG preview 9504x6320 (tiff-ifd) [face q=188]',
+    '[17/17] M1104119.DNG preview 9504x6320 (tiff-ifd) [face q=129]'
+  ];
+  var JUDGED = [
+    '[1/17] M1103817.DNG CULL  sharp 2.5(missed_focus) exp 7.0(+0.3EV) comp 6.5(good)  [model: Woman\'s eyes with glasses]',
+    '[2/17] M1103813.DNG KEEP  sharp 8.7(sharp) exp 8.0(+0.0EV) comp 7.5(good)  [model: Woman\'s near eye (glasses)]',
+    '[3/17] M1103823.DNG KEEP  sharp 8.6(sharp) exp 6.5(+0.5EV) comp 6.5(croppable)  [face q=287]',
+    '[4/17] M1103821.DNG REVIEW  sharp 8.5(sharp) exp 7.5(+0.1EV) comp 7.0(good)  [model: Smiling woman with glasses]',
+    '[5/17] M1103865.DNG KEEP  sharp 8.6(sharp) exp 6.0(+1.0EV) comp 6.0(croppable)  [face q=141]',
+    '[6/17] M1103880.DNG KEEP  sharp 8.0(sharp) exp 6.0(+1.3EV) comp 7.0(good)  [face q=155]',
+    '[7/17] M1103902.DNG KEEP  sharp 8.5(sharp) exp 6.0(+1.0EV) comp 7.0(good)  [model: Woman\'s eyes with glasses]',
+    '[8/17] M1103971.DNG KEEP  sharp 8.0(sharp) exp 6.5(+0.5EV) comp 7.0(good)  [face q=124]',
+    '[9/17] M1103979.DNG KEEP  sharp 8.3(sharp) exp 6.5(+0.5EV) comp 6.0(croppable)  [face q=179]',
+    '[10/17] M1104110.DNG REVIEW  sharp 4.5(soft) exp 6.5(+0.5EV) comp 6.0(croppable)  [model: Woman\'s glasses/eyes]',
+    '[11/17] M1104112.DNG KEEP  sharp 8.0(sharp) exp 7.0(+0.4EV) comp 7.0(good)  [model: Woman\'s eyes with glasses]',
+    '[12/17] M1104114.DNG KEEP  sharp 8.0(sharp) exp 6.5(+0.4EV) comp 6.5(good)  [model: Woman\'s eyes with glasses]',
+    '[13/17] M1104115.DNG KEEP  sharp 8.3(sharp) exp 6.8(+0.4EV) comp 6.5(croppable)  [model: Woman\'s eyes behind glasses]',
+    '[14/17] M1104116.DNG KEEP  sharp 7.2(acceptable) exp 6.5(+0.5EV) comp 6.5(good)  [face q=105]',
+    '[15/17] M1104117.DNG KEEP  sharp 6.8(acceptable) exp 6.5(+0.5EV) comp 6.5(good)  [face q=132]',
+    '[16/17] M1104119.DNG KEEP  sharp 6.5(acceptable) exp 5.5(+1.3EV) comp 6.5(good)  [face q=129]',
+    '[17/17] M1104118.DNG KEEP  sharp 7.0(acceptable) exp 6.0(+1.0EV) comp 6.0(croppable)  [face q=188]'
+  ];
+  var SHOOT = 'Pictures/2025-12-28 Forest portraits';
+  var REPLAYS = {
+    offload: [
+      ['cmd', 'cull offload LEICA_M Pictures --name "Forest portraits" --location "Forest Park, Portland"'],
+      ['out', 'shoot folder: 2025-12-28 Forest portraits (date from earliest capture date, M1103813.DNG)'],
+      ['out', '  into ' + SHOOT],
+      ['out', '17 of 17 DNGs to copy, 1.1 GB (M1103813.DNG … M1104119.DNG)'],
+      ['bytes', 'offload', 1.07e9, 2200, 2, 624],
+      ['out', 'copied 17, skipped 0 (already there), failed 0: 1.1 GB in 2s (624 MB/s, verified)'],
+      ['out', 'all 17 files verified on ' + SHOOT + ': safe to format the card', 'hi'],
+      ['out', '17 DNGs found, 0 already done, 17 to process'],
+      ['frames', 'scan', SCAN, 260, 0.78, false],
+      ['out', 'report: ' + SHOOT + '/cull-report.json'],
+      ['out', 'results: map[measured:17]'],
+      ['out', 'next: cull judge --estimate "' + SHOOT + '"', 'dim']
+    ],
+    judge: [
+      ['cmd', 'cull judge --backend claude-code --write-xmp "' + SHOOT + '"'],
+      ['out', 'backend: claude-code, model: sonnet, auth: Claude subscription via ~/.local/bin/claude'],
+      ['out', '17 DNGs found, 0 already done, 17 to process'],
+      ['frames', 'judge', JUDGED, 420, 6.3, true],
+      ['frames', 'rank', [
+        'ranked set 1 (2 frames): M1104115.DNG wins — The two frames are almost identical: the same pose in a forest, with the subject looking back over her shoulder and smiling. …',
+        'ranked set 2 (2 frames): M1104116.DNG wins — The two frames are nearly identical: the same pose in a forest, with a slight head tilt and a smile. …'
+      ], 900, 4, false, 'sets'],
+      ['out', 'report: ' + SHOOT + '/cull-report.json'],
+      ['out', 'results: map[cull:1 keep:14 review:2]', 'hi'],
+      ['out', 'tokens this run: in=153598 out=13840 (subscription, not billed per token)', 'dim']
+    ]
+  };
+
+  function replayTerminal(box) {
+    var script = REPLAYS[box.getAttribute('data-replay')];
+    if (!script) return;
+    var title = box.getAttribute('data-title') || 'cull';
+    box.innerHTML = '';
+    box.classList.add('live');
+    var bar = document.createElement('div');
+    bar.className = 'replay-bar';
+    bar.innerHTML = '<span class="leds" aria-hidden="true"><i></i><i></i><i></i></span><span class="replay-title"></span>' +
+      '<button class="replay-again eng" type="button" hidden>Replay</button>';
+    bar.querySelector('.replay-title').textContent = title;
+    var body = document.createElement('div');
+    body.className = 'replay-body';
+    body.setAttribute('role', 'log');
+    body.setAttribute('aria-label', title + ', a recorded run');
+    box.appendChild(bar); box.appendChild(body);
+    var again = bar.querySelector('.replay-again');
+    var timers = [], token = 0;
+
+    function line(text, cls) {
+      var d = document.createElement('div');
+      d.className = 'rl' + (cls ? ' ' + cls : '');
+      d.textContent = text;
+      body.appendChild(d);
+      body.scrollTop = body.scrollHeight;
+      return d;
+    }
+    function gauge(label) {
+      var d = document.createElement('div');
+      d.className = 'rl rgauge';
+      d.innerHTML = '<b></b><span class="rbar"><i></i></span><span class="rtxt"></span>';
+      d.querySelector('b').textContent = label;
+      body.appendChild(d);
+      return {
+        set: function (frac, text) {
+          d.querySelector('i').style.width = (Math.max(0, Math.min(1, frac)) * 100).toFixed(1) + '%';
+          d.querySelector('.rtxt').textContent = text;
+          body.scrollTop = body.scrollHeight;
+        }, el: d
+      };
+    }
+    function left(s) {
+      s = Math.max(0, Math.round(s));
+      return (s >= 60 ? Math.floor(s / 60) + 'm' + (s % 60) + 's' : s + 's') + ' left';
+    }
+    function gb(b) { return (b / 1e9).toFixed(1) + ' GB'; }
+    function wait(ms, fn) { var t = token; timers.push(setTimeout(function () { if (t === token) fn(); }, ms)); }
+
+    // Each step calls next() when done; instant=true renders the final state at once.
+    function run(instant) {
+      token++; timers.forEach(clearTimeout); timers = [];
+      body.innerHTML = ''; again.hidden = true;
+      var i = 0;
+      function next() {
+        if (i >= script.length) { again.hidden = instant; return; }
+        var s = script[i++];
+        if (s[0] === 'cmd') {
+          var d = line('', 'cmd');
+          if (instant) { d.textContent = s[1]; return next(); }
+          var k = 0;
+          (function type() {
+            d.textContent = s[1].slice(0, ++k);
+            if (k < s[1].length) wait(18, type); else wait(380, next);
+          })();
+        } else if (s[0] === 'out') {
+          line(s[1], s[2]);
+          instant ? next() : wait(140, next);
+        } else if (s[0] === 'bytes') {
+          var g = gauge(s[1]), total = s[2], ms = s[3], real = s[4], mbs = s[5];
+          if (instant) { g.set(1, gb(total) + '/' + gb(total) + '  done'); return next(); }
+          var t0 = performance.now(), tk = token;
+          (function tick() {
+            if (tk !== token) return;
+            var p = Math.min(1, (performance.now() - t0) / ms);
+            g.set(p, p < 1 ? gb(total * p) + '/' + gb(total) + '  ' + mbs + ' MB/s, ' + left(real * (1 - p)) : gb(total) + '/' + gb(total) + '  done');
+            if (p < 1) requestAnimationFrame(tick); else wait(260, next);
+          })();
+        } else if (s[0] === 'frames') {
+          var label = s[1], items = s[2], per = s[3], realPer = s[4], tally = s[5], unit = s[6] || 'frames';
+          var n = items.length, done = 0, counts = { keep: 0, review: 0, cull: 0 };
+          var gg = null, tl = null;
+          function view() {
+            if (gg) { body.removeChild(gg.el); }
+            if (tl) { body.removeChild(tl); }
+            gg = gauge(label);
+            gg.set(done / n, done + '/' + n + ' ' + unit + '  ' + (done < n ? left(realPer * (n - done)) : 'done'));
+            if (tally) {
+              var parts = [];
+              ['keep', 'review', 'cull'].forEach(function (k2) { if (counts[k2]) parts.push(k2 + ' ' + counts[k2]); });
+              tl = line(parts.join(' · '), 'rtally');
+            }
+          }
+          function one() {
+            var text = items[done++];
+            var m = / (KEEP|REVIEW|CULL) /.exec(text);
+            if (m) counts[m[1].toLowerCase()]++;
+            if (gg) { body.removeChild(gg.el); gg = null; }
+            if (tl) { body.removeChild(tl); tl = null; }
+            line(text, m ? m[1].toLowerCase() : '');
+            view();
+          }
+          if (instant) { while (done < n) one(); return next(); }
+          view();
+          (function step() { one(); if (done < n) wait(per, step); else wait(400, next); })();
+        }
+      }
+      next();
+    }
+    again.addEventListener('click', function () { run(false); });
+    if (reduce.matches || !('IntersectionObserver' in window)) { run(true); return; }
+    run(true); // the final state until it comes into view, so nothing jumps
+    var seen = false;
+    new IntersectionObserver(function (es, ob) {
+      es.forEach(function (e) {
+        if (e.isIntersecting && !seen) { seen = true; ob.disconnect(); run(false); }
+      });
+    }, { threshold: 0.35 }).observe(box);
+  }
+  document.querySelectorAll('[data-replay]').forEach(replayTerminal);
+
   /* ---------- copy buttons ---------- */
   document.querySelectorAll('[data-copy]').forEach(function(btn){
     btn.addEventListener('click', function(){

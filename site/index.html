@@ -71,13 +71,13 @@
             <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
             View on GitHub
           </a>
-          <a class="btn btn-ghost" href="#pipeline">How it works</a>
+          <a class="btn btn-ghost" href="usage.html">See it work</a>
         </div>
         <div class="snippet">
-          <pre id="snip-hero" aria-label="Install command"><code><span class="p">$ </span>git clone https://github.com/jefflaplante/cull &amp;&amp; cd cull &amp;&amp; make build</code></pre>
+          <pre id="snip-hero" aria-label="Install command"><code><span class="p">$ </span>brew install jefflaplante/tap/cull</code></pre>
           <button class="copy" type="button" data-copy="snip-hero" aria-label="Copy install command">Copy</button>
         </div>
-        <p class="req">Requires Go 1.26. The Capture One parts need macOS.</p>
+        <p class="req">macOS, Apple silicon and Intel. Or <a href="#install">download the binary, or build from source</a>.</p>
       </div>
 
       <aside class="plate readout reveal" aria-labelledby="h-readout">
@@ -246,15 +246,9 @@
     <div class="plate shots-wide reveal">
       <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
         <figure class="shot">
-          <a class="zoom" href="img/offload-copying.png"><img src="img/offload-copying.png" width="972" height="106" decoding="async" loading="lazy"
-               alt="Terminal window titled cull offload: 17 of 17 DNGs to copy, 1.1 GB, M1103813.DNG to M1104119.DNG. Progress bar at 544.9 MB of 1.0 GB, 590.8 MB/s, 1s left."></a>
-          <figcaption><span class="eng">Copy</span><span>One read of the card, hashed as it goes.</span></figcaption>
-        </figure>
-        <figure class="shot">
-          <a class="zoom" href="img/offload-scanning.png"><img src="img/offload-scanning.png" width="972" height="306" decoding="async" loading="lazy"
-               alt="Terminal window titled cull offload, scan stage: ten of 17 frames listed, each with a 9504x6320 preview found via the TIFF IFD; some with a detected face and its quality score, others marked no subject, no face, scan does not call a model. Progress 10 of 17 frames, 5s left."></a>
-          <figcaption><span class="eng">Scan</span><span>Every preview found at 9504 × 6320. No model call.</span></figcaption>
-        </figure>
+        <div class="replay" data-replay="offload" data-title="cull offload"><img class="replay-fallback" src="img/offload-scanning.png" width="972" height="306" decoding="async" loading="lazy" alt="The scan after offload: frames listed with their 9504x6320 preview and a detected face score."></div>
+        <figcaption><span class="eng">Replay</span><span>The recorded run: copy, verify, then the free scan. Sped up; the text is what it printed.</span></figcaption>
+      </figure>
     </div>
   </div>
 </section>
@@ -338,10 +332,8 @@
 
     <div class="split" style="margin-top:clamp(48px,6vw,80px)">
       <figure class="plate shot pad reveal" style="grid-column:1/-1">
-        <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
-        <a class="zoom" href="img/judge-ranking.png"><img src="img/judge-ranking.png" width="1026" height="566" decoding="async" loading="lazy"
-             alt="Terminal window titled cull judge after a full run: 17 DNG files listed with verdict, sharpness, exposure and composition scores. M1103817 is CULL with sharpness 2.5, missed focus; M1103821 and M1104110 are REVIEW; the rest are KEEP with sharpness from 6.5 to 8.7. The judge bar reads 17/17 frames done, the rank bar 0/2 sets, and the tally keep 14, review 2, cull 1."></a>
-        <figcaption><span class="eng">Live view · recorded</span><span>17 frames in under two minutes: 14 keep, 2 review, 1 cull. The cull is M1103817, missed focus, sharpness 2.5. Each line shows the score, the suggested exposure correction and a composition note.</span></figcaption>
+        <div class="replay" data-replay="judge" data-title="cull judge"><img class="replay-fallback" src="img/judge-ranking.png" width="1026" height="566" decoding="async" loading="lazy" alt="cull judge after a full run: 17 frames with verdicts and scores; keep 14, review 2, cull 1."></div>
+        <figcaption><span class="eng">Replay</span><span>The recorded run: 17 frames judged, then two sets ranked. 14 keep, 2 review, 1 cull. Sped up; the text is what it printed.</span></figcaption>
       </figure>
     </div>
 
@@ -564,6 +556,31 @@
 </section>
 
 <!-- 250 · INSTALL -->
+<section class="sec walk" id="walkthrough" aria-labelledby="h-walk">
+  <div class="wrap">
+    <div class="rule" aria-hidden="true"></div>
+    <header class="sec-head reveal">
+      <p class="sec-no eng"><b>&rarr;</b> Usage</p>
+      <div><h2 id="h-walk">See it work. <span>One real session, seven steps.</span></h2></div>
+    </header>
+    <div class="walk-grid reveal">
+      <ol class="walk-steps">
+        <li><span class="eng">60</span>Install</li>
+        <li><span class="eng">125</span>Copy the card</li>
+        <li><span class="eng">250</span>Price it, then judge it</li>
+        <li><span class="eng">500</span>Look for yourself</li>
+        <li><span class="eng">1000</span>Check it against you</li>
+        <li><span class="eng">2000</span>Tag and sort</li>
+        <li><span class="eng">4000</span>Into Capture One</li>
+      </ol>
+      <div>
+        <p class="lede" style="margin-bottom:26px">A 17-frame M11-P shoot taken from the card to Capture One, with the commands and what the terminal printed at every step.</p>
+        <a class="btn btn-primary" href="usage.html">Read the walkthrough <span aria-hidden="true">&rarr;</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="sec" id="install" data-n="4000" data-name="Install" aria-labelledby="h-install">
   <div class="wrap">
     <div class="rule" aria-hidden="true"></div>
@@ -571,8 +588,13 @@
       <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
       <div>
         <p class="sec-no eng" style="margin-bottom:22px"><b>4000</b> Install</p>
-        <h2 id="h-install">Download it, then read it.</h2>
+        <h2 id="h-install">Install it, then read it.</h2>
         <p>One universal binary for Apple silicon and Intel Macs. Open source, written in Go: every rule that keeps or culls a frame is in the repository.</p>
+        <div class="snippet">
+          <pre id="snip-brew"><code><span class="p">$ </span>brew install jefflaplante/tap/cull</code></pre>
+          <button class="copy" type="button" data-copy="snip-brew" aria-label="Copy the Homebrew command">Copy</button>
+        </div>
+        <p class="req">Or download the binary from the latest release:</p>
         <div class="snippet">
           <pre id="snip-download"><code><span class="p">$ </span>curl -fsSL https://github.com/jefflaplante/cull/releases/latest/download/cull_macos_universal.tar.gz | tar -xz &amp;&amp; sudo mv cull_macos_universal/cull /usr/local/bin/</code></pre>
           <button class="copy" type="button" data-copy="snip-download" aria-label="Copy download command">Copy</button>

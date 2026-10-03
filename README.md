@@ -478,7 +478,16 @@ plain lines. Ctrl-C works as before: in-flight frames finish, the report is save
 - `--eyes-closed`, `--raw-clipped` and `--outranked` (each `ignore`, `review` or
   `cull`; default `review`);
 - `--junk` (`cull`, `review` or `ignore`; default `cull`): blank frames, decided without
-  a model call;
+  a model call.
+  - **Changing it:** `decide --junk review` (or `cull`) re-decides junk frames for free,
+    and rewrites their sidecars with `--write-xmp`. `decide --junk ignore` takes back a
+    junk cull and leaves the frame unjudged; `judge --resume --junk ignore` then has the
+    model judge it.
+  - **The thresholds come from one photographer's outdoor work.** A night sky, a concert or
+    white-seamless product frames could cross them. `calibrate` lists any junk frame you
+    labelled keep: check it on a new kind of shoot.
+  - **Cost estimates** count every DNG, because junk is only found while frames are read.
+    Junk frames are never charged;
 - `--raw-clip-threshold` (0.5 % of raw samples);
 - `--min-crop-area` (0.6);
 - `--keep-best` (3).

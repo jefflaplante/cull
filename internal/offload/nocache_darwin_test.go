@@ -5,11 +5,11 @@ package offload
 import (
 	"context"
 	"os"
-	"syscall"
-	"unsafe"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 // When the verify read starts, none of the copy's pages may be in the page cache:

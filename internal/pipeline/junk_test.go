@@ -4,6 +4,8 @@ import (
 	"context"
 	"image"
 	"image/color"
+	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -170,4 +172,43 @@ func TestResultDoesNotRetainFrame(t *testing.T) {
 	}
 	runtime.KeepAlive(res)
 	t.Fatal("the decoded frame is still reachable from its result")
+}
+
+// decide --junk ignore: a junk cull from an earlier judge doesn't stand; the frame
+// waits for judge --resume to be judged.
+func TestDecideJunkIgnoreClearsJunkCull(t *testing.T) {
+	_, c := junkShoot(t)
+	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatal(err)
+	}
+	pol := c.Policy
+	pol.Junk = eval.ActionIgnore
+	sum, err := Decide(context.Background(), c.ReportPath, DecideOptions{Policy: pol}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := report.Load(c.ReportPath)
+	r := result(t, rep, "L0000000.DNG")
+	if r.Decision != "" || len(r.Reasons) != 1 || !strings.Contains(r.Reasons[0], "judge --resume") || sum.Changed["cull→"] != 1 {
+		t.Fatalf("decision %q reasons %v changed %v", r.Decision, r.Reasons, sum.Changed)
+	}
+}
+
+// decide --write-xmp rewrites a junk frame's sidecar when its decision changes:
+// Capture One imports that sidecar.
+func TestDecideRewritesJunkSidecar(t *testing.T) {
+	dir, c := junkShoot(t)
+	c.WriteXMP = true
+	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err != nil {
+		t.Fatal(err)
+	}
+	pol := c.Policy
+	pol.Junk = eval.ActionReview
+	if _, err := Decide(context.Background(), c.ReportPath, DecideOptions{Policy: pol, WriteXMP: true}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "L0000000.xmp"))
+	if !strings.Contains(string(b), "cull:review") || strings.Contains(string(b), "cull:cull") {
+		t.Fatalf("sidecar not rewritten:\n%s", b)
+	}
 }

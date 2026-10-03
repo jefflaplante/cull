@@ -82,7 +82,7 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	fmt.Fprintf(w, "%s: %d DNGs; report %s (%s, effort %s)\n", cfg.Dir, len(files), filepath.Base(cfg.ReportPath), model, effort)
 
 	inReport := map[string]bool{}
-	var assessed, errs, moved int
+	var assessed, junk, errs, moved int
 	counts := map[string]int{}
 	var labelled, rated, disagree int
 	for _, r := range rep.Results {
@@ -92,6 +92,9 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 			errs++
 		case r.Evaluation != nil:
 			assessed++
+			counts[string(r.Decision)]++
+		case r.Junk != nil && r.Decision != "": // decided by --junk, without the model
+			junk++
 			counts[string(r.Decision)]++
 		}
 		if r.MovedTo != "" {
@@ -115,8 +118,8 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 			unjudged++
 		}
 	}
-	fmt.Fprintf(w, "  assessed %d · errors %d · not yet judged %d\n", assessed, errs, unjudged)
-	if assessed > 0 {
+	fmt.Fprintf(w, "  assessed %d · junk %d · errors %d · not yet judged %d\n", assessed, junk, errs, unjudged)
+	if assessed+junk > 0 {
 		fmt.Fprintf(w, "  model: keep %d · review %d · cull %d · moved out of the shoot folder (culled/ or keep/ review/ cull/) %d\n", counts["keep"], counts["review"], counts["cull"], moved)
 	}
 	fmt.Fprintf(w, "  you: labelled %d/%d · rated %d · disagree with the model %d\n", labelled, len(rep.Results), rated, disagree)

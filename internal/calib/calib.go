@@ -118,6 +118,9 @@ func Sweep(rep *report.Report, labels map[string]string, base eval.Policy, thres
 			m = Compare(decide(p), labels)
 		} else {
 			m = compare(rep, labels, func(r report.Result) string {
+				if r.Evaluation == nil { // junk: decided without an assessment, no threshold applies
+					return string(r.Decision)
+				}
 				e := *r.Evaluation
 				d, _ := p.DecideFacts(&e, r.Facts())
 				return string(d)

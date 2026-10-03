@@ -127,3 +127,14 @@ func TestJunkFramesCountAndAreListed(t *testing.T) {
 		t.Fatalf("no junk line:\n%s", out.String())
 	}
 }
+
+// Sweep's nil decide (each frame re-decided alone) must cope with junk frames,
+// which have a decision but no assessment.
+func TestSweepWithJunkFrame(t *testing.T) {
+	rep := testReport()
+	rep.Results = append(rep.Results, report.Result{File: "/shoot/J.DNG", Decision: eval.Cull, Junk: &report.JunkInfo{Kind: "black"}})
+	rows := Sweep(rep, map[string]string{"A.DNG": "keep", "J.DNG": "keep"}, eval.Policy{}, []float64{0, 7}, nil)
+	if len(rows) != 2 || rows[0].Matrix.N != 2 {
+		t.Fatalf("rows %+v", rows)
+	}
+}

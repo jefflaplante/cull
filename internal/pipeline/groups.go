@@ -171,10 +171,16 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 	var changed []int
 	for i := range rep.Results {
 		r := &rep.Results[i]
-		if r.Error != "" || !junked(*r, p) {
+		if r.Error != "" || r.Junk == nil {
 			continue
 		}
-		d, rs, _ := p.DecideJunk(JunkDetail(r.Junk))
+		d, rs, ok := p.DecideJunk(JunkDetail(r.Junk))
+		if !ok && r.Evaluation != nil {
+			continue // judged by the model (--junk ignore): decided with the rest below
+		}
+		if !ok { // --junk ignore, never judged: no verdict until judge --resume sends it
+			d, rs = "", []string{"junk: " + JunkDetail(r.Junk) + "; --junk ignore: run judge --resume to have it judged"}
+		}
 		if r.Decision != d {
 			changed = append(changed, i)
 		}

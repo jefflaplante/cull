@@ -128,7 +128,8 @@ func redecide(rep *report.Report, o DecideOptions, log io.Writer, between func()
 	if o.WriteXMP {
 		for i := range rep.Results {
 			r := &rep.Results[i]
-			if r.Evaluation == nil || r.Error != "" {
+			// Junk frames have a decision but no assessment; their sidecar follows it too.
+			if r.Error != "" || (r.Evaluation == nil && (r.Junk == nil || r.Decision == "")) {
 				continue
 			}
 			writeDecidedSidecar(r, o)

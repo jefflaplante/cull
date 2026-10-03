@@ -153,3 +153,24 @@ func TestScanCountsJunkAndJunkFlag(t *testing.T) {
 		t.Fatal("--junk bogus accepted")
 	}
 }
+
+// status counts junk frames: decided without the model, they are neither assessed
+// nor waiting to be judged.
+func TestStatusCountsJunk(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	blackTinyDNG(t, filepath.Join(dir, "L2.DNG"))
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := run(t, "status", dir)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "assessed 1 · junk 1 · errors 0 · not yet judged 0") || !strings.Contains(out, "cull 2") {
+		t.Fatalf("status miscounts junk:\n%s", out)
+	}
+}

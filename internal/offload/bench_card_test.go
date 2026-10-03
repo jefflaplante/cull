@@ -35,7 +35,7 @@ func TestCardBench(t *testing.T) {
 	start := time.Now()
 	for _, f := range engine {
 		st, _ := os.Stat(f)
-		if _, err := copyFile(context.Background(), f, filepath.Base(f), []string{a}, st.ModTime(), hooks{}); err != nil {
+		if _, err := copyFile(context.Background(), f, filepath.Base(f), []string{a}, sizeOf(t, f), st.ModTime(), hooks{}); err != nil {
 			t.Fatal(err)
 		}
 	}

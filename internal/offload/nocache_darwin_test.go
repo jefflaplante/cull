@@ -4,6 +4,7 @@ package offload
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -29,10 +30,39 @@ func TestVerifyStartsWithNothingCached(t *testing.T) {
 			checked++
 		},
 	}
-	if _, err := copyFile(context.Background(), src, "M1.DNG", []string{dst}, time.Now(), h); err != nil {
+	if _, err := copyFile(context.Background(), src, "M1.DNG", []string{dst}, sizeOf(t, src), time.Now(), h); err != nil {
 		t.Fatal(err)
 	}
 	if checked != 1 {
 		t.Fatalf("beforeVerify ran %d times", checked)
+	}
+}
+
+// C3: --checksum compares the destination from the disk: nothing of it cached when
+// the read starts.
+func TestChecksumReadsDestinationUncached(t *testing.T) {
+	src := t.TempDir()
+	card(t, src, map[string]spec{"DCIM/M1.DNG": {size: 4 << 20}})
+	o := opts(t, src)
+	o.Checksum = true
+	dst := filepath.Join(o.Dest, "2026-10-02 Smith wedding", "M1.DNG")
+	card(t, filepath.Dir(dst), map[string]spec{"M1.DNG": {size: 4 << 20}})
+	warmCache(t, dst)
+	checked := 0
+	beforeDiskRead = func(p string) {
+		if p != dst {
+			return
+		}
+		checked++
+		if r, n, _ := residentPages(p); r != 0 {
+			t.Errorf("%d of %d pages cached when --checksum reads the destination", r, n)
+		}
+	}
+	defer func() { beforeDiskRead = nil }()
+	if _, err := MakePlan(o); err != nil {
+		t.Fatal(err)
+	}
+	if checked != 1 {
+		t.Fatalf("destination read %d times through hashFromDisk", checked)
 	}
 }

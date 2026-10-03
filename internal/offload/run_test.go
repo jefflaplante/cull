@@ -115,7 +115,7 @@ func TestWriteErrorFailsFileNotRun(t *testing.T) {
 	p, _ := MakePlan(o)
 	p.h.write = func(f *os.File, b []byte) (int, error) {
 		if strings.Contains(f.Name(), "M2.DNG") {
-			return 0, syscall.ENOSPC
+			return 0, syscall.EIO // a write error other than a full disk: fails the file, not the run
 		}
 		return f.Write(b)
 	}
@@ -189,11 +189,11 @@ func TestVerifyFindsLaterCorruption(t *testing.T) {
 	b, _ := os.ReadFile(f)
 	b[100] ^= 1
 	os.WriteFile(f, b, 0o644)
-	ok, bad, err := Verify(context.Background(), p.Dests[0], nil)
-	if err != nil || ok != 2 || bad != 1 {
-		t.Fatalf("ok %d bad %d err %v", ok, bad, err)
+	v, err := Verify(context.Background(), p.Dests[0], nil)
+	if err != nil || v.OK != 2 || v.Bad != 1 {
+		t.Fatalf("%+v err %v", v, err)
 	}
-	if ok, bad, _ := Verify(context.Background(), p.Dests[1], nil); ok != 3 || bad != 0 {
-		t.Fatalf("backup: ok %d bad %d", ok, bad)
+	if v, _ := Verify(context.Background(), p.Dests[1], nil); v.OK != 3 || v.Bad != 0 {
+		t.Fatalf("backup: %+v", v)
 	}
 }

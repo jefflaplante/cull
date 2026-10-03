@@ -38,7 +38,7 @@ func TestCopyFileTwoDestinations(t *testing.T) {
 	src, data := randomFile(t, 9<<20+123)
 	a, b := t.TempDir(), t.TempDir()
 	mt := time.Date(2025, 12, 27, 23, 56, 5, 0, time.UTC)
-	sum, err := copyFile(context.Background(), src, "M1.DNG", []string{a, b}, mt, hooks{})
+	sum, err := copyFile(context.Background(), src, "M1.DNG", []string{a, b}, sizeOf(t, src), mt, hooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestCopyFileCatchesCorruption(t *testing.T) {
 		f.WriteAt(buf, 1234)
 		f.Close()
 	}}
-	_, err := copyFile(context.Background(), src, "M1.DNG", []string{a, b}, time.Now(), h)
+	_, err := copyFile(context.Background(), src, "M1.DNG", []string{a, b}, sizeOf(t, src), time.Now(), h)
 	if err == nil || !bytes.Contains([]byte(err.Error()), []byte(a)) {
 		t.Fatalf("corruption not caught or not named: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestCopyFileNeverReplaces(t *testing.T) {
 	src, _ := randomFile(t, 1<<20)
 	a := t.TempDir()
 	os.WriteFile(filepath.Join(a, "M1.DNG"), []byte("theirs"), 0o644)
-	if _, err := copyFile(context.Background(), src, "M1.DNG", []string{a}, time.Now(), hooks{}); err == nil {
+	if _, err := copyFile(context.Background(), src, "M1.DNG", []string{a}, sizeOf(t, src), time.Now(), hooks{}); err == nil {
 		t.Fatal("replaced an existing file")
 	}
 	if got, _ := os.ReadFile(filepath.Join(a, "M1.DNG")); string(got) != "theirs" {
@@ -120,7 +120,7 @@ func TestCopyFileSourceErrorCleansUp(t *testing.T) {
 	h := hooks{open: func(string) (io.ReadCloser, error) {
 		return &failingReader{r: bytes.NewReader(data), after: 5 << 20}, nil
 	}}
-	if _, err := copyFile(context.Background(), src, "M1.DNG", []string{a}, time.Now(), h); err == nil {
+	if _, err := copyFile(context.Background(), src, "M1.DNG", []string{a}, sizeOf(t, src), time.Now(), h); err == nil {
 		t.Fatal("source error ignored")
 	}
 	if _, err := os.Stat(filepath.Join(a, "M1.DNG")); err == nil {
@@ -151,7 +151,7 @@ func TestCopyFileCancel(t *testing.T) {
 	h := hooks{open: func(string) (io.ReadCloser, error) {
 		return &cancelAfterFirst{r: bytes.NewReader(data), cancel: cancel}, nil
 	}}
-	if _, err := copyFile(ctx, src, "M1.DNG", []string{a}, time.Now(), h); !errors.Is(err, context.Canceled) {
+	if _, err := copyFile(ctx, src, "M1.DNG", []string{a}, sizeOf(t, src), time.Now(), h); !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context.Canceled, got %v", err)
 	}
 	if ents, _ := os.ReadDir(a); len(ents) != 0 {
@@ -163,7 +163,7 @@ func TestCopyFileWriteError(t *testing.T) {
 	src, _ := randomFile(t, 9<<20)
 	a := t.TempDir()
 	h := hooks{write: func(f *os.File, p []byte) (int, error) { return 0, errors.New("no space left on device") }}
-	if _, err := copyFile(context.Background(), src, "M1.DNG", []string{a}, time.Now(), h); err == nil {
+	if _, err := copyFile(context.Background(), src, "M1.DNG", []string{a}, sizeOf(t, src), time.Now(), h); err == nil {
 		t.Fatal("write error ignored")
 	}
 	if ents, _ := os.ReadDir(a); len(ents) != 0 {
@@ -177,4 +177,13 @@ func warmCache(t *testing.T, p string) {
 	if _, err := os.ReadFile(p); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func sizeOf(t *testing.T, p string) int64 {
+	t.Helper()
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st.Size()
 }

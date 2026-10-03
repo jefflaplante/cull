@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jefflaplante/cull/internal/ui"
@@ -57,7 +60,7 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 	emit(ui.Event{Stage: &ui.Stage{Name: "offload", Unit: "bytes", Total: p.Bytes}})
 	defer emit(ui.Event{Stage: &ui.Stage{Name: "offload", Done: true}})
 
-	for _, f := range p.Files {
+	for i, f := range p.Files {
 		if f.Skip != "" {
 			res.Skipped++
 			if f.Unverified {
@@ -70,6 +73,16 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 		}
 		sum, err := copyWithRetries(ctx, f, p.h, warn)
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			break
+		}
+		if destinationFull(err) {
+			res.Failed = append(res.Failed, f.Name+": destination full: "+err.Error())
+			warn("%s not copied, the destination is full: %v", f.Name, err)
+			for _, rest := range p.Files[i+1:] {
+				if rest.Skip == "" {
+					res.Failed = append(res.Failed, rest.Name+": not attempted: destination full")
+				}
+			}
 			break
 		}
 		if err != nil {
@@ -108,8 +121,11 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 
 func copyWithRetries(ctx context.Context, f File, h hooks, warn func(string, ...any)) ([32]byte, error) {
 	for try := 0; ; try++ {
-		sum, err := copyFile(ctx, f.Src, f.Name, f.To, f.ModTime, h)
-		if err == nil || ctx.Err() != nil || try == len(retryDelays) {
+		sum, err := copyFile(ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, h)
+		// Retried: card reads and verify mismatches (a flaky reader, a reseated card).
+		// Not retried: a full disk or a name taken since planning won't change, and
+		// each retry would read the whole file off the card again.
+		if err == nil || ctx.Err() != nil || try == len(retryDelays) || destinationFull(err) || errors.Is(err, fs.ErrExist) {
 			return sum, err
 		}
 		warn("%s: %v; retrying in %s", f.Name, err, retryDelays[try])
@@ -132,13 +148,21 @@ func flushDrive(dir string) error {
 
 // Verify re-hashes every file folder's manifest records, from the disk, and reports
 // how many match and how many are missing or differ (each with a warning).
-func Verify(ctx context.Context, folder string, sink ui.Sink) (ok, bad int, err error) {
+// Verified is what Verify found.
+type Verified struct {
+	OK, Bad    int
+	Unrecorded []string // DNGs in the folder that no manifest line covers: never verified by cull
+}
+
+func Verify(ctx context.Context, folder string, sink ui.Sink) (v Verified, err error) {
+	ok, bad := 0, 0
+	defer func() { v.OK, v.Bad = ok, bad }()
 	man, err := readManifest(folder)
 	if err != nil {
-		return 0, 0, err
+		return v, err
 	}
 	if len(man) == 0 {
-		return 0, 0, fmt.Errorf("no %s in %s: nothing to verify", ManifestName, folder)
+		return v, fmt.Errorf("no %s in %s: nothing to verify", ManifestName, folder)
 	}
 	if sink != nil {
 		sink.Emit(ui.Event{Stage: &ui.Stage{Name: "verify", Unit: "files", Total: int64(len(man))}})
@@ -146,13 +170,15 @@ func Verify(ctx context.Context, folder string, sink ui.Sink) (ok, bad int, err 
 	}
 	for _, e := range man {
 		if err := ctx.Err(); err != nil {
-			return ok, bad, err
+			return v, err
 		}
 		p := filepath.Join(folder, e.Name)
 		problem := ""
-		if err := dropCache(p); err != nil {
-			problem = err.Error()
-		} else if sum, err := hashUncached(ctx, p); err != nil {
+		if st, err := os.Stat(p); err != nil {
+			problem = "missing"
+		} else if st.Size() != e.Size {
+			problem = fmt.Sprintf("size %d, the card's was %d", st.Size(), e.Size)
+		} else if sum, err := hashFromDisk(ctx, p); err != nil {
 			problem = err.Error()
 		} else if hexOf(sum[:]) != e.SHA256 {
 			problem = "differs from the card (checksum mismatch)"
@@ -169,5 +195,24 @@ func Verify(ctx context.Context, folder string, sink ui.Sink) (ok, bad int, err 
 			sink.Emit(ui.Event{Stage: &ui.Stage{Name: "verify", Add: 1}})
 		}
 	}
-	return ok, bad, nil
+	recorded := map[string]bool{}
+	for _, e := range man {
+		recorded[e.Name] = true
+	}
+	ents, err := os.ReadDir(folder)
+	if err != nil {
+		return v, err
+	}
+	for _, d := range ents {
+		if d.Type().IsRegular() && strings.EqualFold(filepath.Ext(d.Name()), ".dng") && !recorded[d.Name()] {
+			v.Unrecorded = append(v.Unrecorded, d.Name())
+		}
+	}
+	return v, nil
+}
+
+// destinationFull reports a write that failed for lack of space: every later file
+// would fail the same way, after reading it off the card for nothing.
+func destinationFull(err error) bool {
+	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)
 }

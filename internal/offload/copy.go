@@ -38,7 +38,7 @@ type chunk struct {
 // src's SHA-256 (computed during that one read). A copy appears under name only after
 // its temp file is fsynced, re-read without the page cache and matched against the
 // hash; nothing existing is ever replaced. On any failure every temp file is removed.
-func copyFile(ctx context.Context, src, name string, dirs []string, mtime time.Time, h hooks) (sum [32]byte, err error) {
+func copyFile(ctx context.Context, src, name string, dirs []string, size int64, mtime time.Time, h hooks) (sum [32]byte, err error) {
 	in, err := openSource(src, h)
 	if err != nil {
 		return sum, err
@@ -63,8 +63,12 @@ func copyFile(ctx context.Context, src, name string, dirs []string, mtime time.T
 	}
 
 	hs := sha256.New()
-	if err := stream(ctx, in, hs, temps, h); err != nil {
+	n, err := stream(ctx, in, hs, temps, h)
+	if err != nil {
 		return sum, err
+	}
+	if n != size { // a reader that ends early without an error is still a failed read
+		return sum, fmt.Errorf("short read of %s: %d of %d bytes", name, n, size)
 	}
 	copy(sum[:], hs.Sum(nil))
 
@@ -143,7 +147,7 @@ func createTemp(dir, name string) (*os.File, error) {
 
 // stream copies in to every out while hashing, with the reader one goroutine ahead so
 // the card keeps streaming while the destinations are written.
-func stream(ctx context.Context, in io.Reader, hs hash.Hash, outs []*os.File, h hooks) error {
+func stream(ctx context.Context, in io.Reader, hs hash.Hash, outs []*os.File, h hooks) (total int64, err error) {
 	free := make(chan []byte, bufs)
 	for i := 0; i < bufs; i++ {
 		free <- make([]byte, bufSize)
@@ -181,22 +185,23 @@ func stream(ctx context.Context, in io.Reader, hs hash.Hash, outs []*os.File, h 
 	}
 	for c := range chunks {
 		if err := ctx.Err(); err != nil {
-			return err
+			return total, err
 		}
 		for _, f := range outs {
 			if _, err := write(f, c.buf[:c.n]); err != nil {
-				return fmt.Errorf("write %s: %w", f.Name(), err)
+				return total, fmt.Errorf("write %s: %w", f.Name(), err)
 			}
 		}
+		total += int64(c.n)
 		free <- c.buf
 		switch {
 		case c.err == io.EOF:
-			return nil
+			return total, nil
 		case c.err != nil:
-			return fmt.Errorf("read card: %w", c.err)
+			return total, fmt.Errorf("read card: %w", c.err)
 		}
 	}
-	return ctx.Err()
+	return total, ctx.Err()
 }
 
 // dropCache evicts p's pages from the page cache and checks none remain, so the verify
@@ -221,6 +226,22 @@ func dropCache(p string) error {
 		}
 		time.Sleep(time.Duration(try+1) * 20 * time.Millisecond)
 	}
+}
+
+// beforeDiskRead is a test hook: called after p was dropped from the page cache, just
+// before hashFromDisk reads it.
+var beforeDiskRead func(p string)
+
+// hashFromDisk drops p from the page cache, checks it's gone, and hashes it from the
+// device: how --checksum and --verify read copies.
+func hashFromDisk(ctx context.Context, p string) ([32]byte, error) {
+	if err := dropCache(p); err != nil {
+		return [32]byte{}, err
+	}
+	if beforeDiskRead != nil {
+		beforeDiskRead(p)
+	}
+	return hashUncached(ctx, p)
 }
 
 // hashUncached hashes p, reading it from the device rather than the page cache.
@@ -262,10 +283,10 @@ func linkNoReplace(tmp, final string) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, fs.ErrExist):
-		return fmt.Errorf("%s already exists, not replaced", final)
+		return fmt.Errorf("%s already exists, not replaced: %w", final, fs.ErrExist)
 	}
 	if _, serr := os.Lstat(final); serr == nil {
-		return fmt.Errorf("%s already exists, not replaced", final)
+		return fmt.Errorf("%s already exists, not replaced: %w", final, fs.ErrExist)
 	}
 	if err := os.Rename(tmp, final); err != nil {
 		return err

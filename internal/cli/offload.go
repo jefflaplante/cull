@@ -114,14 +114,20 @@ judge it next.`,
 func runVerify(cmd *cobra.Command, so *sharedOpts, folder string) error {
 	out := so.out.newOutput(cmd, true)
 	defer out.Close()
-	ok, bad, err := offload.Verify(cmd.Context(), folder, out.UI)
+	v, err := offload.Verify(cmd.Context(), folder, out.UI)
 	out.Close()
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "%d verified, %d missing or different\n", ok, bad)
-	if bad > 0 {
-		return fmt.Errorf("%d file(s) in %s don't match the card", bad, folder)
+	fmt.Fprintf(cmd.ErrOrStderr(), "%d verified, %d missing or different\n", v.OK, v.Bad)
+	if len(v.Unrecorded) > 0 {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%d DNG(s) here were never verified by cull (no manifest line): %s\n", len(v.Unrecorded), strings.Join(v.Unrecorded, ", "))
+	}
+	switch {
+	case v.Bad > 0:
+		return fmt.Errorf("%d file(s) in %s don't match the card", v.Bad, folder)
+	case len(v.Unrecorded) > 0:
+		return fmt.Errorf("%d file(s) in %s can't be vouched for", len(v.Unrecorded), folder)
 	}
 	return nil
 }

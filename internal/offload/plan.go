@@ -4,6 +4,7 @@
 package offload
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,6 +104,12 @@ func MakePlan(o Options) (*Plan, error) {
 			p.Bytes += f.Size
 		}
 	}
+	return p, p.checkSpace(o)
+}
+
+// checkSpace makes sure each volume has room for every copy it will receive: the
+// destination and the backup on one drive need room for both.
+func (p *Plan) checkSpace(o Options) error {
 	free := o.freeSpace
 	if free == nil {
 		free = statfsFree
@@ -110,17 +118,43 @@ func MakePlan(o Options) (*Plan, error) {
 	if o.Backup != "" {
 		roots = append(roots, o.Backup)
 	}
-	for _, r := range roots {
-		n, err := free(r)
-		if err != nil {
-			return nil, fmt.Errorf("free space on %s: %w", r, err)
+	type volume struct {
+		roots []string
+		need  int64
+	}
+	var vols []*volume
+	byID := map[uint64]*volume{}
+	for i, r := range roots {
+		var need int64
+		for _, f := range p.Files {
+			if slices.Contains(f.To, p.Dests[i]) {
+				need += f.Size
+			}
 		}
-		if need := reserve(p.Bytes); n < need {
-			return p, fmt.Errorf("not enough free space on %s: %s free, %s needed (%s to copy plus a margin)",
-				r, gb(int64(n)), gb(int64(need)), gb(p.Bytes))
+		id, err := volumeID(r)
+		if err != nil {
+			return fmt.Errorf("volume of %s: %w", r, err)
+		}
+		v := byID[id]
+		if v == nil {
+			v = &volume{}
+			byID[id] = v
+			vols = append(vols, v)
+		}
+		v.roots = append(v.roots, r)
+		v.need += need
+	}
+	for _, v := range vols {
+		n, err := free(v.roots[0])
+		if err != nil {
+			return fmt.Errorf("free space on %s: %w", v.roots[0], err)
+		}
+		if need := reserve(v.need); n < need {
+			return fmt.Errorf("not enough free space for %s: %s free, %s needed (%s to copy there plus a margin)",
+				strings.Join(v.roots, " and "), gb(int64(n)), gb(int64(need)), gb(v.need))
 		}
 	}
-	return p, nil
+	return nil
 }
 
 // scan lists every regular .dng file under the sources, never following symlinks and
@@ -224,7 +258,9 @@ func same(f File, dir, name string, st os.FileInfo, checksum bool) (bool, error)
 	if err != nil {
 		return false, err
 	}
-	b, err := fileSum(filepath.Join(dir, name))
+	// The copy is checked from the disk, as the engine checks its own: a file copied
+	// minutes ago would otherwise be compared against the page cache.
+	b, err := hashFromDisk(context.Background(), filepath.Join(dir, name))
 	return a == b, err
 }
 
@@ -335,16 +371,16 @@ func (p *Plan) renamed(o Options) error {
 	// The counter continues from the largest n among names the pattern produced.
 	re := patternRE(pat, date, name)
 	next := 1
-	recorded := map[string]Entry{}
+	recorded := make([]map[string]Entry, len(p.Dests)) // per destination: orig+size → manifest line
 	seenNames := map[string]bool{}
-	for _, d := range p.Dests {
+	for i, d := range p.Dests {
 		ents, err := os.ReadDir(d)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 		for _, e := range ents {
 			seenNames[strings.ToLower(e.Name())] = true
-			if m := re.FindStringSubmatch(e.Name()); m != nil && m[1] != "" {
+			if m := re.FindStringSubmatch(e.Name()); numbered && len(m) > 1 && m[1] != "" {
 				if n, err := strconv.Atoi(m[1]); err == nil && n >= next {
 					next = n + 1
 				}
@@ -354,20 +390,58 @@ func (p *Plan) renamed(o Options) error {
 		if err != nil {
 			return err
 		}
-		if d == p.Dests[0] {
-			for _, e := range man {
-				recorded[strings.ToLower(e.Orig)+"\x00"+strconv.FormatInt(e.Size, 10)] = e
-			}
+		recorded[i] = map[string]Entry{}
+		for _, e := range man {
+			recorded[i][strings.ToLower(e.Orig)+"\x00"+strconv.FormatInt(e.Size, 10)] = e
 		}
 	}
 	for i := range p.Files {
 		f := &p.Files[i]
 		orig := filepath.Base(f.Src)
-		if e, ok := recorded[strings.ToLower(orig)+"\x00"+strconv.FormatInt(f.Size, 10)]; ok {
-			if dt := e.ModTime.Sub(f.ModTime); dt <= mtimeWindow && dt >= -mtimeWindow {
-				f.Name, f.Skip = e.Name, "in manifest"
-				continue
+		key := strings.ToLower(orig) + "\x00" + strconv.FormatInt(f.Size, 10)
+		matches := func(e Entry) bool {
+			dt := e.ModTime.Sub(f.ModTime)
+			return dt <= mtimeWindow && dt >= -mtimeWindow
+		}
+		var rec *Entry
+		for _, m := range recorded {
+			if e, ok := m[key]; ok && matches(e) {
+				rec = &e
+				break
 			}
+		}
+		if rec != nil {
+			// Copied before under rec.Name: it is skipped only where it still is, and
+			// counts as verified only where that folder's manifest records it.
+			f.Name = rec.Name
+			for j, d := range p.Dests {
+				st, ok := existing(d, rec.Name)
+				if !ok {
+					f.To = append(f.To, d)
+					continue
+				}
+				if !st.Mode().IsRegular() || st.Size() != f.Size {
+					return fmt.Errorf("%s isn't the copy the manifest records (size %d, the card's is %d); move it aside and rerun",
+						filepath.Join(d, rec.Name), st.Size(), f.Size)
+				}
+				if e, ok := recorded[j][key]; ok && e.Name == rec.Name && matches(e) {
+					continue
+				}
+				eq := false
+				if o.Checksum {
+					var err error
+					if eq, err = same(*f, d, rec.Name, st, true); err != nil {
+						return err
+					}
+				}
+				if !eq {
+					f.Unverified = true
+				}
+			}
+			if len(f.To) == 0 {
+				f.Skip = "in manifest"
+			}
+			continue
 		}
 		stem := strings.TrimSuffix(orig, filepath.Ext(orig))
 		f.Name = expand(stem, next) + strings.ToUpper(filepath.Ext(orig))
@@ -405,6 +479,23 @@ func patternRE(pat, date, name string) *regexp.Regexp {
 	b.WriteString(regexp.QuoteMeta(pat[last:]))
 	b.WriteString(`\.[A-Za-z0-9]+$`)
 	return regexp.MustCompile(b.String())
+}
+
+// volumeID identifies the volume path is on (or will be created on: the nearest
+// existing ancestor's).
+func volumeID(path string) (uint64, error) {
+	p := filepath.Clean(path)
+	for {
+		st, err := os.Stat(p)
+		if err == nil {
+			return uint64(st.Sys().(*syscall.Stat_t).Dev), nil
+		}
+		parent := filepath.Dir(p)
+		if !errors.Is(err, fs.ErrNotExist) || parent == p {
+			return 0, err
+		}
+		p = parent
+	}
 }
 
 // statfsFree is the space free to unprivileged users on path's volume; a path that

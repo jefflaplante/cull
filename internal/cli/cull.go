@@ -148,7 +148,12 @@ Backends (--backend):
 				}
 			}
 			price, priced := llm.PriceFor(o.backend, o.model)
-			if o.estimate || priced {
+			var escPrice llm.Price
+			escPriced := false
+			if o.escalateBackend != "" {
+				escPrice, escPriced = llm.PriceFor(o.escalateBackend, o.escalateModel)
+			}
+			if o.estimate || priced || escPriced {
 				files, err := pipeline.Discover(cfg.Dir, cfg.Recursive)
 				if err != nil {
 					return err
@@ -165,6 +170,15 @@ Backends (--backend):
 					}
 				}
 				usd := printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch, !o.noRank, o.rankTwice)
+				if escPriced {
+					// Only frames the first pass doubts escalate, and which those are isn't
+					// known before judging: price the bound, so the question and --max-cost
+					// advice aren't blind to it.
+					eusd, _, _ := llm.Estimate(len(files), escPrice, false)
+					fmt.Fprintf(cmd.ErrOrStderr(), "escalation to %s/%s ≤ $%.2f at list price, if every frame escalates (only frames the first pass calls %s do)\n",
+						o.escalateBackend, o.escalateModel, eusd, o.escalateOnList)
+					usd += eusd
+				}
 				if o.second {
 					fmt.Fprintln(cmd.ErrOrStderr(), "second opinions: one more evaluation per soft-or-worse frame, on top of the estimate")
 				}

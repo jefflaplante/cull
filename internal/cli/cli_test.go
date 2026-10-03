@@ -1464,3 +1464,17 @@ func TestEffortRefusedOnOpenAIEscalation(t *testing.T) {
 		t.Fatalf("want an effort error, got %v", err)
 	}
 }
+
+// A priced escalation is in the estimate (as an upper bound) even when the first pass
+// is on the subscription, so --max-cost and the spend question aren't blind to it.
+func TestEstimateIncludesPricedEscalation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	for _, n := range []string{"L1.DNG", "L2.DNG"} {
+		tinyDNG(t, filepath.Join(dir, n))
+	}
+	out, err := run(t, "judge", "--estimate", "--backend", "claude-code", "--escalate-backend", "anthropic", "--escalate-model", "claude-opus-5-5", dir)
+	if err != nil || !strings.Contains(out, "escalation to anthropic/claude-opus-5-5") || !strings.Contains(out, "if every frame escalates") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+}

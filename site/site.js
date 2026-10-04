@@ -86,17 +86,18 @@
       return 'M' + ix + ' 0H' + (W - ix) + 'M' + ix + ' ' + H + 'H' + (W - ix) +
         'M0 ' + iy + 'V' + (H - iy) + 'M' + W + ' ' + iy + 'V' + (H - iy);
     }
-    function brackets(x, y, w, h, a) { // four corner brackets with arms a
-      return 'M' + x + ' ' + (y + a) + 'V' + y + 'H' + (x + a) +
-        'M' + (x + w - a) + ' ' + y + 'H' + (x + w) + 'V' + (y + a) +
-        'M' + (x + w) + ' ' + (y + h - a) + 'V' + (y + h) + 'H' + (x + w - a) +
-        'M' + (x + a) + ' ' + (y + h) + 'H' + x + 'V' + (y + h - a);
+    function brackets(x, y, w, h, ax, ay, r) { // corner brackets: arms ax across, ay down, corners rounded to r
+      function c(cx, cy, sx, sy) { // the corner at (cx, cy); sx, sy point along its arms
+        return 'M' + (cx + sx * ax) + ' ' + cy + 'H' + (cx + sx * r) +
+          'Q' + cx + ' ' + cy + ' ' + cx + ' ' + (cy + sy * r) + 'V' + (cy + sy * ay);
+      }
+      return c(x, y, 1, 1) + c(x + w, y, -1, 1) + c(x + w, y + h, -1, -1) + c(x, y + h, 1, -1);
     }
     var EDGE = 64, CLEAR_X = 40, CLEAR_Y = 18; // from the window's edge; from the contents
     var dial = document.getElementById('dial'), dialLayer = document.getElementById('dialLayer');
     function layout() {
-      var k = box(hero.querySelector('.kicker')), q = box(hero.querySelector('.req')), r = box(hero.querySelector('.readout'));
-      var left = k.x, right = r.x + r.w, top = k.y, bottom = Math.max(q.y + q.h, r.y + r.h);
+      var k = box(hero.querySelector('.kicker')), gr = box(hero.querySelector('.hero-grid'));
+      var left = k.x, right = gr.x + gr.w, top = k.y, bottom = gr.y + gr.h;
       var W = Math.max(right - left + 2 * CLEAR_X, (bottom - top + 2 * CLEAR_Y) * 1.5), H = W / 1.5;
       var cx = (left + right) / 2, cy = (top + bottom) / 2;
       // Keep the left line off the window's edge; give way to the right if there's room.
@@ -117,7 +118,8 @@
       var lines = el('g', { 'class': 'f' });
       lines.appendChild(el('path', { d: frame35(W, H) }));
       var w135 = W * 0.28, h135 = H * 0.31;
-      lines.appendChild(el('path', { 'class': 'f135', d: brackets((W - w135) / 2, (H - h135) / 2, w135, h135, w135 * 0.19) }));
+      var arm = w135 * 0.19;
+      lines.appendChild(el('path', { 'class': 'f135', d: brackets((W - w135) / 2, (H - h135) / 2, w135, h135, arm / 2, arm, arm * 0.22) }));
       svg.appendChild(lines);
       var pw = W * 0.10, ph = W * 0.066, pl = cx - pw / 2, pt = cy - ph / 2;
       patch.style.cssText = 'left:' + pl + 'px;top:' + pt + 'px;width:' + pw + 'px;height:' + ph + 'px';

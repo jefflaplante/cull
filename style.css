@@ -623,6 +623,7 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 /* usage page: a label and what it does, left to right */
 .spec.steps th{white-space:nowrap;padding-right:28px}
 .spec.steps td{text-align:left}
+.hero .spec.steps th,.hero .spec.steps td{padding-block:8px}
 
 /* terminal replays: a recorded run, played back when the terminal comes into view */
 .replay{border-radius:8px;overflow:hidden;background:#151517;font-family:var(--mono);
@@ -726,13 +727,14 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 
 /* viewfinder: the 35 and 135 bright-line frames and the rangefinder patch over the
    homepage hero, glowing like the M11's illuminated frames */
-html[data-vf] .hero{position:relative;--vf-line:#f7f4ec;--vf-glow:rgba(255,250,236,.55)}
+html[data-vf] .hero{position:relative;--vf-line:#f7f4ec;--vf-glow:rgba(255,250,236,.38)}
 html[data-vf]:not(.vf-off) .rf::before,html[data-vf]:not(.vf-off) .rf::after{display:none}
 .vf{position:absolute;inset:0;z-index:3;pointer-events:none;opacity:0}
 .vf.on{animation:vf-on 1.2s ease-out forwards}
 @keyframes vf-on{0%{opacity:0}10%{opacity:.75}16%{opacity:.2}28%{opacity:.95}100%{opacity:1}}
-.vf-lines{position:absolute;overflow:visible;filter:drop-shadow(0 0 3px var(--vf-glow)) drop-shadow(0 0 9px var(--vf-glow)) drop-shadow(0 0 22px rgba(255,248,230,.28))}
-.vf-lines .f{fill:none;stroke:var(--vf-line);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;opacity:.96}
+.vf-lines{position:absolute;overflow:visible;mix-blend-mode:screen;filter:drop-shadow(0 0 3px var(--vf-glow)) drop-shadow(0 0 9px var(--vf-glow)) drop-shadow(0 0 22px rgba(255,248,230,.2))}
+.vf-lines .f{fill:none;stroke:var(--vf-line);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.vf.on .vf-lines{opacity:.58}
 .vf-lines .f135{stroke-width:2.3}
 .vf-patch{position:absolute;border-radius:10px;
   background:rgba(255,248,232,.05);

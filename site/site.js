@@ -119,7 +119,7 @@
       lines.appendChild(el('path', { d: frame35(W, H) }));
       var w135 = W * 0.28, h135 = H * 0.31;
       var arm = w135 * 0.19;
-      lines.appendChild(el('path', { 'class': 'f135', d: brackets((W - w135) / 2, (H - h135) / 2, w135, h135, arm / 2, arm, arm * 0.22) }));
+      lines.appendChild(el('path', { 'class': 'f135', d: brackets((W - w135) / 2, (H - h135) / 2, w135, h135, arm / 2, arm, arm * 0.1) }));
       svg.appendChild(lines);
       var pw = W * 0.10, ph = W * 0.066, pl = cx - pw / 2, pt = cy - ph / 2;
       patch.style.cssText = 'left:' + pl + 'px;top:' + pt + 'px;width:' + pw + 'px;height:' + ph + 'px';

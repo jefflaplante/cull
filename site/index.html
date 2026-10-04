@@ -185,14 +185,14 @@
         <span class="node" aria-hidden="true"></span>
         <code class="cmd">cull decide</code>
         <h3>Sort</h3>
-        <p>Writes XMP sidecars and moves the frames into keep/, review/ and cull/.</p>
+        <p>Writes XMP sidecars and moves the frames into <code>keep/</code>, <code>review/</code> and <code>cull/</code>.</p>
         <span class="phase eng">Your call</span>
       </li>
       <li class="station" style="--i:5">
         <span class="node" aria-hidden="true"></span>
         <code class="cmd">cull apply-c1</code>
         <h3>Capture One</h3>
-        <p>Import keep/ and review/. Changes made after import go in by AppleScript.</p>
+        <p>Import <code>keep/</code> and <code>review/</code>. Changes made after import go in by AppleScript.</p>
         <span class="phase eng">Your call</span>
       </li>
     </ol>
@@ -384,7 +384,7 @@
     <div class="split wide-r">
       <div class="reveal">
         <p class="pull">Your labels override the model&rsquo;s.</p>
-        <p class="lede" style="margin-bottom:28px"><code style="color:var(--text);font-size:.9em">cull review</code> opens a keyboard-driven contact sheet in your browser.</p>
+        <p class="lede" style="margin-bottom:28px"><code style="font-size:.9em">cull review</code> opens a keyboard-driven contact sheet in your browser.</p>
         <dl class="legend">
           <div><dt class="eng">Verdict</dt><dd>Keep, review or cull, frame by frame</dd></div>
           <div><dt class="eng">Stars</dt><dd>Rate as you go</dd></div>
@@ -410,7 +410,7 @@
       <span class="eng">Calibrate</span>
       <div>
         <h3>Calibrate before you trust it.</h3>
-        <p>Label a sample of frames. <code style="color:var(--text);font-size:.9em">cull calibrate</code> then reports how often cull culled a frame you&rsquo;d keep, and what each threshold would change.</p>
+        <p>Label a sample of frames. <code style="font-size:.9em">cull calibrate</code> then reports how often cull culled a frame you&rsquo;d keep, and what each threshold would change.</p>
       </div>
       <p>Nothing should auto-apply until it&rsquo;s calibrated. The rules are code, so tuning them means moving a threshold, not rewording a prompt.</p>
     </div>
@@ -454,7 +454,7 @@
       <div class="reveal">
         <div class="sub">
           <h3>Sorted before import</h3>
-          <p><code>--sort</code> moves frames into three folders, so you import only keep and review.</p>
+          <p><code>--sort</code> moves frames into three folders, so you import only <code>keep/</code> and <code>review/</code>.</p>
           <div class="folders">
             <div class="folder imp"><b>keep/</b><span>import</span></div>
             <div class="folder imp"><b>review/</b><span>import</span></div>
@@ -467,7 +467,7 @@
         </div>
         <div class="plate safety">
           <span class="dot" aria-hidden="true" style="margin-top:8px;flex:none"></span>
-          <p><strong>Your DNGs are never modified.</strong> Every move is recorded, and <code style="color:var(--text);font-size:.9em">cull restore</code> undoes it.</p>
+          <p><strong>Your DNGs are never modified.</strong> Every move is recorded, and <code style="font-size:.9em">cull restore</code> undoes it.</p>
         </div>
       </div>
     </div>

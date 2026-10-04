@@ -15,6 +15,8 @@ import (
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/rawclip"
 	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/review"
+	"github.com/jefflaplante/cull/internal/ui"
 	"github.com/jefflaplante/cull/internal/xmp"
 )
 
@@ -166,6 +168,11 @@ func buildInput(cfg Config, p *prepared, target *focus.Target) (eval.Input, erro
 			return eval.Input{}, fmt.Errorf("crop: %w", err)
 		}
 		subject = &eval.Labeled{Label: subjectLabel(ft), JPEG: jb}
+	}
+	if cfg.ReviewImages != "" {
+		if err := review.Prerender(cfg.ReviewImages, cfg.Dir, *res, frame); err != nil {
+			cfg.note(ui.Verbose, "  %s review images: %v", filepath.Base(res.File), err)
+		}
 	}
 	var landed []eval.Labeled
 	for _, c := range cells {

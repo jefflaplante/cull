@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,6 +26,7 @@ func newReviewCmd(so *sharedOpts) *cobra.Command {
 		out                      string
 		jobs, port               int
 		force, static            bool
+		prepare, clearCache      bool
 		noOpen, noXMP, overwrite bool
 		labelsPath               string
 	)
@@ -42,17 +44,29 @@ are never touched. Ctrl-C stops the server.
 --no-xmp saves only the labels log; --no-open doesn't launch the browser; --static
 writes an offline index.html instead of serving (labels then stay in the browser;
 export them from the page, then cull import-labels). 'calibrate', 'decide' and 'apply-c1' read the log.
-Works on scan reports too (labeling only).`,
+Works on scan reports too (labeling only).
+
+The sheet's images (thumbnails, subject crops, 100% loupe views) are a cache in
+cull-review/assets. scan and judge fill it while each preview is decoded anyway, so a
+judged shoot opens without rendering. Each image is named after the file and focus box
+it was made from: review renders only what's missing or changed and removes stale
+images. --prepare fills the cache and exits; --clear-cache empties it; --force
+renders everything again.`,
 		Example: `  cull review ~/Pictures/2026-09-26
   cull review --no-xmp ~/Pictures/2026-09-26     # labels only, no sidecars
-  cull review --static ~/Pictures/2026-09-26     # offline page`,
+  cull review --static ~/Pictures/2026-09-26     # offline page
+  cull review --prepare ~/Pictures/2026-09-26    # fill the image cache now, open later
+  cull review --clear-cache ~/Pictures/2026-09-26`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fl := cmd.Flags()
-			if static {
+			for mode, on := range map[string]bool{"static": static, "prepare": prepare} {
+				if !on {
+					continue
+				}
 				for _, name := range []string{"port", "no-open", "no-xmp", "overwrite-xmp"} {
 					if fl.Changed(name) {
-						return fmt.Errorf("--%s can't be used with --static: it only applies when serving", name)
+						return fmt.Errorf("--%s can't be used with --%s: it only applies when serving", name, mode)
 					}
 				}
 			}
@@ -75,11 +89,25 @@ Works on scan reports too (labeling only).`,
 			if out == "" {
 				out = filepath.Join(filepath.Dir(cfg.ReportPath), "cull-review")
 			}
+			if clearCache {
+				n, err := review.ClearCache(out)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "removed %d cached image(s) from %s\n", n, filepath.Join(out, review.AssetsDir))
+				if !prepare {
+					return nil
+				}
+			}
 			ro := so.out.newOutput(cmd, true) // decoding every preview takes a while on a big shoot
 			sheet, err := review.Build(rep, cfg.ReportPath, review.Options{Out: out, Concurrency: jobs, Force: force, UI: ro.UI}, ro.Log)
 			ro.Close()
 			if err != nil {
 				return err
+			}
+			if prepare {
+				fmt.Fprintf(cmd.ErrOrStderr(), "review images ready in %s; open the sheet with: cull review %q\n", filepath.Join(out, review.AssetsDir), args[0])
+				return nil
 			}
 			if static {
 				fmt.Fprintf(cmd.ErrOrStderr(), "review sheet: %s\nopen it with: open %q\n", sheet.Index, sheet.Index)
@@ -93,8 +121,10 @@ Works on scan reports too (labeling only).`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&out, "out", "", "output directory for index.html, with the images in its assets/ folder (default: cull-review next to the report)")
-	f.IntVarP(&jobs, "concurrency", "j", 4, "parallel image rendering (~200 MB RAM each)")
-	f.BoolVar(&force, "force", false, "re-render images that already exist")
+	f.IntVarP(&jobs, "concurrency", "j", min(runtime.NumCPU(), 8), "parallel image rendering (~200 MB RAM each)")
+	f.BoolVar(&force, "force", false, "render every image again, even current ones")
+	f.BoolVar(&prepare, "prepare", false, "render missing or changed images into the cache, then exit (no server)")
+	f.BoolVar(&clearCache, "clear-cache", false, "delete the sheet's cached images and exit (with --prepare: then render them again)")
 	f.BoolVar(&static, "static", false, "write an offline index.html instead of serving (labels stay in the browser)")
 	f.BoolVar(&noOpen, "no-open", false, "don't open the browser; open the printed URL yourself")
 	f.BoolVar(&noXMP, "no-xmp", false, "don't write sidecars; save only the labels log")

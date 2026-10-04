@@ -62,13 +62,14 @@ func TestBuildWritesAnOfflinePageWithImages(t *testing.T) {
 		t.Fatal(err)
 	}
 	index := sheet.Index
-	for _, f := range []string{"L1.thumb.jpg", "L1.subject.jpg", `L2<b>&".thumb.jpg`} {
+	r1, r2 := rep.Results[0], rep.Results[1]
+	for _, f := range []string{thumbName("L1", r1), subjectName("L1", r1, *r1.FocusTarget.Box), thumbName(`L2<b>&"`, r2)} {
 		if _, err := os.Stat(filepath.Join(out, "assets", f)); err != nil {
 			t.Errorf("missing %s", f)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(out, "assets", `L2<b>&".subject.jpg`)); err == nil {
-		t.Error("a frame without a focus box got a subject crop")
+	if got := len(assets(t, out)); got != 3 {
+		t.Errorf("want 3 images (no subject crop for a frame without a focus box), got %v", assets(t, out))
 	}
 	b, _ := os.ReadFile(index)
 	page := string(b)
@@ -220,7 +221,7 @@ func TestBuildMovesLooseImagesIntoAssets(t *testing.T) {
 	if _, err := Build(rep, filepath.Join(dir, "r.json"), Options{Out: out, Concurrency: 1}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(out, "assets", "L1.thumb.jpg")); string(b) != "old thumb" {
+	if b, _ := os.ReadFile(filepath.Join(out, "assets", thumbName("L1", rep.Results[0]))); string(b) != "old thumb" {
 		t.Fatalf("loose thumbnail not moved (re-rendered or missing): %q", b)
 	}
 	if _, err := os.Stat(filepath.Join(out, "L1.thumb.jpg")); err == nil {

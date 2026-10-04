@@ -58,7 +58,7 @@ func NewServer(s *Sheet, rep *report.Report, o ServeOptions) (*Server, error) {
 			if r.MovedTo != "" {
 				src = r.MovedTo
 			}
-			natives[baseName(rep.Dir, r.File)+nativeSuffix] = src
+			natives[nativeName(baseName(rep.Dir, r.File), r)] = src
 		}
 	}
 	return &Server{sheet: s, o: o, files: files, natives: natives}, nil
@@ -116,12 +116,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := filepath.Join(s.sheet.Dir, AssetsDir, name)
-	if strings.HasSuffix(name, nativeSuffix) {
-		src, ok := s.natives[name]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
+	if src, ok := s.natives[name]; ok {
 		if err := s.renderNative(src, p); err != nil {
 			http.Error(w, "loupe: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -150,11 +145,7 @@ func (s *Server) renderNative(src, p string) error {
 	if err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, p)
+	return writeAsset(p, b)
 }
 
 type state struct {

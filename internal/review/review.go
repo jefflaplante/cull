@@ -32,8 +32,6 @@ const (
 	placeholder = "/*__DATA__*/null"
 )
 
-// nativeSuffix names a frame's whole preview at native size, for the loupe.
-const nativeSuffix = ".native.jpg"
 
 // AssetsDir holds the sheet's images, beside index.html.
 const AssetsDir = "assets"
@@ -106,6 +104,13 @@ func Build(rep *report.Report, reportPath string, o Options, log io.Writer) (*Sh
 	}
 	close(jobs)
 	wg.Wait()
+	keep := map[string]bool{}
+	for _, c := range cards {
+		keep[c.Thumb], keep[c.Subject], keep[c.Native] = true, true, true
+	}
+	if n := sweep(o.Out, keep); n > 0 {
+		fmt.Fprintf(log, "removed %d stale image(s) from the sheet's cache\n", n)
+	}
 
 	folder := rep.Dir
 	if abs, err := filepath.Abs(folder); err == nil {
@@ -174,15 +179,15 @@ func makeCard(rep *report.Report, r report.Result, o Options, log io.Writer) car
 		src = r.MovedTo
 	}
 	base := baseName(rep.Dir, r.File)
-	c.Native = base + nativeSuffix
-	if name, err := image1(o, base+".thumb.jpg", func() ([]byte, error) { return thumb(src) }); err == nil {
+	c.Native = nativeName(base, r)
+	if name, err := image1(o, thumbName(base, r), base+".thumb.jpg", func() ([]byte, error) { return thumb(src) }); err == nil {
 		c.Thumb = name
 	} else {
 		fmt.Fprintf(log, "%s: thumbnail: %v\n", c.File, err)
 	}
 	if r.FocusTarget != nil && r.FocusTarget.Box != nil {
 		box := *r.FocusTarget.Box
-		if name, err := image1(o, base+".subject.jpg", func() ([]byte, error) { return subject(src, box) }); err == nil {
+		if name, err := image1(o, subjectName(base, r, box), base+".subject.jpg", func() ([]byte, error) { return subject(src, box) }); err == nil {
 			c.Subject = name
 		} else {
 			fmt.Fprintf(log, "%s: subject crop: %v\n", c.File, err)
@@ -191,24 +196,27 @@ func makeCard(rep *report.Report, r report.Result, o Options, log io.Writer) car
 	return c
 }
 
-// image1 writes one image into the assets folder unless it already exists (and
-// !Force), returning its file name there. An image left beside index.html by a
-// sheet built before assets/ is moved in rather than rendered again.
-func image1(o Options, name string, render func() ([]byte, error)) (string, error) {
+// image1 makes one image in the assets folder unless a current one is there (and
+// !Force), returning its file name there (see cache.go). An image a sheet made
+// before names carried their inputs (legacy: in assets/, or beside index.html from
+// before assets/ existed) is adopted under the new name rather than rendered again.
+func image1(o Options, name, legacy string, render func() ([]byte, error)) (string, error) {
 	p := filepath.Join(o.Out, AssetsDir, name)
-	if _, err := os.Stat(p); err != nil {
-		os.Rename(filepath.Join(o.Out, name), p) // a sheet from before assets/: keep its image
-	}
 	if !o.Force {
-		if _, err := os.Stat(p); err == nil {
+		if exists(p) {
 			return name, nil
+		}
+		for _, old := range []string{filepath.Join(o.Out, AssetsDir, legacy), filepath.Join(o.Out, legacy)} {
+			if os.Rename(old, p) == nil {
+				return name, nil
+			}
 		}
 	}
 	b, err := render()
 	if err != nil {
 		return "", err
 	}
-	return name, os.WriteFile(p, b, 0o644)
+	return name, writeAsset(p, b)
 }
 
 func thumb(path string) ([]byte, error) {
@@ -234,6 +242,11 @@ func subject(path string, box eval.NormBox) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return subjectFrom(f, box)
+}
+
+// subjectFrom is subject's crop of an already-decoded full preview.
+func subjectFrom(f *imageprep.Frame, box eval.NormBox) ([]byte, error) {
 	r := image.Rect(int(box.Left*float64(f.W)), int(box.Top*float64(f.H)), int(box.Right*float64(f.W)), int(box.Bottom*float64(f.H)))
 	t := focus.BoxTarget(r)
 	crop := focus.SubjectRect(t, f.W, f.H)

@@ -3,6 +3,9 @@ package pipeline
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -87,4 +90,26 @@ func TestDecideShowsProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.finished(t, "restore", 3)
+}
+
+// scan and judge write the review sheet's images while each preview is decoded, so
+// review has nothing left to render.
+func TestRunPrerendersReviewImages(t *testing.T) {
+	dir, b := shoot(t)
+	c := moveCfg(dir)
+	c.MoveCulled, c.WriteXMP = false, false
+	c.ReviewImages = filepath.Join(dir, "cull-review")
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatal(err)
+	}
+	ents, _ := os.ReadDir(filepath.Join(c.ReviewImages, "assets"))
+	thumbs := 0
+	for _, e := range ents {
+		if strings.Contains(e.Name(), ".thumb.") {
+			thumbs++
+		}
+	}
+	if thumbs != 3 {
+		t.Fatalf("thumbnails %d of 3: %v", thumbs, ents)
+	}
 }

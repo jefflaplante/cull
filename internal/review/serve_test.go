@@ -95,8 +95,8 @@ func TestServerAccessControl(t *testing.T) {
 		{"wrong token", "GET", "/api/labels", map[string]string{"X-Cull-Token": strings.Repeat("0", 32)}, 403},
 		{"foreign origin", "POST", "/api/labels", map[string]string{"X-Cull-Token": tok, "Origin": "http://evil.example"}, 403},
 		{"localhost", "GET", "/api/labels", map[string]string{"Host": "localhost:4567", "Origin": "http://localhost:4567", "X-Cull-Token": tok}, 200},
-		{"image", "GET", "/assets/L1.thumb.jpg", nil, 200},
-		{"image outside assets", "GET", "/L1.thumb.jpg", nil, 404},
+		{"image", "GET", "/assets/" + thumbName("L1", report.Result{}), nil, 200},
+		{"image outside assets", "GET", "/" + thumbName("L1", report.Result{}), nil, 404},
 		{"escape", "GET", "/..%2Fcull-report.json", nil, 0},
 		{"escape from assets", "GET", "/assets/..%2F..%2Fcull-report.json", nil, 0},
 		{"not an image", "GET", "/index.json", nil, 404},
@@ -251,7 +251,8 @@ func TestServerKeepsDevelopSettings(t *testing.T) {
 // and then served from the sheet's assets.
 func TestLoupeServesNativePreview(t *testing.T) {
 	dir, h, _ := serveFixture(t, false)
-	rec := call(h, "GET", "/assets/L1.native.jpg", "", nil)
+	native := nativeName("L1", report.Result{})
+	rec := call(h, "GET", "/assets/"+native, "", nil)
 	if rec.Code != 200 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
@@ -259,12 +260,12 @@ func TestLoupeServesNativePreview(t *testing.T) {
 	if err != nil || cfg.Width != 1600 || cfg.Height != 1067 {
 		t.Fatalf("decoded %+v err %v", cfg, err)
 	}
-	p := filepath.Join(dir, "cull-review", AssetsDir, "L1.native.jpg")
+	p := filepath.Join(dir, "cull-review", AssetsDir, native)
 	st1, err := os.Stat(p)
 	if err != nil {
 		t.Fatalf("not cached: %v", err)
 	}
-	call(h, "GET", "/assets/L1.native.jpg", "", nil)
+	call(h, "GET", "/assets/"+native, "", nil)
 	if st2, _ := os.Stat(p); !st2.ModTime().Equal(st1.ModTime()) {
 		t.Fatal("rendered again instead of served from disk")
 	}
@@ -282,7 +283,7 @@ func TestLoupeServesOnlyKnownFrames(t *testing.T) {
 func TestPageOffersTheLoupe(t *testing.T) {
 	_, h, _ := serveFixture(t, false)
 	body := call(h, "GET", "/", "", nil).Body.String()
-	if !strings.Contains(body, `"native":"L1.native.jpg"`) || !strings.Contains(pageTemplate, `k === "z"`) {
+	if !strings.Contains(body, `"native":"`+nativeName("L1", report.Result{})+`"`) || !strings.Contains(pageTemplate, `k === "z"`) {
 		t.Fatal("page doesn't offer the loupe")
 	}
 }

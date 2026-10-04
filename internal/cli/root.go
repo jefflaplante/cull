@@ -29,6 +29,7 @@ type sharedOpts struct {
 	faceMinQ          float64
 	saveInputs        string
 	landedWithSubject bool
+	noReviewImages    bool
 	seqGap            time.Duration
 	seqLook           float64
 	out               outputOpts
@@ -89,6 +90,7 @@ func (so *sharedOpts) registerPrep(f *pflag.FlagSet) {
 	f.Float64Var(&so.faceMinQ, "face-min-q", 80, "face detection score needed to trust a face as the focus target")
 	f.StringVar(&so.saveInputs, "save-inputs", "", "write exactly what the model sees (JPEGs + inputs.json) to this directory")
 	f.BoolVar(&so.landedWithSubject, "landed-with-subject", false, "also send \"where focus landed\" tiles when a subject crop exists (can bias the model toward texture)")
+	f.BoolVar(&so.noReviewImages, "no-review-images", false, "don't write the review sheet's images (cull-review/assets) while previews are decoded; review renders them later")
 }
 
 // registerSeq adds the grouping flags (the commands that group frames into sets).
@@ -130,6 +132,10 @@ func (so *sharedOpts) base(arg string) (pipeline.Config, error) {
 	if report == "" {
 		report = filepath.Join(dir, "cull-report.json")
 	}
+	reviewImages := filepath.Join(filepath.Dir(report), "cull-review") // where review looks by default
+	if so.noReviewImages {
+		reviewImages = ""
+	}
 	return pipeline.Config{
 		Dir:               dir,
 		Recursive:         so.recursive,
@@ -141,6 +147,7 @@ func (so *sharedOpts) base(arg string) (pipeline.Config, error) {
 		Seq:               group.Options{Gap: so.seqGap, MaxLook: so.seqLook},
 		LandedWithSubject: so.landedWithSubject,
 		SaveInputs:        saveInputs,
+		ReviewImages:      reviewImages,
 		Concurrency:       4,
 		CheckpointN:       25,
 		Log:               os.Stderr,

@@ -35,6 +35,10 @@ type Config struct {
 	ReportPath     string
 	Concurrency    int
 	DryRun         bool // extract + prepare only; no API calls
+	// ReviewImages is the review sheet's folder (cull-review beside the report): each
+	// frame's thumbnail and subject crop are written into its cache while the full
+	// preview is decoded anyway, so review renders nothing. "" = off.
+	ReviewImages string
 	Resume         bool
 	Fresh          bool // replace a report holding assessments; refused while it records moved frames
 	WriteXMP       bool

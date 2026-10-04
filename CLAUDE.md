@@ -61,7 +61,10 @@ make vet
   look to the previous frame), score order
 - `internal/rawclip` — pure-Go lossless-JPEG (SOF3) decoder; raw highlight clipping
 - `internal/review` — HTML contact sheet (index.html from embedded page.html: labels, stars,
-  filters; images in its assets/ folder) and
+  filters; images in its assets/ folder, a cache: cache.go names each image after the DNG's size+mtime,
+  the focus box and `assetVersion`, so review renders only what's missing or changed and sweeps stale ones;
+  scan/judge pre-render thumbs and subject crops via `Prerender` while the preview is decoded,
+  `--no-review-images` off; `review --prepare` / `--clear-cache` / `--force`) and
   the server `review` runs by default (serve.go: 127.0.0.1, Host/Origin/token checks, appends labels,
   optional sidecars)
 - `internal/labels` — the user's append-only JSONL labels log (last line per file wins),

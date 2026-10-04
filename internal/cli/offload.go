@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -58,52 +59,85 @@ judge it next.`,
 			}
 			po := so.out.newOutput(cmd, true) // reading the cards, or --checksum's hashing, takes a while
 			o.UI = po.UI
-			p, err := offload.MakePlan(o)
+			plans, err := offload.MakePlans(o)
 			po.Close()
 			o.UI = nil
+			w := cmd.ErrOrStderr()
 			if err != nil {
-				if p != nil {
-					fmt.Fprintln(cmd.ErrOrStderr(), p.Summary())
+				if len(plans) > 0 {
+					fmt.Fprintln(w, plansSummary(plans, o))
 				}
 				return err
 			}
 			if dryRun {
 				// The plan is a dry run's whole output, so -q doesn't hide it.
-				fmt.Fprintln(cmd.ErrOrStderr(), p.Summary())
+				fmt.Fprintln(w, plansSummary(plans, o))
 				if tags != nil {
-					fmt.Fprintln(cmd.ErrOrStderr(), "tags not stored: --dry-run writes nothing")
+					fmt.Fprintln(w, "tags not stored: --dry-run writes nothing")
 				}
 				return nil
 			}
 			out := so.out.newOutput(cmd, true)
 			defer out.Close()
-			fmt.Fprintln(out.Log, p.Summary())
-			res, runErr := offload.Run(cmd.Context(), p, out.UI)
-			out.Close()
-			w := cmd.ErrOrStderr()
-			if tags != nil {
-				if err := storeTags(so, p.Dests[0], tags); err != nil {
-					fmt.Fprintf(w, "warning: tags not stored (%v); set them with cull tag\n", err)
+			fmt.Fprintln(out.Log, plansSummary(plans, o))
+			var results []*offload.Result
+			var runErr error
+			for _, p := range plans {
+				res, err := offload.Run(cmd.Context(), p, out.UI)
+				results = append(results, res)
+				if err != nil {
+					runErr = err
+					break // Ctrl-C: the events not started stay uncopied
 				}
 			}
-			mbps := 0.0
-			if s := res.Elapsed.Seconds(); s > 0 {
-				mbps = float64(res.Bytes) / 1e6 / s
+			out.Close()
+			if tags != nil {
+				for _, p := range plans {
+					if err := storeTags(so, p.Dests[0], tags); err != nil {
+						fmt.Fprintf(w, "warning: tags not stored in %s (%v); set them with cull tag\n", p.Folder, err)
+					}
+				}
 			}
-			fmt.Fprintf(w, "\ncopied %d, skipped %d (already there), failed %d: %.1f GB in %s (%.0f MB/s, verified)\n",
-				res.Copied, res.Skipped, len(res.Failed), float64(res.Bytes)/1e9, res.Elapsed.Round(1e9), mbps)
-			if res.Safe {
-				fmt.Fprintf(w, "all %d files verified on %s: safe to format the card\n", len(p.Files), strings.Join(p.Dests, " and "))
+			safe, files := len(results) == len(plans), 0
+			for i, res := range results {
+				mbps := 0.0
+				if s := res.Elapsed.Seconds(); s > 0 {
+					mbps = float64(res.Bytes) / 1e6 / s
+				}
+				label := ""
+				if len(plans) > 1 {
+					label = plans[i].Folder + ": "
+				}
+				fmt.Fprintf(w, "\n%scopied %d, skipped %d (already there), failed %d: %.1f GB in %s (%.0f MB/s, verified)\n",
+					label, res.Copied, res.Skipped, len(res.Failed), float64(res.Bytes)/1e9, res.Elapsed.Round(1e9), mbps)
+				safe = safe && res.Safe
+				files += len(res.Plan.Files)
+			}
+			if safe {
+				if len(plans) == 1 {
+					fmt.Fprintf(w, "all %d files verified on %s: safe to format the card\n", files, strings.Join(plans[0].Dests, " and "))
+				} else {
+					fmt.Fprintf(w, "all %d files verified in %d shoot folders: safe to format the card\n", files, len(plans))
+				}
 			} else {
 				fmt.Fprintln(w, "NOT safe to format the card:")
-				for _, f := range res.Failed {
-					fmt.Fprintln(w, "  failed:", f)
+				for i, res := range results {
+					where := ""
+					if len(plans) > 1 {
+						where = " (" + plans[i].Folder + ")"
+					}
+					for _, f := range res.Failed {
+						fmt.Fprintf(w, "  failed%s: %s\n", where, f)
+					}
+					for _, s := range res.SyncErrs {
+						fmt.Fprintln(w, "  drive cache not flushed:", s)
+					}
+					if res.Unverified > 0 {
+						fmt.Fprintf(w, "  %d file(s)%s were already there but never checked against the card: rerun with --checksum\n", res.Unverified, where)
+					}
 				}
-				for _, s := range res.SyncErrs {
-					fmt.Fprintln(w, "  drive cache not flushed:", s)
-				}
-				if res.Unverified > 0 {
-					fmt.Fprintf(w, "  %d file(s) were already there but never checked against the card: rerun with --checksum\n", res.Unverified)
+				if n := len(plans) - len(results); n > 0 {
+					fmt.Fprintf(w, "  %d event(s) not started\n", n)
 				}
 				if runErr != nil {
 					fmt.Fprintln(w, "  stopped:", runErr)
@@ -117,7 +151,11 @@ judge it next.`,
 			if noScan {
 				return nil
 			}
-			return scanShoot(cmd, so, p.Dests[0])
+			var scanErr error
+			for _, p := range plans {
+				scanErr = errors.Join(scanErr, scanShoot(cmd, so, p.Dests[0]))
+			}
+			return scanErr
 		},
 	}
 	f := cmd.Flags()
@@ -128,6 +166,9 @@ judge it next.`,
 	f.BoolVar(&o.Checksum, "checksum", false, "decide what's already copied by SHA-256, not size and time")
 	f.BoolVar(&dryRun, "dry-run", false, "print the plan and exit; write nothing")
 	f.BoolVar(&noScan, "no-scan", false, "stop after copying (don't scan the shoot folder)")
+	f.BoolVar(&o.Split, "split", false, "one shoot folder per event, numbered: a capture-time gap over --split-gap, or a new day, starts the next")
+	f.DurationVar(&o.SplitGap, "split-gap", offload.DefaultSplitGap, "with --split, the capture-time gap that starts a new event")
+	f.StringSliceVar(&o.SplitAt, "split-at", nil, "start a new event at each of these files (camera order), e.g. M1103402,M1103777; for a card whose clock can't be trusted")
 	so.tags.register(f)
 	f.BoolVar(&verify, "verify", false, "re-check a shoot folder's copies against the checksums recorded when they were made")
 	return cmd
@@ -196,4 +237,38 @@ func scanShoot(cmd *cobra.Command, so *sharedOpts, folder string) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "next: cull judge --estimate %q\n", filepath.Clean(folder))
 	}
 	return err
+}
+
+// plansSummary is the plan as printed: one block per event, under a line saying how
+// the card was split when it was.
+func plansSummary(plans []*offload.Plan, o offload.Options) string {
+	if len(plans) == 1 {
+		return plans[0].Summary()
+	}
+	how := "at " + strings.Join(o.SplitAt, ", ")
+	if len(o.SplitAt) == 0 {
+		gap := o.SplitGap
+		if gap <= 0 {
+			gap = offload.DefaultSplitGap
+		}
+		how = "where capture time jumps by more than " + shortDuration(gap) + " or the day changes"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d events, split %s:\n", len(plans), how)
+	for _, p := range plans {
+		fmt.Fprintf(&b, "\nevent %d: %s\n", p.Event, p.Summary())
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// shortDuration drops a duration's trailing zero units: 2h, 1h30m, 45m.
+func shortDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }

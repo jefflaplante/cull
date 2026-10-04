@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeCard writes tiny DNGs under <tmp>/DCIM/100LEICA and returns the card root.
@@ -198,5 +199,35 @@ func TestOffloadQuietDryRunPrintsPlan(t *testing.T) {
 	out, err := run(t, "offload", "-q", "--dry-run", "--name", "Test", cardDir, dest)
 	if err != nil || !strings.Contains(out, "1 of 1 DNGs to copy") {
 		t.Fatalf("%v\n%q", err, out)
+	}
+}
+
+// --split: two events five hours apart become two numbered shoot folders, each copied,
+// verified and scanned on its own.
+func TestOffloadSplitIntoEvents(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cardDir, dest := fakeCard(t, "M1.DNG", "M2.DNG", "M3.DNG"), t.TempDir()
+	day := time.Date(2026, 10, 2, 14, 0, 0, 0, time.Local)
+	for i, n := range []string{"M1.DNG", "M2.DNG", "M3.DNG"} {
+		at := day.Add(time.Duration(i) * time.Minute)
+		if i == 2 {
+			at = day.Add(5 * time.Hour)
+		}
+		os.Chtimes(filepath.Join(cardDir, "DCIM", "100LEICA", n), at, at)
+	}
+	out, err := run(t, "offload", "--dry-run", "--split", "--name", "Test", cardDir, dest)
+	if err != nil || !strings.Contains(out, "2 events, split where capture time jumps by more than 2h") || !strings.Contains(out, "event 2: shoot folder: 2026-10-02 Test 2") {
+		t.Fatalf("dry run: %v\n%s", err, out)
+	}
+	out, err = run(t, "offload", "--split", "--name", "Test", cardDir, dest)
+	if err != nil || !strings.Contains(out, "all 3 files verified in 2 shoot folders: safe to format the card") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for folder, n := range map[string]string{"2026-10-02 Test 1": "M1.DNG", "2026-10-02 Test 2": "M3.DNG"} {
+		for _, f := range []string{n, "cull-report.json", "cull-offload.jsonl"} {
+			if _, err := os.Stat(filepath.Join(dest, folder, f)); err != nil {
+				t.Errorf("%s/%s: %v", folder, f, err)
+			}
+		}
 	}
 }

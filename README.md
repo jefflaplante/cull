@@ -159,8 +159,17 @@ Every step, with its full output and screenshots of the live progress view, is i
 
 - **The cards are only read.** Nothing on them is written, renamed or deleted.
 - **The folder date** comes from the earliest capture date. Camera clocks get set wrong,
-  so the plan says which file it came from; use `--date` to set it yourself. A run is
-  never split by day.
+  so the plan says which file it came from; use `--date` to set it yourself.
+- **One folder per event, if you ask.** A card holding several events can go into one
+  numbered shoot folder each (`2026-10-02 Smith wedding 1`, `… 2`), so each imports into
+  Capture One or Lightroom as its own set. Each event folder gets its own manifest, scan
+  and report.
+  - `--split` starts a new event wherever capture time jumps by more than `--split-gap`
+    (default 2h), or the day changes. It refuses a card whose clock wasn't running:
+    nearly every frame stamped alike.
+  - `--split-at M1103426,M1103838` starts an event at each named file instead, in camera
+    order, whatever the clock says. `--dry-run` shows the events first.
+  - Free space is checked for all events together.
 - **Planned first.** Every name, skip and refusal is decided before any byte is written:
   - a file name already in the folder with different content is refused (use `--rename`);
   - too little free space on either destination is refused.

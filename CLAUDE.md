@@ -72,7 +72,8 @@ make vet
   `WriteSidecar`) used by cull, decide, the server; apply-c1 mirrors it
 - `internal/calib` — confusion matrix, rates, sharpness-threshold sweep
 - `internal/c1` — Capture One AppleScript generator, read-only probe, osascript runner
-- `internal/offload` — `cull offload`: plan.go (hygienic card walk, one folder per run,
+- `internal/offload` — `cull offload`: plan.go (hygienic card walk, one folder per run or per event with
+  `--split` (capture-time gap or new day; refused when `clockBroken`) / `--split-at` (file names), `MakePlans`,
   names/--rename counter, skips, clashes, free space; nothing written), copy.go (single-read
   tee, SHA-256 while reading, F_NOCACHE temp, evict + mincore check, uncached verify,
   link-based no-replace rename), run.go (retries, verified-only manifest

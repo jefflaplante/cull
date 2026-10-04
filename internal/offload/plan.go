@@ -34,6 +34,12 @@ type Options struct {
 	Rename   string   // pattern with {date} {name} {orig} {n} {n:W}; "" = camera names
 	Checksum bool     // skip by SHA-256 rather than size and mtime
 	UI       ui.Sink  // progress while planning (reading the cards, --checksum's hashing); nil = none
+	// Split makes one shoot folder per event, numbered: a capture-time gap over
+	// SplitGap (0 = DefaultSplitGap), or a new day, starts the next. Refused when the
+	// capture times can't be trusted (see clockBroken).
+	Split    bool
+	SplitGap time.Duration
+	SplitAt  []string // file names (camera order) that each start a new event; for any clock
 
 	freeSpace func(path string) (uint64, error) // test hook; nil = statfs
 }
@@ -53,8 +59,13 @@ type File struct {
 	Unverified bool
 }
 
-// Plan is everything an offload will do, decided before it writes anything.
+// DefaultSplitGap is the capture-time gap that starts a new event with --split.
+const DefaultSplitGap = 2 * time.Hour
+
+// Plan is everything an offload will do, decided before it writes anything. A split
+// run has one Plan per event.
 type Plan struct {
+	Event  int      // this plan's event, 1-based, when the run is split into several; else 0
 	Folder string   // shoot folder name
 	Dests  []string // absolute shoot folders: under Dest and, with Backup, under Backup
 	Files  []File
@@ -71,12 +82,25 @@ const mtimeWindow = 2 * time.Second
 // reserve is the free space kept beyond the bytes to copy: 1% plus 512 MB.
 func reserve(n int64) uint64 { return uint64(n) + uint64(n)/100 + 512<<20 }
 
-// MakePlan scans the sources and decides every name, skip and refusal. It writes
-// nothing. When the only problem is free space, the plan comes back with the error,
-// so a dry run can still show it.
+// MakePlan plans an unsplit run (see MakePlans).
 func MakePlan(o Options) (*Plan, error) {
+	ps, err := MakePlans(o)
+	if len(ps) == 0 {
+		return nil, err
+	}
+	return ps[0], err
+}
+
+// MakePlans scans the sources, splits them into events (Split, SplitAt; one event
+// otherwise) and plans each into its own shoot folder, deciding every name, skip and
+// refusal. It writes nothing. When the only problem is free space, checked for every
+// event together, the plans come back with the error, so a dry run can still show it.
+func MakePlans(o Options) ([]*Plan, error) {
 	if len(o.Sources) == 0 || o.Dest == "" {
 		return nil, errors.New("offload needs at least one source and a destination")
+	}
+	if o.Split && len(o.SplitAt) > 0 {
+		return nil, errors.New("--split finds the events by capture time and --split-at names them yourself: pick one")
 	}
 	files, err := scan(o.Sources, o.UI)
 	if err != nil {
@@ -85,7 +109,28 @@ func MakePlan(o Options) (*Plan, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no DNGs found under %s", strings.Join(o.Sources, ", "))
 	}
-	p := &Plan{Files: files}
+	events, err := partition(files, o)
+	if err != nil {
+		return nil, err
+	}
+	var plans []*Plan
+	for i, ev := range events {
+		n := 0
+		if len(events) > 1 {
+			n = i + 1
+		}
+		p, err := planEvent(o, ev, n)
+		if err != nil {
+			return nil, err
+		}
+		plans = append(plans, p)
+	}
+	return plans, checkSpace(plans, o)
+}
+
+// planEvent plans one event's files into its shoot folder; n > 0 numbers the folder.
+func planEvent(o Options, files []File, n int) (*Plan, error) {
+	p := &Plan{Files: files, Event: n}
 	if err := p.date(o); err != nil {
 		return nil, err
 	}
@@ -93,6 +138,7 @@ func MakePlan(o Options) (*Plan, error) {
 	if o.Backup != "" {
 		p.Dests = append(p.Dests, filepath.Join(o.Backup, p.Folder))
 	}
+	var err error
 	if o.Rename != "" {
 		err = p.renamed(o)
 	} else {
@@ -106,12 +152,88 @@ func MakePlan(o Options) (*Plan, error) {
 			p.Bytes += f.Size
 		}
 	}
-	return p, p.checkSpace(o)
+	return p, nil
+}
+
+// partition splits the scanned files into events, each in camera-name order.
+func partition(files []File, o Options) ([][]File, error) {
+	switch {
+	case len(o.SplitAt) > 0:
+		starts := map[string]bool{}
+		for _, n := range o.SplitAt {
+			starts[stem(n)] = true
+		}
+		var events [][]File
+		for i, f := range files { // files are in camera-name order
+			if i == 0 || starts[stem(f.Src)] {
+				events = append(events, nil)
+			}
+			delete(starts, stem(f.Src))
+			events[len(events)-1] = append(events[len(events)-1], f)
+		}
+		if len(starts) > 0 {
+			var missing []string
+			for _, n := range o.SplitAt {
+				if starts[stem(n)] {
+					missing = append(missing, n)
+				}
+			}
+			return nil, fmt.Errorf("--split-at %s: no such file on the cards", strings.Join(missing, ", "))
+		}
+		return events, nil
+	case o.Split:
+		if same, pairs, broken := clockBroken(files); broken {
+			return nil, fmt.Errorf("capture times can't place the split: %d of %d consecutive frames share a timestamp "+
+				"(a camera clock that wasn't running?); name the first file of each later event instead, e.g. --split-at %s",
+				same, pairs, filepath.Base(files[len(files)/2].Src))
+		}
+		gap := o.SplitGap
+		if gap <= 0 {
+			gap = DefaultSplitGap
+		}
+		byTime := slices.Clone(files)
+		sort.SliceStable(byTime, func(i, j int) bool { return byTime[i].Capture.Before(byTime[j].Capture) })
+		var events [][]File
+		for i, f := range byTime {
+			if i == 0 || f.Capture.Sub(byTime[i-1].Capture) > gap ||
+				f.Capture.Format("2006-01-02") != byTime[i-1].Capture.Format("2006-01-02") {
+				events = append(events, nil)
+			}
+			events[len(events)-1] = append(events[len(events)-1], f)
+		}
+		for _, ev := range events {
+			sort.Slice(ev, func(i, j int) bool { return lessByName(ev[i], ev[j]) })
+		}
+		return events, nil
+	}
+	return [][]File{files}, nil
+}
+
+// stem is a file name without its folder or extension, lower-cased: how --split-at
+// names match ("M1103402", "m1103402.dng").
+func stem(p string) string {
+	b := filepath.Base(p)
+	return strings.ToLower(strings.TrimSuffix(b, filepath.Ext(b)))
+}
+
+// clockBroken reports capture times too uniform to split on: at least 90% of
+// consecutive frames (in camera order, at least ten pairs) share a timestamp. A
+// burst puts frames in one second, but not nearly all of a card; a clock that
+// wasn't running does (seen: 969 of 991 on an M11-P card).
+func clockBroken(files []File) (same, pairs int, broken bool) {
+	for i := 1; i < len(files); i++ {
+		pairs++
+		if files[i].Capture.Truncate(time.Second).Equal(files[i-1].Capture.Truncate(time.Second)) {
+			same++
+		}
+	}
+	return same, pairs, pairs >= 10 && same*10 >= pairs*9
 }
 
 // checkSpace makes sure each volume has room for every copy it will receive: the
-// destination and the backup on one drive need room for both.
-func (p *Plan) checkSpace(o Options) error {
+// destination and the backup on one drive need room for both, and so do all the
+// events of a split run.
+func checkSpace(plans []*Plan, o Options) error {
 	free := o.freeSpace
 	if free == nil {
 		free = statfsFree
@@ -128,9 +250,11 @@ func (p *Plan) checkSpace(o Options) error {
 	byID := map[uint64]*volume{}
 	for i, r := range roots {
 		var need int64
-		for _, f := range p.Files {
-			if slices.Contains(f.To, p.Dests[i]) {
-				need += f.Size
+		for _, p := range plans {
+			for _, f := range p.Files {
+				if slices.Contains(f.To, p.Dests[i]) {
+					need += f.Size
+				}
 			}
 		}
 		id, err := volumeID(r)
@@ -206,14 +330,17 @@ func scan(sources []string, s ui.Sink) ([]File, error) {
 			return nil, err
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		bi, bj := filepath.Base(out[i].Src), filepath.Base(out[j].Src)
-		if bi != bj {
-			return bi < bj
-		}
-		return out[i].Src < out[j].Src
-	})
+	sort.Slice(out, func(i, j int) bool { return lessByName(out[i], out[j]) })
 	return out, nil
+}
+
+// lessByName is camera order: by file name, then full path.
+func lessByName(a, b File) bool {
+	ba, bb := filepath.Base(a.Src), filepath.Base(b.Src)
+	if ba != bb {
+		return ba < bb
+	}
+	return a.Src < b.Src
 }
 
 func (p *Plan) date(o Options) error {
@@ -239,6 +366,9 @@ func (p *Plan) date(o Options) error {
 			return fmt.Errorf("--name %q: no path separators or colons", o.Name)
 		}
 		p.Folder += " " + o.Name
+	}
+	if p.Event > 0 {
+		p.Folder += " " + strconv.Itoa(p.Event)
 	}
 	return nil
 }

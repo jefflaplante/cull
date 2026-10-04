@@ -19,6 +19,7 @@ import (
 	"github.com/jefflaplante/cull/internal/focus"
 	"github.com/jefflaplante/cull/internal/llm"
 	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/ui"
 )
 
 // BatchClient is the Message Batches API (implemented by *llm.Anthropic).
@@ -245,6 +246,8 @@ func evalRequest(cfg Config, p *prepared, target *focus.Target) (llm.BatchReques
 // prepareRound prepares frames in parallel, records each in the state, and
 // returns the requests to send.
 func prepareRound(cfg Config, files []string, st *batchState, build func(*prepared) (llm.BatchRequest, string, bool)) []llm.BatchRequest {
+	t := ui.Track(cfg.UI, "prepare", "preparing frames for the batch", "frames", len(files))
+	defer t.Done()
 	var mu sync.Mutex
 	var reqs []llm.BatchRequest
 	jobs := make(chan string)
@@ -264,6 +267,7 @@ func prepareRound(cfg Config, files []string, st *batchState, build func(*prepar
 				case err == nil:
 					req, stage, ok = build(p)
 				}
+				t.Add(1)
 				mu.Lock()
 				st.Frames[frameID(path)] = &batchFrame{Result: p.res, Orientation: p.orientation, Stage: stage}
 				if ok {
@@ -288,10 +292,13 @@ func prepareRound(cfg Config, files []string, st *batchState, build func(*prepar
 // re-run command (judge's "--batch --resume", cull rank's own hint): submitChunk
 // itself doesn't know which command called it, so it never hard-codes one.
 func submit(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchRecord, reqs []llm.BatchRequest, what string, round int, rerun string, save func() error) error {
+	t := ui.Track(cfg.UI, "upload", "uploading the batch", "requests", len(reqs))
+	defer t.Done()
 	for _, chunk := range chunkRequests(cfg, reqs) {
 		if err := submitChunk(ctx, cfg, client, recs, chunk, what, round, rerun, save); err != nil {
 			return err
 		}
+		t.Add(len(chunk))
 	}
 	return nil
 }
@@ -397,13 +404,29 @@ func collect(ctx context.Context, cfg Config, client BatchClient, st *batchState
 }
 
 // await polls batch id every cfg.BatchPoll until it ends. Once ctx is cancelled it
-// returns ctx's error.
+// returns ctx's error. The wait shows as a stage: requests finished out of the
+// batch's total, with the live view's spinner turning between polls.
 func await(ctx context.Context, cfg Config, client BatchClient, id string) (llm.BatchStatus, error) {
+	var t *ui.Tracker
+	var shown int
+	defer func() { t.Done() }()
 	for {
 		status, err := client.BatchStatus(ctx, id)
 		if err != nil {
 			return status, fmt.Errorf("batch %s: %w", id, err)
 		}
+		total, finished := 0, 0
+		for k, n := range status.Counts {
+			total += n
+			if k != "processing" {
+				finished += n
+			}
+		}
+		if t == nil {
+			t = ui.Track(cfg.UI, "batch", "waiting for the batch (Ctrl-C is safe; --resume re-attaches)", "requests", total)
+		}
+		t.Add(finished - shown)
+		shown = max(shown, finished)
 		if status.Ended {
 			return status, nil
 		}

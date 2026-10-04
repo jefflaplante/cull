@@ -67,10 +67,12 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 			if err != nil {
 				return err
 			}
+			out := so.out.newOutput(cmd, true) // looks, sidecars and moves can take a while
 			sum, err := pipeline.Decide(cmd.Context(), cfg.ReportPath, pipeline.DecideOptions{
 				Dir: cfg.Dir, Policy: p, WriteXMP: writeXMP, XMPDevelop: xmpDevelop, OverwriteXMP: overwrite, MoveCulled: moveC, Sort: sortF,
-				Seq: cfg.Seq, Labels: lab,
-			}, cmd.ErrOrStderr())
+				Seq: cfg.Seq, Labels: lab, UI: out.UI,
+			}, out.Log)
+			out.Close()
 			if err != nil {
 				return err
 			}

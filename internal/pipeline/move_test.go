@@ -178,7 +178,7 @@ func TestRestoreUndoesTheMove(t *testing.T) {
 	}
 
 	var log bytes.Buffer
-	n, err := Restore(c.ReportPath, "", &log)
+	n, err := Restore(c.ReportPath, "", &log, nil)
 	if err != nil || n != 1 {
 		t.Fatalf("restored %d, err %v\n%s", n, err, log.String())
 	}
@@ -192,7 +192,7 @@ func TestRestoreUndoesTheMove(t *testing.T) {
 	if r := result(t, saved, "L1000001.DNG"); r.MovedTo != "" {
 		t.Fatalf("moved_to not cleared: %q", r.MovedTo)
 	}
-	if n, err := Restore(c.ReportPath, "", io.Discard); err != nil || n != 0 {
+	if n, err := Restore(c.ReportPath, "", io.Discard, nil); err != nil || n != 0 {
 		t.Fatalf("second restore: %d, %v", n, err)
 	}
 }
@@ -205,7 +205,7 @@ func TestRestoreNeverOverwrites(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(dir, "L1000001.DNG"), []byte("new file at the old path"), 0o644)
 	var log bytes.Buffer
-	if n, err := Restore(c.ReportPath, "", &log); err != nil || n != 0 {
+	if n, err := Restore(c.ReportPath, "", &log, nil); err != nil || n != 0 {
 		t.Fatalf("restored %d, err %v", n, err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, "L1000001.DNG")); string(got) != "new file at the old path" {
@@ -245,7 +245,7 @@ func TestRestoreAdoptsUnrecordedMove(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	n, err := Restore(filepath.Join(dir, "r.json"), "", io.Discard)
+	n, err := Restore(filepath.Join(dir, "r.json"), "", io.Discard, nil)
 	if err != nil || n != 1 {
 		t.Fatalf("restored %d, err %v", n, err)
 	}
@@ -286,7 +286,7 @@ func TestRestoreForgetsAlreadyRestoredMove(t *testing.T) {
 	os.Rename(filepath.Join(culled, "L1000001.DNG"), filepath.Join(dir, "L1000001.DNG"))
 	os.Rename(filepath.Join(culled, "L1000001.xmp"), filepath.Join(dir, "L1000001.xmp"))
 	var log bytes.Buffer
-	if _, err := Restore(filepath.Join(dir, "r.json"), "", &log); err != nil {
+	if _, err := Restore(filepath.Join(dir, "r.json"), "", &log, nil); err != nil {
 		t.Fatal(err)
 	}
 	rep, _ := report.Load(filepath.Join(dir, "r.json"))
@@ -382,7 +382,7 @@ func TestReconcileNeverAdoptsAStranger(t *testing.T) {
 	os.MkdirAll(culled, 0o755)
 	os.Remove(filepath.Join(dir, "L1000001.DNG"))
 	os.WriteFile(filepath.Join(culled, "L1000001.DNG"), []byte("someone else's file"), 0o644)
-	if n, err := Restore(filepath.Join(dir, "r.json"), "", io.Discard); err != nil || n != 0 {
+	if n, err := Restore(filepath.Join(dir, "r.json"), "", io.Discard, nil); err != nil || n != 0 {
 		t.Fatalf("restored %d, err %v", n, err)
 	}
 	if exists(filepath.Join(dir, "L1000001.DNG")) {

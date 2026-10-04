@@ -79,7 +79,11 @@ make vet
 - `internal/report` — JSON source of truth (schema v4); `Tags` (the shoot's project/event/
   location/keywords, merged per run by `MergeTags`, changed by `cull tag`, cli/tags.go)
 - `internal/ui` — verbosity levels and progress events (`Sink`): plain lines, or the Bubble Tea
-  live view on an interactive terminal (live.go); `-q`/`-v`/`--debug`/`--plain` in cli/output.go
+  live view on an interactive terminal (live.go); `-q`/`-v`/`--debug`/`--plain` in cli/output.go.
+  Every step that can take a while is a stage (`ui.Track`): sidecars, sort/move, restore, looks,
+  review's render, batch prepare/upload/wait, offload's plan/checksum/flush, `apply-c1 --run`. Active
+  stages spin and show elapsed time, so an open-ended wait never looks hung; plain output announces
+  a described stage at the normal level
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default
 - `internal/config` — API key resolution
 - `site/` — the GitHub Pages site (`index.html` overview, `usage.html` walkthrough, shared

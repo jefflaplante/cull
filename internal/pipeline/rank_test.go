@@ -139,7 +139,7 @@ func TestRankReadsFramesWhereTheyLiveAndFillsLooks(t *testing.T) {
 	for i := range rep.Results {
 		rep.Results[i].Look = ""
 	}
-	if n, err := fillLooks(context.Background(), rep, io.Discard); n != 2 || err != nil || rep.Results[0].Look == "" {
+	if n, err := fillLooks(context.Background(), rep, io.Discard, nil); n != 2 || err != nil || rep.Results[0].Look == "" {
 		t.Fatalf("filled %d, %v", n, err)
 	}
 	_ = c
@@ -158,7 +158,7 @@ func TestFillLooksLogsProgress(t *testing.T) {
 		rep.Results = append(rep.Results, report.Result{File: p, Preview: &report.PreviewInfo{Width: 1600, Height: 1067, Orientation: 1}})
 	}
 	var buf bytes.Buffer
-	filled, err := fillLooks(context.Background(), rep, &buf)
+	filled, err := fillLooks(context.Background(), rep, &buf, nil)
 	if err != nil || filled != n {
 		t.Fatalf("filled %d/%d, err %v", filled, n, err)
 	}
@@ -173,7 +173,7 @@ func TestFillLooksLogsProgress(t *testing.T) {
 	}
 
 	// nil-safe: no writer, nothing left to fill.
-	if _, err := fillLooks(context.Background(), rep, nil); err != nil {
+	if _, err := fillLooks(context.Background(), rep, nil, nil); err != nil {
 		t.Fatalf("nil writer: %v", err)
 	}
 }
@@ -219,7 +219,7 @@ func TestRankImagesSizesAndMovedFrames(t *testing.T) {
 
 	rep.Results[0] = r
 	rep.Results[0].Look, rep.Results[1].Look = "", ""
-	if n, err := fillLooks(context.Background(), rep, io.Discard); n != 2 || err != nil || rep.Results[0].Look == "" {
+	if n, err := fillLooks(context.Background(), rep, io.Discard, nil); n != 2 || err != nil || rep.Results[0].Look == "" {
 		t.Fatalf("filled %d (%v), the moved frame too", n, err)
 	}
 }
@@ -252,7 +252,7 @@ func TestRankImageWorkHonoursCancel(t *testing.T) {
 	for i := range rep.Results { // a v3 report: looks to compute
 		rep.Results[i].Look = ""
 	}
-	if n, err := fillLooks(ctx, rep, io.Discard); n != 0 || !errors.Is(err, context.Canceled) || rep.Results[0].Look != "" {
+	if n, err := fillLooks(ctx, rep, io.Discard, nil); n != 0 || !errors.Is(err, context.Canceled) || rep.Results[0].Look != "" {
 		t.Fatalf("fillLooks: %d, %v", n, err)
 	}
 	if err := rep.Save(c.ReportPath); err != nil {

@@ -224,7 +224,7 @@ const lookProgressEvery = 50
 // On real DNGs this is ~1s/frame (a full-preview decode), so a large schema-v3
 // report can spend many silent minutes here: log progresses every
 // lookProgressEvery frames to w, which may be nil (io.Discard).
-func fillLooks(ctx context.Context, rep *report.Report, w io.Writer) (int, error) {
+func fillLooks(ctx context.Context, rep *report.Report, w io.Writer, s ui.Sink) (int, error) {
 	if w == nil {
 		w = io.Discard
 	}
@@ -236,12 +236,18 @@ func fillLooks(ctx context.Context, rep *report.Report, w io.Writer) (int, error
 		}
 	}
 	n := 0
+	if len(todo) == 0 {
+		return 0, nil
+	}
+	t := ui.Track(s, "looks", "computing looks from the DNGs (an older report)", "frames", len(todo))
+	defer t.Done()
 	for _, i := range todo {
 		if err := ctx.Err(); err != nil {
 			return n, err
 		}
 		r := &rep.Results[i]
 		f, err := decodeWhereItLives(*r)
+		t.Add(1)
 		if err != nil {
 			continue
 		}
@@ -304,7 +310,7 @@ func rank(ctx context.Context, cfg Config, ex rankExec, force bool) (*report.Rep
 	if cfg.pinner != nil && rep.ResolvedModel != "" {
 		cfg.pinner.Pin(rep.ResolvedModel) // rank with the model the frames were judged with
 	}
-	n, err := fillLooks(ctx, rep, log)
+	n, err := fillLooks(ctx, rep, log, cfg.UI)
 	if n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
 	}

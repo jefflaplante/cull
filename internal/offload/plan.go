@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/jefflaplante/cull/internal/dng"
+	"github.com/jefflaplante/cull/internal/ui"
 )
 
 // Options describe one offload run.
@@ -32,6 +33,7 @@ type Options struct {
 	Date     string   // YYYY-MM-DD; "" = the earliest capture date in the run
 	Rename   string   // pattern with {date} {name} {orig} {n} {n:W}; "" = camera names
 	Checksum bool     // skip by SHA-256 rather than size and mtime
+	UI       ui.Sink  // progress while planning (reading the cards, --checksum's hashing); nil = none
 
 	freeSpace func(path string) (uint64, error) // test hook; nil = statfs
 }
@@ -76,7 +78,7 @@ func MakePlan(o Options) (*Plan, error) {
 	if len(o.Sources) == 0 || o.Dest == "" {
 		return nil, errors.New("offload needs at least one source and a destination")
 	}
-	files, err := scan(o.Sources)
+	files, err := scan(o.Sources, o.UI)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +163,9 @@ func (p *Plan) checkSpace(o Options) error {
 // skipping dot-files and dot-directories (.Trashes, .Spotlight-V100, .fseventsd,
 // AppleDouble ._ files), in camera-name order: file numbers are the camera's own
 // order, and unlike capture times they survive a clock set wrong.
-func scan(sources []string) ([]File, error) {
+func scan(sources []string, s ui.Sink) ([]File, error) {
+	t := ui.Track(s, "plan", "reading the cards", "files", 0)
+	defer t.Done()
 	var out []File
 	for _, root := range sources {
 		root, err := filepath.Abs(root)
@@ -195,6 +199,7 @@ func scan(sources []string) ([]File, error) {
 				}
 			}
 			out = append(out, f)
+			t.Add(1)
 			return nil
 		})
 		if err != nil {
@@ -300,8 +305,14 @@ func (p *Plan) cameraNames(o Options) error {
 		}
 	}
 	byName := map[string]string{}
+	var t *ui.Tracker
+	if o.Checksum { // every file already there is hashed on the card and on the disk
+		t = ui.Track(o.UI, "checksum", "comparing what's already copied by SHA-256", "files", len(p.Files))
+		defer t.Done()
+	}
 	for i := range p.Files {
 		f := &p.Files[i]
+		t.Add(1)
 		f.Name = filepath.Base(f.Src)
 		key := strings.ToLower(f.Name)
 		if other, ok := byName[key]; ok {
@@ -404,8 +415,14 @@ func (p *Plan) renamed(o Options) error {
 			recorded[i][strings.ToLower(e.Orig)+"\x00"+strconv.FormatInt(e.Size, 10)] = e
 		}
 	}
+	var t *ui.Tracker
+	if o.Checksum {
+		t = ui.Track(o.UI, "checksum", "comparing what's already copied by SHA-256", "files", len(p.Files))
+		defer t.Done()
+	}
 	for i := range p.Files {
 		f := &p.Files[i]
+		t.Add(1)
 		orig := filepath.Base(f.Src)
 		key := strings.ToLower(orig) + "\x00" + strconv.FormatInt(f.Size, 10)
 		matches := func(e Entry) bool {

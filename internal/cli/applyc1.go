@@ -9,6 +9,7 @@ import (
 	"github.com/jefflaplante/cull/internal/c1"
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/ui"
 )
 
 func newApplyC1Cmd(so *sharedOpts) *cobra.Command {
@@ -67,7 +68,13 @@ things before anything is written.`,
 				fmt.Fprint(cmd.OutOrStdout(), script)
 				return nil
 			}
+			// osascript reports nothing until Capture One has run the whole script, which
+			// takes a while on a big catalogue: a spinner and the elapsed time meanwhile.
+			ro := so.out.newOutput(cmd, true)
+			t := ui.Track(ro.UI, "apply-c1", "running the script in Capture One", "", 0)
 			out, err := c1.Run(osascript, script)
+			t.Done()
+			ro.Close()
 			fmt.Fprint(cmd.OutOrStdout(), out)
 			return err
 		},

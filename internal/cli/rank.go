@@ -122,7 +122,11 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 			cfg.Effort = o.effort
 			price, priced := llm.PriceFor(o.backend, o.model)
 			if o.estimate || priced {
-				sets, calls, filled, cerr := pipeline.RankCalls(cmd.Context(), rep, cfg, o.force, cmd.ErrOrStderr())
+				eo := so.out.newOutput(cmd, true) // an older report's looks are a slow DNG pass
+				ecfg := cfg
+				ecfg.UI = eo.UI
+				sets, calls, filled, cerr := pipeline.RankCalls(cmd.Context(), rep, ecfg, o.force, eo.Log)
+				eo.Close()
 				if filled > 0 {
 					fmt.Fprintf(cmd.ErrOrStderr(), "computed the look of %d frame(s) from their DNGs\n", filled)
 					if serr := rep.Save(cfg.ReportPath); serr != nil {

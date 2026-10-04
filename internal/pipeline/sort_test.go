@@ -128,7 +128,7 @@ func TestRestoreFromSortFolders(t *testing.T) {
 	// one frame moved by hand between sort folders: still restored
 	os.Rename(filepath.Join(dir, KeepDir, "L1000002.DNG"), filepath.Join(dir, ReviewDir, "L1000002.DNG"))
 	os.Rename(filepath.Join(dir, KeepDir, "L1000002.xmp"), filepath.Join(dir, ReviewDir, "L1000002.xmp"))
-	n, err := Restore(c.ReportPath, dir, io.Discard)
+	n, err := Restore(c.ReportPath, dir, io.Discard, nil)
 	if err != nil || n != 3 {
 		t.Fatalf("restored %d, %v", n, err)
 	}

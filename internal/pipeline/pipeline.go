@@ -679,10 +679,11 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 		}
 	}
 	if cfg.WriteXMP {
-		o := DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP, Labels: lab}
+		o := DecideOptions{XMPDevelop: cfg.XMPDevelop, OverwriteXMP: cfg.OverwriteXMP, Labels: lab, UI: cfg.UI}
+		var todo []*report.Result
 		for i := range rep.Results {
 			if changed[i] {
-				writeDecidedSidecar(&rep.Results[i], o, rep.Tags)
+				todo = append(todo, &rep.Results[i])
 			}
 		}
 		// finish() (stages.go) writes each frame's sidecar during processing, before
@@ -696,9 +697,10 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 				continue
 			}
 			if _, mine := lab[filepath.Base(r.File)]; r.Group != nil || mine {
-				writeDecidedSidecar(r, o, rep.Tags)
+				todo = append(todo, r)
 			}
 		}
+		writeSidecars(todo, o, rep.Tags)
 	}
 	if cfg.pinner != nil {
 		if m := cfg.pinner.Resolved(); m != "" {
@@ -714,11 +716,11 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 		}
 		// After a quota stop or Ctrl-C too: those decisions are final.
 		if cfg.Sort {
-			n := place(rep, lab, placeSorted, cfg.warnWriter(), true)
-			if n += place(rep, lab, placeSorted, cfg.warnWriter(), false); n > 0 {
+			n := placeShown(rep, lab, placeSorted, cfg.warnWriter(), true, cfg.UI)
+			if n += placeShown(rep, lab, placeSorted, cfg.warnWriter(), false, cfg.UI); n > 0 {
 				cfg.note(ui.Quiet, "sorted %d frame(s) into %s/, %s/ and %s/ (undo: cull restore %s)", n, KeepDir, ReviewDir, CullDir, cfg.Dir)
 			}
-		} else if n := moveCulled(rep, lab, cfg.warnWriter()); n > 0 {
+		} else if n := moveCulled(rep, lab, cfg.warnWriter(), cfg.UI); n > 0 {
 			cfg.note(ui.Quiet, "moved %d culled frame(s) into %s/ (undo: cull restore %s)", n, CulledDir, cfg.Dir)
 		}
 	}

@@ -62,13 +62,48 @@ type Note struct {
 	Text  string
 }
 
-// Stage is a stage starting (Total set, Add 0), advancing (Add > 0) or finishing (Done).
+// Stage is a stage starting (Start, or Total set with Add 0), advancing (Add > 0) or
+// finishing (Done).
 type Stage struct {
-	Name  string // "judge", "scan", "rank", "offload"
+	Name  string // "judge", "scan", "rank", "offload", "sidecars", "batch"
+	Text  string // what it does, for plain output ("writing sidecars"); "" = verbose-only
 	Unit  string // "frames", "sets", "bytes"
 	Total int64  // 0 = unknown
 	Add   int64
+	Start bool // begins (again): resets the stage's count and clock
 	Done  bool
+}
+
+// Tracker reports one stage's progress on a sink. Track with a nil sink returns a nil
+// *Tracker, whose methods do nothing, so callers needn't check.
+type Tracker struct {
+	s    Sink
+	name string
+}
+
+// Track starts a stage: name labels it in the live view, text says what it does in
+// plain output, total is how many units it will do (0 = unknown: a spinner and the
+// elapsed time).
+func Track(s Sink, name, text, unit string, total int) *Tracker {
+	if s == nil {
+		return nil
+	}
+	s.Emit(Event{Stage: &Stage{Name: name, Text: text, Unit: unit, Total: int64(total), Start: true}})
+	return &Tracker{s: s, name: name}
+}
+
+// Add advances the stage by n units.
+func (t *Tracker) Add(n int) {
+	if t != nil && n > 0 {
+		t.s.Emit(Event{Stage: &Stage{Name: t.name, Add: int64(n)}})
+	}
+}
+
+// Done finishes the stage.
+func (t *Tracker) Done() {
+	if t != nil {
+		t.s.Emit(Event{Stage: &Stage{Name: t.name, Done: true}})
+	}
 }
 
 // Frame is one frame's result: its summary line, and what it adds to the tallies.

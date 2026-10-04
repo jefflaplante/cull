@@ -56,7 +56,11 @@ judge it next.`,
 			if err != nil {
 				return err
 			}
+			po := so.out.newOutput(cmd, true) // reading the cards, or --checksum's hashing, takes a while
+			o.UI = po.UI
 			p, err := offload.MakePlan(o)
+			po.Close()
+			o.UI = nil
 			if err != nil {
 				if p != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), p.Summary())

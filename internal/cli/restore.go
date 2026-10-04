@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jefflaplante/cull/internal/pipeline"
+	"github.com/jefflaplante/cull/internal/ui"
 )
 
 func newRestoreCmd(so *sharedOpts) *cobra.Command {
@@ -24,7 +25,9 @@ is listed. To keep some frames where they are, move the others back by hand inst
 			if err != nil {
 				return err
 			}
-			n, err := pipeline.Restore(cfg.ReportPath, cfg.Dir, cmd.ErrOrStderr())
+			out := so.out.newOutput(cmd, true)
+			n, err := pipeline.Restore(cfg.ReportPath, cfg.Dir, ui.LineWriter(out.UI, ui.Quiet, ui.Warn), out.UI)
+			out.Close()
 			if err != nil {
 				return err
 			}

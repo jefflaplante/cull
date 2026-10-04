@@ -75,7 +75,9 @@ Works on scan reports too (labeling only).`,
 			if out == "" {
 				out = filepath.Join(filepath.Dir(cfg.ReportPath), "cull-review")
 			}
-			sheet, err := review.Build(rep, cfg.ReportPath, review.Options{Out: out, Concurrency: jobs, Force: force}, cmd.ErrOrStderr())
+			ro := so.out.newOutput(cmd, true) // decoding every preview takes a while on a big shoot
+			sheet, err := review.Build(rep, cfg.ReportPath, review.Options{Out: out, Concurrency: jobs, Force: force, UI: ro.UI}, ro.Log)
+			ro.Close()
 			if err != nil {
 				return err
 			}

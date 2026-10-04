@@ -107,12 +107,16 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 		emit(ui.Event{Note: &ui.Note{Level: ui.Verbose, Text: fmt.Sprintf("%s → %s (sha256 %s…)", filepath.Base(f.Src), f.Name, hexOf(sum[:4]))}})
 	}
 	// The drive's own cache, flushed once per destination: fsync stops at the drive.
+	// That can take a few seconds after a big copy, so it shows as a stage.
+	ft := ui.Track(sink, "flush", "flushing the drive's write cache", "drives", len(p.Dests))
 	for _, d := range p.Dests {
 		if err := flushDrive(d); err != nil {
 			res.SyncErrs = append(res.SyncErrs, d+": "+err.Error())
 			warn("couldn't flush %s's drive cache: %v", d, err)
 		}
+		ft.Add(1)
 	}
+	ft.Done()
 	res.Elapsed = time.Since(start)
 	res.Safe = ctx.Err() == nil && len(res.Failed) == 0 && len(res.SyncErrs) == 0 &&
 		res.Unverified == 0 && res.Copied+res.Skipped == len(p.Files)

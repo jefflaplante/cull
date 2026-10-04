@@ -12,6 +12,7 @@ import (
 	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/ui"
 	"github.com/jefflaplante/cull/internal/xmp"
 )
 
@@ -26,6 +27,7 @@ type DecideOptions struct {
 	Sort         bool                    // sync keep/, review/, cull/ with the effective verdicts
 	Seq          group.Options           // sequences of similar frames; Seq.Gap 0 = no grouping
 	Labels       map[string]labels.Entry // the user's labels by base name; nil = the model's verdicts alone
+	UI           ui.Sink                 // progress of the slow steps (looks, sidecars, moves); nil = none
 }
 
 // DecideSummary reports what changed.
@@ -57,7 +59,7 @@ func Decide(ctx context.Context, reportPath string, o DecideOptions, log io.Writ
 	if rep.Relocate(reportPath, o.Dir) {
 		fmt.Fprintf(log, "the report's frames moved to %s (the folder was renamed): using their new paths\n", o.Dir)
 	}
-	n, err := fillLooks(ctx, rep, log)
+	n, err := fillLooks(ctx, rep, log, o.UI)
 	if n > 0 {
 		fmt.Fprintf(log, "computed the look of %d frame(s) from their DNGs\n", n)
 	}
@@ -123,22 +125,38 @@ func redecide(rep *report.Report, o DecideOptions, log io.Writer, between func()
 		mode = placeSorted
 	}
 	if mode != placeNone { // home first, so sidecars are then written where frames live
-		sum.Restored = place(rep, o.Labels, mode, log, true)
+		sum.Restored = placeShown(rep, o.Labels, mode, log, true, o.UI)
 	}
 	if o.WriteXMP {
+		var todo []*report.Result
 		for i := range rep.Results {
 			r := &rep.Results[i]
 			// Junk frames have a decision but no assessment; their sidecar follows it too.
 			if r.Error != "" || (r.Evaluation == nil && (r.Junk == nil || r.Decision == "")) {
 				continue
 			}
-			writeDecidedSidecar(r, o, rep.Tags)
+			todo = append(todo, r)
 		}
+		writeSidecars(todo, o, rep.Tags)
 	}
 	if mode != placeNone {
-		sum.Moved = place(rep, o.Labels, mode, log, false)
+		sum.Moved = placeShown(rep, o.Labels, mode, log, false, o.UI)
 	}
 	return sum, nil
+}
+
+// writeSidecars writes each frame's sidecar (writeDecidedSidecar), with progress on
+// o.UI: on a slow drive a thousand sidecars take a while.
+func writeSidecars(rs []*report.Result, o DecideOptions, tags *report.Tags) {
+	if len(rs) == 0 {
+		return
+	}
+	t := ui.Track(o.UI, "sidecars", "writing sidecars", "files", len(rs))
+	defer t.Done()
+	for _, r := range rs {
+		writeDecidedSidecar(r, o, tags)
+		t.Add(1)
+	}
 }
 
 // writeDecidedSidecar writes the frame's sidecar where the frame currently lives,

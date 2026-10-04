@@ -458,7 +458,7 @@ func TestMovedForeignSidecarStaysForeign(t *testing.T) {
 	if got, _ := os.ReadFile(moved); string(got) != "foreign" {
 		t.Fatalf("decide overwrote a foreign sidecar that travelled with its frame: %q", got)
 	}
-	if _, err := Restore(c.ReportPath, "", io.Discard); err != nil {
+	if _, err := Restore(c.ReportPath, "", io.Discard, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Decide(context.Background(), c.ReportPath, opts, io.Discard); err != nil {

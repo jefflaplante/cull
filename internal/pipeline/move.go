@@ -11,6 +11,7 @@ import (
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/ui"
 	"github.com/jefflaplante/cull/internal/xmp"
 )
 
@@ -67,22 +68,15 @@ func want(r report.Result, lab labels.Entry, mode placement) string {
 // result; a frame that can't move stays put with the reason in Fixups and a line on
 // log. Nothing is deleted or overwritten; `cull restore` reverses it. Returns how
 // many moved.
-func place(rep *report.Report, lab map[string]labels.Entry, mode placement, log io.Writer, toHome bool) int {
+func place(rep *report.Report, lab map[string]labels.Entry, mode placement, log io.Writer, toHome bool, t *ui.Tracker) int {
 	n := 0
 	for i := range rep.Results {
 		r := &rep.Results[i]
-		reconcileMove(r)
-		if r.Error != "" {
+		w, cur, src, ok := placeTarget(r, lab, mode, toHome)
+		if !ok {
 			continue
 		}
-		w := want(*r, lab[filepath.Base(r.File)], mode)
-		cur, src := "", r.File
-		if r.MovedTo != "" {
-			cur, src = filepath.Base(filepath.Dir(r.MovedTo)), r.MovedTo
-		}
-		if w == cur || toHome != (w == "") {
-			continue
-		}
+		t.Add(1)
 		dst := r.File
 		if w != "" {
 			dst = filepath.Join(filepath.Dir(r.File), w, filepath.Base(r.File))
@@ -106,10 +100,50 @@ func place(rep *report.Report, lab map[string]labels.Entry, mode placement, log 
 	return n
 }
 
+// placeTarget is where mode wants r (w: "" = the shoot folder, else a folder name),
+// which folder it is in now (cur) and its path (src); ok is false when this pass
+// leaves it where it is: an error, already in place, or a move for the other pass.
+func placeTarget(r *report.Result, lab map[string]labels.Entry, mode placement, toHome bool) (w, cur, src string, ok bool) {
+	reconcileMove(r)
+	if r.Error != "" {
+		return "", "", "", false
+	}
+	w = want(*r, lab[filepath.Base(r.File)], mode)
+	cur, src = "", r.File
+	if r.MovedTo != "" {
+		cur, src = filepath.Base(filepath.Dir(r.MovedTo)), r.MovedTo
+	}
+	return w, cur, src, w != cur && toHome == (w == "")
+}
+
+// placeShown is place with progress on s: the frames this pass will move are counted
+// first, so the stage has a total (none to move: no stage).
+func placeShown(rep *report.Report, lab map[string]labels.Entry, mode placement, log io.Writer, toHome bool, s ui.Sink) int {
+	total := 0
+	for i := range rep.Results {
+		if _, _, _, ok := placeTarget(&rep.Results[i], lab, mode, toHome); ok {
+			total++
+		}
+	}
+	if total == 0 {
+		return 0
+	}
+	name, text := "sort", "sorting frames into keep/, review/ and cull/"
+	switch {
+	case toHome:
+		name, text = "home", "moving frames back into the shoot folder"
+	case mode == placeCulled:
+		name, text = "move", "moving culls into culled/"
+	}
+	t := ui.Track(s, name, text, "frames", total)
+	defer t.Done()
+	return place(rep, lab, mode, log, toHome, t)
+}
+
 // moveCulled moves every frame whose effective verdict is cull, and that isn't
 // moved yet, into CulledDir beside it (see place).
-func moveCulled(rep *report.Report, lab map[string]labels.Entry, log io.Writer) int {
-	return place(rep, lab, placeCulled, log, false)
+func moveCulled(rep *report.Report, lab map[string]labels.Entry, log io.Writer, s ui.Sink) int {
+	return placeShown(rep, lab, placeCulled, log, false, s)
 }
 
 // Restore moves every frame recorded as moved back to its original path (under
@@ -117,7 +151,7 @@ func moveCulled(rep *report.Report, lab map[string]labels.Entry, log io.Writer) 
 // its sidecar, clears the record, saves the report, and removes culled folders
 // left empty. It never overwrites: a frame whose original path is taken again
 // stays in the culled folder and is reported.
-func Restore(reportPath, dir string, log io.Writer) (int, error) {
+func Restore(reportPath, dir string, log io.Writer, s ui.Sink) (int, error) {
 	rep, err := report.Load(reportPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -128,10 +162,22 @@ func Restore(reportPath, dir string, log io.Writer) (int, error) {
 	rep.Relocate(reportPath, dir) // a renamed shoot folder: its culled/ moved with it
 	n := 0
 	dirs := map[string]bool{}
+	moved := 0
+	for _, r := range rep.Results {
+		if r.MovedTo != "" {
+			moved++
+		}
+	}
+	var t *ui.Tracker
+	if moved > 0 {
+		t = ui.Track(s, "restore", "moving frames back to where they were", "frames", moved)
+		defer t.Done()
+	}
 	for i := range rep.Results {
 		r := &rep.Results[i]
 		if r.MovedTo != "" {
 			dirs[filepath.Dir(r.MovedTo)] = true
+			t.Add(1)
 		}
 		// Moved or restored by a run whose report was never saved, or moved by hand
 		// between folders: restore from wherever it is now.

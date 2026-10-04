@@ -27,7 +27,7 @@ import (
 // sidecar, moves a file, or changes rep's own Sets or decisions — only rep's
 // Results' Look field, via fillLooks.
 func RankCalls(ctx context.Context, rep *report.Report, cfg Config, force bool, log io.Writer) (sets, calls, filled int, err error) {
-	filled, err = fillLooks(ctx, rep, log)
+	filled, err = fillLooks(ctx, rep, log, cfg.UI)
 	if err != nil {
 		return 0, 0, filled, err
 	}

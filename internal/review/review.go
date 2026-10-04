@@ -20,6 +20,7 @@ import (
 	"github.com/jefflaplante/cull/internal/focus"
 	"github.com/jefflaplante/cull/internal/imageprep"
 	"github.com/jefflaplante/cull/internal/report"
+	"github.com/jefflaplante/cull/internal/ui"
 )
 
 //go:embed page.html
@@ -41,7 +42,8 @@ const AssetsDir = "assets"
 type Options struct {
 	Out         string // output directory
 	Concurrency int
-	Force       bool // regenerate images that already exist
+	Force       bool    // regenerate images that already exist
+	UI          ui.Sink // progress while the images render; nil = none
 }
 
 type card struct {
@@ -85,6 +87,8 @@ func Build(rep *report.Report, reportPath string, o Options, log io.Writer) (*Sh
 		return nil, err
 	}
 	cards := make([]card, len(rep.Results))
+	t := ui.Track(o.UI, "render", "rendering the contact sheet's images", "frames", len(rep.Results))
+	defer t.Done()
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 	for w := 0; w < max(1, o.Concurrency); w++ {
@@ -93,6 +97,7 @@ func Build(rep *report.Report, reportPath string, o Options, log io.Writer) (*Sh
 			defer wg.Done()
 			for i := range jobs {
 				cards[i] = makeCard(rep, rep.Results[i], o, log)
+				t.Add(1)
 			}
 		}()
 	}

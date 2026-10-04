@@ -86,13 +86,20 @@ type eventMsg Event
 
 type tickMsg struct{}
 
-// refresh redraws the ETA between events.
+// refresh redraws between events, often enough to turn the spinner: a step that is
+// working but has nothing new to count still visibly moves.
 func refresh() tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} })
+	return tea.Tick(spinStep, func(time.Time) tea.Msg { return tickMsg{} })
 }
+
+// spinner turns one frame per spinStep of wall time, whether or not events arrive.
+var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+const spinStep = 100 * time.Millisecond
 
 type stageState struct {
 	name, unit  string
+	text        string // what it does, shown while an open-ended stage has nothing to count
 	total, done int64
 	start       time.Time
 	finished    bool
@@ -146,8 +153,8 @@ func (m *liveModel) apply(e Event) {
 	switch {
 	case e.Stage != nil:
 		st := m.stage(e.Stage.Name)
-		if e.Stage.Total > 0 && e.Stage.Add == 0 && !e.Stage.Done {
-			st.total, st.unit, st.start, st.finished = e.Stage.Total, e.Stage.Unit, m.now(), false
+		if e.Stage.Start || (e.Stage.Total > 0 && e.Stage.Add == 0 && !e.Stage.Done) {
+			st.total, st.unit, st.start, st.finished, st.done, st.text = e.Stage.Total, e.Stage.Unit, m.now(), false, 0, e.Stage.Text
 		}
 		st.done += e.Stage.Add
 		if e.Stage.Done {
@@ -204,32 +211,43 @@ func (m *liveModel) View() tea.View {
 
 func (m *liveModel) stageLine(s *stageState) string {
 	name := nameStyle.Render(fmt.Sprintf("%-8s", s.name))
+	el := m.now().Sub(s.start)
+	spin := " "
+	if !s.finished {
+		spin = spinner[int(m.now().UnixMilli()/spinStep.Milliseconds())%len(spinner)]
+	}
 	if s.total <= 0 {
 		if s.finished {
-			return fmt.Sprintf("%s done", name)
+			return fmt.Sprintf("%s   done", name)
 		}
-		return fmt.Sprintf("%s %d %s", name, s.done, s.unit)
+		what := "working"
+		if s.text != "" {
+			what = s.text
+		}
+		if s.done > 0 {
+			what = fmt.Sprintf("%d %s", s.done, s.unit)
+		}
+		return fmt.Sprintf("%s %s %s  %s", name, spin, what, dimStyle.Render(el.Round(time.Second).String()))
 	}
 	frac := min(1, float64(s.done)/float64(s.total))
 	count := fmt.Sprintf("%d/%d %s", s.done, s.total, s.unit)
 	if s.unit == "bytes" {
 		count = fmt.Sprintf("%s/%s", humanBytes(s.done), humanBytes(s.total))
 	}
-	tail := ""
+	tail := el.Round(time.Second).String() // before the first item: still alive
 	switch {
 	case s.finished && s.done < s.total:
 		tail = "stopped"
 	case s.finished:
 		tail = "done"
 	case s.done > 0:
-		el := m.now().Sub(s.start)
 		left := time.Duration(float64(el) / float64(s.done) * float64(s.total-s.done))
 		tail = left.Round(time.Second).String() + " left"
 		if s.unit == "bytes" && el > 0 {
 			tail = fmt.Sprintf("%s/s, %s", humanBytes(int64(float64(s.done)/el.Seconds())), tail)
 		}
 	}
-	return fmt.Sprintf("%s %s %s  %s", name, m.bar.ViewAs(frac), count, dimStyle.Render(tail))
+	return fmt.Sprintf("%s %s %s %s  %s", name, spin, m.bar.ViewAs(frac), count, dimStyle.Render(tail))
 }
 
 func humanBytes(n int64) string {

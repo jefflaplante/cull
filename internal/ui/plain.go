@@ -36,14 +36,28 @@ func (p *plain) Emit(e Event) {
 		}
 	case e.Stage != nil:
 		s := e.Stage
+		starting := s.Start || (s.Add == 0 && s.Total > 0 && !s.Done)
+		if starting {
+			p.done[s.Name] = 0
+		}
 		p.done[s.Name] += s.Add
+		// A described stage says what it is doing at the normal level: a step that
+		// prints nothing per item would otherwise look stalled in a log or a pipe.
+		if starting && s.Text != "" && p.l >= Normal {
+			if s.Total > 0 {
+				fmt.Fprintf(p.w, "%s: %d %s\n", s.Text, s.Total, s.Unit)
+			} else {
+				fmt.Fprintf(p.w, "%s…\n", s.Text)
+			}
+			return
+		}
 		if p.l < Verbose {
 			return
 		}
 		switch {
 		case s.Done:
 			fmt.Fprintf(p.w, "%s: done (%d)\n", s.Name, p.done[s.Name])
-		case s.Add == 0 && s.Total > 0:
+		case starting && s.Total > 0:
 			fmt.Fprintf(p.w, "%s: %d %s\n", s.Name, s.Total, s.Unit)
 		}
 	}

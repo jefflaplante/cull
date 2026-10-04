@@ -623,6 +623,7 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 }
 
 /* usage page: a label and what it does, left to right */
+.spec.steps{display:table;width:100%;border-collapse:collapse} /* a table, not the .spec grid */
 .spec.steps th{white-space:nowrap;padding-right:28px}
 .spec.steps td{text-align:left}
 .hero .spec.steps th,.hero .spec.steps td{padding-block:8px}

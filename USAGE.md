@@ -203,6 +203,17 @@ an offline page instead of serving.
   header. For a frame in a set it also shows the frame's rank and a filmstrip of the set.
 - **Your labels always win** over the model's verdicts, for sidecars, moves and Capture
   One.
+- **Files don't move while you review.** A label change rewrites only the labels log and
+  the frame's sidecar, where the frame is now: a frame you rescue from `cull/` stays in
+  `cull/` with a green label. To move frames into the folders that match your labels:
+  - run `cull decide --sort <dir>` after the session; or
+  - start the session with `cull review --sort <dir>`, which re-sorts once when you stop
+    the server with Ctrl-C. If the server ends any other way (the terminal is closed, the
+    process is killed), nothing moves; run `cull decide --sort` yourself.
+
+  **Don't re-sort once `keep/` and `review/` are imported** into Capture One or
+  Lightroom: they lose track of files that move under them. After import, push your
+  changes in with `cull apply-c1` instead.
 
 ## 5. Tags: project, event, location, keywords
 

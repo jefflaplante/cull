@@ -1478,3 +1478,85 @@ func TestEstimateIncludesPricedEscalation(t *testing.T) {
 		t.Fatalf("err=%v\n%s", err, out)
 	}
 }
+
+// judgedShoot is three judged frames whose stored assessments decide L1 keep, L2
+// review (soft), L3 cull (missed focus), as decide will re-derive them.
+func judgedShoot(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	var results []report.Result
+	for _, n := range []struct {
+		name, status string
+		score        float64
+	}{{"L1", "sharp", 9}, {"L2", "soft", 5}, {"L3", "missed_focus", 2}} {
+		p := filepath.Join(dir, n.name+".DNG")
+		tinyDNG(t, p)
+		st, _ := os.Stat(p)
+		results = append(results, report.Result{File: p, Size: st.Size(), ModTime: st.ModTime(),
+			Preview:    &report.PreviewInfo{Width: 1600, Height: 1067, Orientation: 1, Source: "tiff-ifd"},
+			Evaluation: &eval.Evaluation{Sharpness: eval.Sharpness{Status: n.status, Score: n.score}}})
+	}
+	rep := &report.Report{SchemaVersion: report.SchemaVersion, Backend: "claude-code", Model: "sonnet", Dir: dir, Results: results}
+	if err := rep.Save(filepath.Join(dir, "cull-report.json")); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// review --sort re-sorts once when the server stops: a frame relabelled from cull to
+// keep moves from cull/ into keep/, not while the page is in use.
+func TestReviewSortAfterServing(t *testing.T) {
+	dir := judgedShoot(t)
+	out, err := run(t, "decide", "--sort", dir)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cull", "L3.DNG")); err != nil {
+		rep, _ := report.Load(filepath.Join(dir, "cull-report.json"))
+		for _, r := range rep.Results {
+			t.Logf("%s %s %v moved=%s", filepath.Base(r.File), r.Decision, r.Reasons, r.MovedTo)
+		}
+		t.Fatalf("setup: L3 not in cull/: %v\n%s", err, out)
+	}
+	url, before, stop := startServe(t, "--sort", dir)
+	if !strings.Contains(strings.Join(before, "\n"), "re-sorted") {
+		t.Errorf("no note that frames are re-sorted on stop: %q", before)
+	}
+	base, tok, _ := strings.Cut(url, "/#token=")
+	req, _ := http.NewRequest("POST", base+"/api/labels", strings.NewReader(`{"file":"L3.DNG","label":"keep"}`))
+	req.Header.Set("X-Cull-Token", tok)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil || res.StatusCode != 200 {
+		t.Fatalf("post: %v %v", err, res)
+	}
+	res.Body.Close()
+	if _, err := os.Stat(filepath.Join(dir, "cull", "L3.DNG")); err != nil {
+		t.Fatal("moved while the page was still in use")
+	}
+	if err := stop(); err != nil {
+		t.Fatalf("serve exit: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep", "L3.DNG")); err != nil {
+		t.Fatalf("L3 not re-sorted into keep/: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "review", "L2.DNG")); err != nil {
+		t.Fatalf("L2 moved out of review/: %v", err)
+	}
+}
+
+func TestReviewSortRefusals(t *testing.T) {
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1.DNG"))
+	if out, err := run(t, "scan", dir); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out)
+	}
+	if _, err := run(t, "review", "--sort", "--no-open", dir); err == nil || !strings.Contains(err.Error(), "judge") {
+		t.Errorf("--sort on a scan report: %v", err)
+	}
+	jd := judgedShoot(t)
+	for _, mode := range []string{"--static", "--prepare"} {
+		if _, err := run(t, "review", "--sort", mode, jd); err == nil || !strings.Contains(err.Error(), "--sort") {
+			t.Errorf("--sort %s: %v", mode, err)
+		}
+	}
+}

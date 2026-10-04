@@ -15,8 +15,11 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
+	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/pipeline"
 	"github.com/jefflaplante/cull/internal/report"
 	"github.com/jefflaplante/cull/internal/review"
 )
@@ -27,6 +30,7 @@ func newReviewCmd(so *sharedOpts) *cobra.Command {
 		jobs, port               int
 		force, static            bool
 		prepare, clearCache      bool
+		sortAfter                bool
 		noOpen, noXMP, overwrite bool
 		labelsPath               string
 	)
@@ -51,12 +55,20 @@ cull-review/assets. scan and judge fill it while each preview is decoded anyway,
 judged shoot opens without rendering. Each image is named after the file and focus box
 it was made from: review renders only what's missing or changed and removes stale
 images. --prepare fills the cache and exits; --clear-cache empties it; --force
-renders everything again.`,
+renders everything again.
+
+Files never move while the page is open: a label change rewrites only the labels log
+and the frame's sidecar, where the frame is now. --sort re-sorts once, when you stop the
+server with Ctrl-C, into keep/, review/ and cull/ by your labels (as decide --sort does,
+with the report's stored policy). If the server ends any other way, nothing moves: run
+cull decide --sort yourself. Don't re-sort after keep/ and review/ are imported into
+Capture One or Lightroom: they lose track of files that move; use apply-c1 instead.`,
 		Example: `  cull review ~/Pictures/2026-09-26
   cull review --no-xmp ~/Pictures/2026-09-26     # labels only, no sidecars
   cull review --static ~/Pictures/2026-09-26     # offline page
   cull review --prepare ~/Pictures/2026-09-26    # fill the image cache now, open later
-  cull review --clear-cache ~/Pictures/2026-09-26`,
+  cull review --clear-cache ~/Pictures/2026-09-26
+  cull review --sort ~/Pictures/2026-09-26       # re-sort by your labels when you stop`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fl := cmd.Flags()
@@ -64,7 +76,7 @@ renders everything again.`,
 				if !on {
 					continue
 				}
-				for _, name := range []string{"port", "no-open", "no-xmp", "overwrite-xmp"} {
+				for _, name := range []string{"port", "no-open", "no-xmp", "overwrite-xmp", "sort"} {
 					if fl.Changed(name) {
 						return fmt.Errorf("--%s can't be used with --%s: it only applies when serving", name, mode)
 					}
@@ -80,6 +92,9 @@ renders everything again.`,
 			rep, err := report.Load(cfg.ReportPath)
 			if err != nil {
 				return fmt.Errorf("no report: %w (run scan or judge first, or pass -o)", err)
+			}
+			if sortAfter && rep.Backend == "" {
+				return fmt.Errorf("--sort sorts by verdict, and %s is a scan report with no judged frames: run cull judge first", cfg.ReportPath)
 			}
 			if rep.Relocate(cfg.ReportPath, cfg.Dir) { // the folder was renamed: the server reloads the report, so save the new paths
 				if err := rep.Save(cfg.ReportPath); err != nil {
@@ -113,10 +128,13 @@ renders everything again.`,
 				fmt.Fprintf(cmd.ErrOrStderr(), "review sheet: %s\nopen it with: open %q\n", sheet.Index, sheet.Index)
 				return nil
 			}
-			return serveSheet(cmd, sheet, rep, review.ServeOptions{
+			if err := serveSheet(cmd, sheet, rep, review.ServeOptions{
 				ReportPath: cfg.ReportPath, LabelsPath: labelsOr(labelsPath, cfg.ReportPath),
 				WriteXMP: !noXMP, OverwriteXMP: overwrite,
-			}, port, fl.Changed("port"), !noOpen)
+			}, port, fl.Changed("port"), !noOpen, sortAfter); err != nil || !sortAfter {
+				return err
+			}
+			return sortAfterReview(cmd, so, cfg, labelsPath)
 		},
 	}
 	f := cmd.Flags()
@@ -124,6 +142,7 @@ renders everything again.`,
 	f.IntVarP(&jobs, "concurrency", "j", min(runtime.NumCPU(), 8), "parallel image rendering (~200 MB RAM each)")
 	f.BoolVar(&force, "force", false, "render every image again, even current ones")
 	f.BoolVar(&prepare, "prepare", false, "render missing or changed images into the cache, then exit (no server)")
+	f.BoolVar(&sortAfter, "sort", false, "when the server stops (Ctrl-C), re-sort the frames into keep/, review/ and cull/ by your labels, as decide --sort does; don't use it once those folders are imported")
 	f.BoolVar(&clearCache, "clear-cache", false, "delete the sheet's cached images and exit (with --prepare: then render them again)")
 	f.BoolVar(&static, "static", false, "write an offline index.html instead of serving (labels stay in the browser)")
 	f.BoolVar(&noOpen, "no-open", false, "don't open the browser; open the printed URL yourself")
@@ -136,7 +155,7 @@ renders everything again.`,
 
 // serveSheet runs the review server on 127.0.0.1 until the command's context ends
 // (Ctrl-C).
-func serveSheet(cmd *cobra.Command, sheet *review.Sheet, rep *report.Report, o review.ServeOptions, port int, explicit, openIt bool) error {
+func serveSheet(cmd *cobra.Command, sheet *review.Sheet, rep *report.Report, o review.ServeOptions, port int, explicit, openIt, sortAfter bool) error {
 	tok := make([]byte, 16)
 	if _, err := rand.Read(tok); err != nil {
 		return err
@@ -160,6 +179,9 @@ func serveSheet(cmd *cobra.Command, sheet *review.Sheet, rep *report.Report, o r
 	}
 	addr := ln.Addr().String()
 	url := "http://" + addr + "/#token=" + o.Token
+	if sortAfter {
+		fmt.Fprintln(w, "--sort: files stay where they are while you work; when you stop, frames are re-sorted into keep/, review/ and cull/ by your labels")
+	}
 	fmt.Fprintf(w, "review server: %s\nlabels: %s\n", url, o.LabelsPath)
 	switch {
 	case o.WriteXMP && o.OverwriteXMP:
@@ -203,4 +225,42 @@ func labelsOr(path, reportPath string) string {
 		return path
 	}
 	return labels.DefaultPath(reportPath)
+}
+
+// sortAfterReview re-sorts the shoot once the review server has stopped: decide
+// --sort with the report's stored policy (review has no policy flags, so verdicts
+// stay as decided) and the labels just saved. It runs on its own context, since the
+// command's was cancelled by the Ctrl-C that stopped the server.
+func sortAfterReview(cmd *cobra.Command, so *sharedOpts, cfg pipeline.Config, labelsPath string) error {
+	w := cmd.ErrOrStderr()
+	rep, err := report.Load(cfg.ReportPath)
+	if err != nil {
+		return err
+	}
+	var pol policyFlags
+	fs := pflag.NewFlagSet("stored", pflag.ContinueOnError) // nothing typed: the stored policy, or the defaults
+	pol.register(fs)
+	p, _, err := pol.resolve(fs, rep.Policy)
+	if err != nil {
+		return fmt.Errorf("the report's stored policy: %w", err)
+	}
+	var gap time.Duration
+	var look float64
+	registerSeqVars(fs, &gap, &look)
+	seq, _ := resolveSeq(fs, group.Options{Gap: gap, MaxLook: look}, rep.Seq)
+	lab, err := userLabels(w, cfg.ReportPath, labelsPath, false)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "re-sorting by your labels (--sort)…")
+	out := so.out.newOutput(cmd, true)
+	sum, err := pipeline.Decide(context.Background(), cfg.ReportPath, pipeline.DecideOptions{
+		Dir: cfg.Dir, Policy: p, Sort: true, Seq: seq, Labels: lab, UI: out.UI,
+	}, out.Log)
+	out.Close()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w, describeDecide(sum, true))
+	return nil
 }

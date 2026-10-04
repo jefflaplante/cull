@@ -365,6 +365,17 @@ per-session token, then opens your browser.
 - **Other modes:** `--no-xmp` saves only the labels log. `--static` writes an offline
   page that keeps labels in the browser, with JSONL export and import. Bring exported
   labels into the shoot's log with `cull import-labels <export.jsonl> <dir>`.
+- **Files don't move while you review.** A label change rewrites only the labels log and
+  the frame's sidecar, where the frame is now: a frame you rescue from `cull/` stays in
+  `cull/` with a green label. To move frames into the folders that match your labels:
+  - run `cull decide --sort <dir>` after the session; or
+  - start the session with `cull review --sort <dir>`, which re-sorts once when you stop
+    the server with Ctrl-C. If the server ends any other way (the terminal is closed, the
+    process is killed), nothing moves; run `cull decide --sort` yourself.
+
+  **Don't re-sort once `keep/` and `review/` are imported** into Capture One or
+  Lightroom: they lose track of files that move under them. After import, push your
+  changes in with `cull apply-c1` instead.
 
 | Key | Action |
 |---|---|

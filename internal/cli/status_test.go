@@ -155,3 +155,72 @@ func TestEstimateOnResumeCountsOnlyWhatsLeft(t *testing.T) {
 		t.Fatalf("without --resume: err=%v\n%s", err, out)
 	}
 }
+
+// moveTo moves a shoot's frame into a sub-folder and records it, as --sort and
+// --move-culled do.
+func moveTo(t *testing.T, dir, name, sub string) {
+	t.Helper()
+	rp := filepath.Join(dir, "cull-report.json")
+	rep, err := report.Load(rp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(dir, sub), 0o755)
+	for i := range rep.Results {
+		r := &rep.Results[i]
+		if filepath.Base(r.File) == name {
+			dst := filepath.Join(dir, sub, name)
+			if err := os.Rename(r.File, dst); err != nil {
+				t.Fatal(err)
+			}
+			r.MovedTo = dst
+		}
+	}
+	rep.Save(rp)
+}
+
+func labelAll(t *testing.T, dir string) {
+	t.Helper()
+	for _, n := range []string{"L1.DNG", "L2.DNG", "L3.DNG"} {
+		labels.Append(filepath.Join(dir, labels.FileName), labels.Entry{File: n, Label: "keep"})
+	}
+}
+
+// A sorted shoot counts its sorted frames and suggests --sort, not --move-culled;
+// a shoot smaller than the label sample, fully labelled, still gets that far.
+func TestStatusAfterSort(t *testing.T) {
+	dir := statusShoot(t)
+	labelAll(t, dir)
+	moveTo(t, dir, "L1.DNG", "keep")
+	moveTo(t, dir, "L2.DNG", "review")
+	moveTo(t, dir, "L3.DNG", "cull")
+	out, err := run(t, "status", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{": 3 DNGs (3 sorted into folders)", "decide --write-xmp --sort"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "--move-culled") {
+		t.Errorf("suggests --move-culled for a sorted shoot:\n%s", out)
+	}
+}
+
+func TestStatusAfterMoveCulled(t *testing.T) {
+	dir := statusShoot(t)
+	labelAll(t, dir)
+	moveTo(t, dir, "L3.DNG", "culled")
+	if out, _ := run(t, "status", dir); !strings.Contains(out, "decide --write-xmp --move-culled") {
+		t.Errorf("a shoot using culled/ should keep --move-culled:\n%s", out)
+	}
+}
+
+func TestStatusNothingMovedSuggestsSort(t *testing.T) {
+	dir := statusShoot(t)
+	labelAll(t, dir)
+	if out, _ := run(t, "status", dir); !strings.Contains(out, "decide --write-xmp --sort") {
+		t.Errorf("%s", out)
+	}
+}

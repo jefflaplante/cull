@@ -81,7 +81,29 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	if effort == "" {
 		effort = "default"
 	}
-	fmt.Fprintf(w, "%s: %d DNGs; report %s (%s, effort %s)\n", cfg.Dir, len(files), filepath.Base(cfg.ReportPath), model, effort)
+	// Frames moved into keep/ review/ cull/ (--sort) or culled/ (--move-culled) are
+	// the shoot's too, though the folder walk skips those folders.
+	var sorted, culledDir int
+	for _, r := range rep.Results {
+		if r.MovedTo == "" || !exists(r.MovedTo) {
+			continue
+		}
+		if filepath.Base(filepath.Dir(r.MovedTo)) == pipeline.CulledDir {
+			culledDir++
+		} else {
+			sorted++
+		}
+	}
+	where := ""
+	switch {
+	case sorted > 0 && culledDir > 0:
+		where = fmt.Sprintf(" (%d sorted into folders, %d in %s/)", sorted, culledDir, pipeline.CulledDir)
+	case sorted > 0:
+		where = fmt.Sprintf(" (%d sorted into folders)", sorted)
+	case culledDir > 0:
+		where = fmt.Sprintf(" (%d in %s/)", culledDir, pipeline.CulledDir)
+	}
+	fmt.Fprintf(w, "%s: %d DNGs%s; report %s (%s, effort %s)\n", cfg.Dir, len(files)+sorted+culledDir, where, filepath.Base(cfg.ReportPath), model, effort)
 
 	inReport := map[string]bool{}
 	var assessed, junk, errs, moved int
@@ -163,10 +185,16 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 		next = "cull judge --resume " + dir
 	case byScores > 0:
 		next = "cull rank --estimate " + dir + "   (then cull rank)"
-	case labelled < labelSampleTarget:
-		next = fmt.Sprintf("label a sample in cull review %s (%d/%d so far), then cull calibrate %s", dir, labelled, labelSampleTarget, dir)
+	case labelled < min(labelSampleTarget, len(rep.Results)):
+		next = fmt.Sprintf("label a sample in cull review %s (%d/%d so far), then cull calibrate %s", dir, labelled, min(labelSampleTarget, len(rep.Results)), dir)
 	default:
-		next = "cull calibrate " + dir + ", then cull decide --write-xmp --move-culled " + dir
+		// The same placement the shoot already uses: --move-culled only for a shoot
+		// whose culls went into culled/; otherwise --sort, the usual workflow.
+		move := "--sort"
+		if culledDir > 0 && sorted == 0 {
+			move = "--move-culled"
+		}
+		next = "cull calibrate " + dir + ", then cull decide --write-xmp " + move + " " + dir
 	}
 	fmt.Fprintf(w, "next: %s\n", next)
 }

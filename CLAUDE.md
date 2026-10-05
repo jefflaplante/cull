@@ -34,7 +34,9 @@ make vet
 - `internal/cli` — cobra tree: `offload`, `scan`, `judge` (model; code in cull.go), `rank` (rank.go),
   `decide`, `review`, `calibrate`, `apply-c1`, `restore`, `status`, `tag`, `import-labels`,
   `version` (+ built-in `completion`);
-  backend.go (`--backend`/`--model`/credential flags shared by judge and rank)
+  backend.go (`--backend`/`--model`/credential flags shared by judge and rank); dotfile.go (`~/.cull` /
+  `$CULL_CONFIG` flag defaults, applied in the root's PersistentPreRunE: typed flag > stored policy >
+  dotfile > built-in default; `notInDotfile` refuses one-off/risky flags)
 - `internal/dng` — pure-Go TIFF IFD/SubIFD walk for the largest reduced-resolution
   JPEG; reads IFDs + preview bytes only. `exiftool` fallback.
 - `internal/imageprep` — `Frame`: decoder's YCbCr kept in stored orientation + display
@@ -89,7 +91,7 @@ make vet
   stages spin and show elapsed time, so an open-ended wait never looks hung; plain output announces
   a described stage at the normal level
 - `internal/xmp` — sidecar writer, atomic, never clobbers by default
-- `internal/config` — API key resolution
+- `internal/config` — API key resolution; dotfile.go reads `~/.cull` (`LoadSettings`)
 - `site/` — the GitHub Pages site (`index.html` overview, `usage.html` walkthrough, shared
   `style.css` + `site.js`: lens strip, shutter dial, rangefinder headline, and on the homepage and usage heroes the
   M11's 35/135 bright-line frames and a centred focusing patch, proportions measured from a 0.72x finder view; `img/`), deployed to the

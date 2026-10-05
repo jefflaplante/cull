@@ -197,6 +197,33 @@ Every step, with its full output and screenshots of the live progress view, is i
   verified offload runs at about 216 MB/s, against 264 MB/s for plain `cp` with no
   checks: about 5 minutes for a 63 GB card.
 
+## Your defaults: `~/.cull`
+
+Put the flags you always type in `~/.cull`, one `name = value` per line, with `#` comments.
+A `[command]` section applies to that command only:
+
+```ini
+# ~/.cull
+backend = claude-code
+keep-best = 3
+outranked = cull
+
+[review]
+sort = true
+```
+
+- **Precedence:** a flag you type wins, then a shoot's stored policy (for `decide`, `rank`
+  and `judge --resume`, so tuning done on a shoot carries over), then `~/.cull`, then the
+  built-in default.
+- **Visible:** every run that uses the file says so, for example
+  `defaults from ~/.cull: --keep-best 3 --outranked cull`.
+- **Not settable there:** one-off and risky flags (`yes`, `fresh`, `force`, `run`,
+  `overwrite-xmp`, `resume`, `dry-run`, `-q`/`-v`/`--debug`). They're ignored with a
+  warning.
+- **Mistakes are visible:** a name no command has gets a warning, and a bad value stops
+  the command with the file and line.
+- **Another file:** set `CULL_CONFIG=/path/to/file`.
+
 ## Keywords and tags
 
 Every judged frame gets up to 8 **content keywords** from the model, such as `portrait`,

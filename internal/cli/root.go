@@ -14,6 +14,7 @@ import (
 	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/imageprep"
 	"github.com/jefflaplante/cull/internal/pipeline"
+	"github.com/jefflaplante/cull/internal/ui"
 )
 
 // Set via -ldflags "-X github.com/jefflaplante/cull/internal/cli.version=..."
@@ -46,7 +47,19 @@ vision model to assess sharpness, exposure, and composition. A deterministic pol
 turns those assessments into keep / review / cull decisions.
 
 Start with 'cull scan <dir>' to confirm preview resolution before spending tokens,
-then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.`,
+then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.
+
+Your own defaults for any flag go in ~/.cull ($CULL_CONFIG to use another file), one
+"name = value" per line, with optional [command] sections:
+
+  keep-best = 3
+  outranked = cull
+  [review]
+  sort = true
+
+A flag you type wins, then a shoot's stored policy (decide, rank, judge --resume),
+then ~/.cull, then the built-in default. One-off and risky flags (yes, fresh, force,
+run, overwrite-xmp, resume, -q/-v) can't be set there.`,
 		SilenceUsage:  true, // runtime errors shouldn't dump usage
 		SilenceErrors: true, // main prints the error once
 		Version:       version,
@@ -60,9 +73,12 @@ then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.`,
 	pf.StringVarP(&so.report, "report", "o", "", "report path (default <dir>/cull-report.json)")
 	pf.BoolVarP(&so.recursive, "recursive", "r", false, "recurse into subdirectories")
 	so.out.register(pf)
-	root.PersistentPreRunE = func(*cobra.Command, []string) error {
-		_, err := so.out.level()
-		return err
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		l, err := so.out.level()
+		if err != nil {
+			return err
+		}
+		return applyDotfile(cmd, cmd.ErrOrStderr(), l == ui.Quiet)
 	}
 
 	scan, judge, rank, decide := newScanCmd(&so), newCullCmd(&so), newRankCmd(&so), newDecideCmd(&so)

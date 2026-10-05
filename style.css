@@ -41,7 +41,7 @@ p{margin:0 0 1em}
 h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em;line-height:1.04}
 code,pre,kbd{font-family:var(--mono)}
 /* commands, flags, files and folders: monospace and amber, apart from the prose (code blocks keep their own colours) */
-:not(pre)>code{color:var(--code)}
+:not(pre)>code{color:var(--code);overflow-wrap:anywhere} /* breaks only what would overflow the page */
 :focus-visible{outline:2px solid var(--text);outline-offset:3px;border-radius:2px}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .skip{position:absolute;left:16px;top:-60px;z-index:100;background:var(--text);color:var(--bg);padding:10px 14px;font-weight:600;text-decoration:none;border-radius:3px}
@@ -344,7 +344,8 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 }
 
 /* split layouts */
-.split{display:grid;gap:clamp(36px,5vw,64px)}
+.split{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(36px,5vw,64px)}
+.split code,.backends code{overflow-wrap:anywhere} /* long paths wrap instead of widening the page */
 @media (min-width:980px){
   .split{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}
   .split.solo{grid-template-columns:minmax(0,1fr)}
@@ -750,14 +751,30 @@ html[data-vf]:not(.vf-off) .rf::before,html[data-vf]:not(.vf-off) .rf::after{dis
 @media (prefers-reduced-motion:reduce){.vf.on{animation:none;opacity:1}}
 .figures dt code{font-size:13px;letter-spacing:0;text-transform:none}
 
-/* usage: table of contents into the command reference */
-.toc-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:10px}
-.toc-item{display:flex;flex-direction:column;gap:6px;height:100%;padding:14px 16px;border:1px solid var(--line);border-radius:4px;background:rgba(255,255,255,.015);text-decoration:none;transition:border-color .2s,background .2s}
-.toc-item:hover,.toc-item:focus-visible{border-color:var(--red);background:rgba(217,38,28,.06);outline:none}
-.toc-item code{font:500 15px/1.3 var(--mono);color:var(--code)}
-.toc-item span{color:var(--muted);font-size:15.5px;line-height:1.45}
 .spec.steps th a{color:inherit;text-decoration:none;border-bottom:1px solid var(--line-2)}
 .spec.steps th a:hover{color:var(--text);border-bottom-color:var(--red)}
-.toc-h{margin:34px 0 12px;font-size:11px;letter-spacing:.22em;color:var(--dim);font-weight:600}
-.toc-more{margin:18px 0 0;color:var(--dim);font-size:15.5px}
-.toc-more a{color:var(--muted)}
+
+/* usage: the contents, a table on a plate */
+.nb{white-space:nowrap}
+.toc-plate{padding:clamp(22px,3vw,34px) clamp(18px,3vw,38px) clamp(18px,2.4vw,28px);border-color:var(--line-2);box-shadow:0 0 0 1px rgba(217,38,28,.18),0 26px 60px -30px rgba(0,0,0,.95)}
+.toc-table{width:100%;border-collapse:collapse}
+.toc-table caption{caption-side:top;text-align:left;padding:0 0 16px 12px;font-size:11px;letter-spacing:.24em;color:var(--red-text);font-weight:600}
+.toc-table thead th{text-align:left;font-size:10.5px;letter-spacing:.22em;color:var(--dim);font-weight:600;padding:0 12px 10px;border-bottom:1px solid var(--line-2)}
+.toc-table td{padding:0;border-bottom:1px solid var(--line);vertical-align:baseline}
+.toc-table td a{display:block;padding:11px 12px;text-decoration:none;color:var(--muted)}
+.toc-table td:first-child{width:1%;white-space:nowrap}
+.toc-table td:first-child a{padding-right:28px}
+.toc-table td code{font:500 15.5px/1.3 var(--mono);color:var(--code);white-space:nowrap}
+.toc-table tbody tr{transition:background .15s}
+.toc-table tbody tr:hover{background:rgba(217,38,28,.07)}
+.toc-table tbody tr:hover td:last-child a{color:var(--text)}
+.toc-table td a:focus-visible{outline:1px solid var(--red);outline-offset:-1px}
+.toc-settings th{text-align:left;padding:22px 12px 8px;font-size:10.5px;letter-spacing:.22em;color:var(--dim);font-weight:600;border-bottom:1px solid var(--line-2)}
+@media (max-width:640px){
+  .toc-table td a{padding:10px 8px}
+  .toc-table td:first-child a{padding-right:12px}
+  .toc-table td code{font-size:12.5px}
+  .toc-table td:last-child a{font-size:14.5px}
+}
+.backends thead th{white-space:normal}
+.backends td:first-child{padding-right:14px}

@@ -74,18 +74,31 @@
       <div class="reveal">
         <table class="spec steps">
           <tbody>
-            <tr><th>Install</th><td><code>brew install jefflaplante/tap/cull</code></td></tr>
-            <tr><th>Copy the card</th><td><code>cull offload</code></td></tr>
-            <tr><th>Price the run</th><td><code>cull judge --estimate</code></td></tr>
-            <tr><th>Judge</th><td><code>cull judge</code></td></tr>
-            <tr><th>Check by eye</th><td><code>cull review</code></td></tr>
-            <tr><th>Measure and tune</th><td><code>cull calibrate</code></td></tr>
-            <tr><th>Before import</th><td><code>cull decide --sort</code></td></tr>
-            <tr><th>After import</th><td><code>cull apply-c1</code></td></tr>
+            <tr><th><a href="#install">Install</a></th><td><code>brew install jefflaplante/tap/cull</code></td></tr>
+            <tr><th><a href="#offload">Copy the card</a></th><td><code>cull offload</code></td></tr>
+            <tr><th><a href="#judge">Price the run</a></th><td><code>cull judge --estimate</code></td></tr>
+            <tr><th><a href="#judge">Judge</a></th><td><code>cull judge</code></td></tr>
+            <tr><th><a href="#review">Check by eye</a></th><td><code>cull review</code></td></tr>
+            <tr><th><a href="#tune">Measure and tune</a></th><td><code>cull calibrate</code></td></tr>
+            <tr><th><a href="#sort">Before import</a></th><td><code>cull decide --sort</code></td></tr>
+            <tr><th><a href="#capture-one">After import</a></th><td><code>cull apply-c1</code></td></tr>
           </tbody>
         </table>
       </div>
     </div>
+  </div>
+</section>
+
+
+<!-- COMMANDS: a table of contents into the reference -->
+<section class="sec toc" id="commands" aria-labelledby="h-commands">
+  <div class="wrap">
+    <div class="rule" aria-hidden="true"></div>
+    <header class="sec-head reveal">
+      <p class="sec-no eng">Commands</p>
+      <div><h2 id="h-commands">Every command, <span>and what it does.</span></h2></div>
+    </header>
+    <ul class="toc-grid reveal"><li><a class="toc-item" href="#cmd-offload"><code>cull offload</code><span>Copy cards into a verified shoot folder, or one folder per event.</span></a></li><li><a class="toc-item" href="#cmd-scan"><code>cull scan</code><span>Measure every preview, find faces and blank frames. No model, free.</span></a></li><li><a class="toc-item" href="#cmd-judge"><code>cull judge</code><span>A vision model assesses each frame; Go rules decide keep, review or cull.</span></a></li><li><a class="toc-item" href="#cmd-rank"><code>cull rank</code><span>Rank near-identical sets side by side, without judging again.</span></a></li><li><a class="toc-item" href="#cmd-review"><code>cull review</code><span>Label, rate and check frames at 100% in your browser.</span></a></li><li><a class="toc-item" href="#cmd-import-labels"><code>cull import-labels</code><span>Bring labels in from an offline review page.</span></a></li><li><a class="toc-item" href="#cmd-calibrate"><code>cull calibrate</code><span>Score the verdicts against your labels and sweep the thresholds.</span></a></li><li><a class="toc-item" href="#cmd-decide"><code>cull decide</code><span>Re-apply the rules for free; write sidecars and sort into folders.</span></a></li><li><a class="toc-item" href="#cmd-tag"><code>cull tag</code><span>Set the shoot&#x27;s project, event, location and keywords.</span></a></li><li><a class="toc-item" href="#cmd-status"><code>cull status</code><span>Where a shoot stands, and the command to run next.</span></a></li><li><a class="toc-item" href="#cmd-apply-c1"><code>cull apply-c1</code><span>Push verdicts, keywords, stars and edits into Capture One.</span></a></li><li><a class="toc-item" href="#cmd-restore"><code>cull restore</code><span>Move sorted or culled frames back where they were.</span></a></li></ul><h3 class="toc-h eng">Settings</h3><ul class="toc-grid reveal"><li><a class="toc-item" href="#cmd-policy"><code>Policy flags</code><span>The rules that turn assessments into keep, review or cull.</span></a></li><li><a class="toc-item" href="#cmd-global"><code>Global flags</code><span>Options every command accepts: report path, recursion, output.</span></a></li><li><a class="toc-item" href="#cmd-dotfile"><code>~/.cull</code><span>Your own defaults for any flag, and which value wins.</span></a></li></ul><p class="toc-more">Also: <a href="#cmd-completion"><code>cull completion</code> and <code>cull version</code></a>, for shell completion and the version.</p>
   </div>
 </section>
 

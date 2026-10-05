@@ -289,6 +289,64 @@ M1103817 and M1103865 in `photos/c1-kw-test/live/`; the report went to a temp fo
 - **Still unchecked: whether structured output is written in schema property order.**
   The decoded answer doesn't show key order, so that unverified assumption stands.
 
+### First calibration: 979 labelled frames (2026-10-05)
+
+The user labelled 979 of the 992 frames from the LEICA M card (keep or cull only), in
+`/Volumes/photos/2026/2025-12-27 Card-Offload` on the NAS. The frames were judged with
+`--backend claude-code` (Sonnet → claude-sonnet-5-5), with `--keep-best 2` and otherwise
+default policy; 174 sets were ranked.
+
+`cull calibrate` (rows: the user's label; columns: cull's verdict):
+
+| | keep | review | cull |
+|---|---|---|---|
+| **keep** (638) | 398 | 237 | 3 |
+| **cull** (341) | 60 | 248 | 33 |
+
+- **Safe to auto-cull.** False culls: 3 of 638 keeps (0.5%; 95% upper bound about 1.4%).
+  Two are consecutive frames (M1104022/23, missed_focus 2 and 2.5); the third is M1103282
+  (motion_blur 2.5). Of 35 frames the model called missed_focus or motion_blur, the user
+  culled 32.
+- **It catches few culls.** 33 of the user's 341 culls. 196 of those 341 are sharp or
+  acceptable: the user culls for moment, duplicates and taste, which the policy never culls
+  on by design. 52 of the 60 culls the model kept sit in sets; the user culled 19 of the 179
+  sets entirely, and ranking always keeps the top keep-best.
+- **Review splits evenly:** 485 frames (49.5%), of which the user kept 237 and culled 248.
+  By reason (a frame can have several):
+
+  | reason | kept | culled |
+  |---|---|---|
+  | clipping | 155 | 71 |
+  | soft | 72 | 112 |
+  | eyes | 59 | 79 |
+  | outranked, and nothing else | 7 | 63 |
+
+  The `--review-below-sharpness` sweep only grows review.
+- **Ranking:** with keep-best 2, 7.6% of the user's keeps were ranked out of the best;
+  outranked-only frames were 90% the user's culls.
+
+**Policy tests.** These ran on copies of the report against the same labels; the NAS report
+was not touched.
+
+| settings | false culls | culls caught | missed culls | review |
+|---|---|---|---|---|
+| as judged (keep-best 2) | 3 (0.5%) | 33 | 60 | 49.5% |
+| `--outranked cull` | 16 (2.5%) | 115 | 60 | 39.8% |
+| `--keep-best 3 --outranked cull` | 6 (0.9%) | 80 | 95 | 39.8% |
+| …and `--raw-clip-threshold 2` | 7 (1.1%) | 89 | 104 | 33.7% |
+| …and `--raw-clipped ignore` | 7 (1.1%) | 91 | 127 | 22.3% |
+| `--raw-clipped ignore` alone | 3 (0.5%) | 33 | 85 | 33.9% |
+
+- Clipping only moves frames between keep and review, never to cull.
+- `--keep-best 3 --outranked cull` is the candidate: it stays under 1% false culls and
+  catches 2.4× as many culls.
+
+**Limits.**
+- One shoot, one model run and one photographer.
+- The review page shows the model's verdict while labelling, which may bias labels towards it.
+- The settings were tuned on the same frames they were measured on: confirm them on the
+  next labelled shoot before changing any default.
+
 ### Run-to-run stability after the section-3 changes (2026-09-30, user-approved)
 
 Two `judge --backend claude-code` runs (Sonnet via subscription, ranking on, defaults) on
@@ -486,9 +544,11 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
 - Capture One AppleScript property names for rating, keywords, exposure, crop.
   Dump the real dictionary with `sdef "/Applications/Capture One.app"` and read it
   before writing the applier.
-- How good and how stable the model's side-by-side ranking is: verdicts stay
-  `review` (`--outranked` default) until the calibrate sets section shows it's
-  trustworthy on a labeled sample.
+- How good and how stable the model's side-by-side ranking is. On the first labelled shoot
+  (2026-10-05) frames outranked and nothing else were 90% the user's culls, and
+  `--keep-best 3 --outranked cull` gave 0.9% false culls. That is one shoot, tuned on the
+  frames it was measured on: `--outranked` stays `review` by default until a second labelled
+  shoot confirms it.
 - M11-P capture-time spacing: the user's card has 992 frames within 10 minutes of camera
   time, from a clock set wrong (see Card offload measurements), so `--seq-gap` never split
   anything there. Grouping relied on look distance alone. Whether gaps split sequences on
@@ -505,9 +565,13 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
    fallback → native subject crop; noise-corrected "where focus landed" tile;
    `anthropic` / `claude-code` / `openai` backends; `--save-inputs`; scan summary.
 2. **Calibrate before trusting.** Tooling done 2026-09-27 (`review` →
-   `cull-labels.jsonl` → `calibrate`, tune with `decide`). Waiting on the user's labeled sample set.
-   Tune prompt/policy until false-cull rate is acceptable. Nothing should auto-apply
-   at 1000-frame scale before this.
+   `cull-labels.jsonl` → `calibrate`, tune with `decide`).
+   - **Safety: settled (2026-10-05).** False culls were 0.5% on 979 labelled frames (see "First
+     calibration"), so the model's culls can be auto-applied for shoots like that one.
+   - **Usefulness: open.** It caught 33 of 341 culls, and review is a coin flip at 49.5%.
+     Candidate settings: `--keep-best 3 --outranked cull` (0.9% false culls, 80 culls caught).
+   - **Next:** judge the next shoot with the candidate settings, label it, and calibrate again
+     before changing any default.
 3. ~~`apply-c1`~~ built (dry run default); confirm with `--probe` on a real catalog.
 4. ~~Raw-level clipping~~ built (pure Go).
 5. ~~Message Batches~~ built (`--batch`); verified live 2026-09-27 on 3 frames.

@@ -199,30 +199,74 @@ Every step, with its full output and screenshots of the live progress view, is i
 
 ## Your defaults: `~/.cull`
 
-Put the flags you always type in `~/.cull`, one `name = value` per line, with `#` comments.
-A `[command]` section applies to that command only:
+Flags you always type can go in a dotfile, `~/.cull`. Each line is a flag's name (without
+the dashes), `=`, and its value. `#` starts a comment. Lines under a `[command]` header
+apply to that command only; the lines above any header apply to every command that has
+the flag.
 
 ```ini
 # ~/.cull
-backend = claude-code
+backend = claude-code     # judge and rank on your Claude subscription
 keep-best = 3
 outranked = cull
 
+[judge]
+write-xmp = true
+
 [review]
-sort = true
+sort = true               # re-sort by your labels when the review server stops
 ```
 
-- **Precedence:** a flag you type wins, then a shoot's stored policy (for `decide`, `rank`
-  and `judge --resume`, so tuning done on a shoot carries over), then `~/.cull`, then the
-  built-in default.
-- **Visible:** every run that uses the file says so, for example
-  `defaults from ~/.cull: --keep-best 3 --outranked cull`.
-- **Not settable there:** one-off and risky flags (`yes`, `fresh`, `force`, `run`,
-  `overwrite-xmp`, `resume`, `dry-run`, `-q`/`-v`/`--debug`). They're ignored with a
-  warning.
-- **Mistakes are visible:** a name no command has gets a warning, and a bad value stops
-  the command with the file and line.
-- **Another file:** set `CULL_CONFIG=/path/to/file`.
+Booleans take `true` or `false`. A repeatable flag (`keyword`) takes one line per value.
+Quotes around a value are optional.
+
+### Managing it
+
+- **Create or edit it** with any text editor; there's nothing to install or register.
+- **See what it changed:** every run that takes a value from it prints one line first,
+  for example `defaults from /Users/you/.cull: --keep-best 3 --outranked cull`.
+  `cull judge --estimate <dir>` is a free way to check without changing anything.
+- **Turn it off for one run:** `CULL_CONFIG=/dev/null cull judge <dir>`.
+- **Use another file:** `CULL_CONFIG=~/cull-weddings cull judge <dir>`. That's handy for
+  different kinds of work, such as weddings and travel.
+- **Mistakes are flagged, not ignored:**
+  - a name no command has (a typo) prints a warning and is skipped;
+  - a value that doesn't fit the flag (`keep-best = lots`) stops the command, naming the
+    file and line;
+  - a malformed line also stops the command.
+- **What it can't set:** one-off and risky flags are refused with a warning, so you always
+  type them on purpose: `yes`, `fresh`, `force`, `run`, `probe`, `verify`, `dry-run`,
+  `estimate`, `prepare`, `clear-cache`, `resume`, `overwrite-xmp`, `report`, and the
+  verbosity flags `quiet`, `verbose`, `debug` and `log-level`.
+
+### Precedence: which value wins
+
+From strongest to weakest:
+
+1. **A flag you type** on the command line always wins.
+2. **The shoot's stored policy**, for the decision rules and the set grouping only.
+   These are `keep-best`, `outranked`, `eyes-closed`, `raw-clipped`,
+   `raw-clip-threshold`, `junk`, `review-below-sharpness`, `cull-max-sharpness`,
+   `min-crop-area`, `seq-gap` and `seq-look`.
+   - Every `judge`, `decide`, `rank` and `review --sort` saves the full policy it used in
+     the shoot's `cull-report.json`.
+   - `decide`, `rank`, `calibrate`, `judge --resume` and `review --sort` start from that
+     stored policy, so tuning done on one shoot stays with it.
+3. **`~/.cull`**: a `[command]` section first, then the lines above any header.
+4. **The built-in default.**
+
+Some special cases:
+
+| Situation | What happens |
+|---|---|
+| A fresh `cull judge` (no `--resume`) | There's no stored policy yet: typed flags, then `~/.cull`, then the defaults. The result becomes the shoot's stored policy. |
+| `cull rank` | `--backend`, `--model` and `--effort` come from the report the shoot was judged with, not `~/.cull`, unless you type them. A set is ranked by the model that judged it. |
+| `cull judge --resume` | The backend, model and effort must match the report's. A different `backend` in `~/.cull` is refused, with the flags that continue the run. |
+| `~/.cull` says `keep-best = 3`, the shoot's report says 2 | `cull decide` uses 2, and the note `policy from the report: --keep-best 2` says so. Type `--keep-best 3` to change the shoot, which then stores 3. |
+| You want a built-in default back on a tuned shoot | Type it: `cull decide --keep-best 3 <dir>`. Leaving a flag off keeps the stored value. |
+
+To see a shoot's stored policy, look at `"policy"` and `"seq"` in its `cull-report.json`,
+for example with `jq '.policy, .seq' cull-report.json`.
 
 ## Keywords and tags
 

@@ -35,6 +35,22 @@ make install    # optional: $GOPATH/bin/cull, so `cull` is on your PATH
 | **Subscription** (`--backend claude-code`) | Uses your Claude login through the `claude` CLI, so no key is needed. |
 | **Local** (`--backend openai --model <name>`) | Any OpenAI-compatible server. It's free, but small models judge poorly. |
 
+**Your defaults (optional).** Flags you'd type on every run can go in `~/.cull`, one
+`name = value` per line. A `[command]` section applies to that command only:
+
+```ini
+backend = claude-code
+keep-best = 3
+
+[review]
+sort = true
+```
+
+A flag you type still wins. A shoot's stored settings (for `decide`, `rank` and
+`judge --resume`) win over the file too. Each run prints the values it took from it.
+`CULL_CONFIG=/dev/null` switches the file off for one run. The README's
+[Your defaults](README.md#your-defaults-cull) section has the full rules and precedence.
+
 ## 1. Copy the card (`cull offload`)
 
 ```sh

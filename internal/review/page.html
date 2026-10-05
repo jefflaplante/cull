@@ -322,14 +322,21 @@ function fmtEV(ev) { return !ev ? "0" : (ev > 0 ? "+" : "") + (Math.round(ev * 1
     if (inSet && !c.error) {
       const t = el("button", { cls: "keeper-toggle", type: "button", "aria-pressed": String(keeper), title: "keeper: keep or cull this frame",
         text: keeper ? "✓ keeper" : "keeper?" });
-      t.onclick = ev => { ev.stopPropagation(); toggleKeeper(i); };
+      t.onclick = ev => { ev.stopPropagation(); holdScroll = true; toggleKeeper(i); };
       card.appendChild(t);
     }
     card.onclick = () => { sel = k; detailOpen = true; render(); };
     return card;
   }
 
+  // holdScroll keeps the page where it is through the next grid render: a click on a
+  // set's − / + or a keeper toggle acts where the pointer is, and must not jump the
+  // page to the selected card, which may be far away. Keys act on the selection, so
+  // they still bring it into view.
+  let holdScroll = false;
   function renderGrid() {
+    const y = window.scrollY, hold = holdScroll;
+    holdScroll = false;
     const grid = document.getElementById("grid");
     const vis = visible();
     if (!vis.length) { grid.replaceChildren(el("p", { cls: "empty", text: "No frames match this filter." })); return; }
@@ -346,8 +353,8 @@ function fmtEV(ev) { return !ev ? "0" : (ev > 0 ? "+" : "") + (Math.round(ev * 1
         const modelKept = ms.filter(m => cards[m].decision === "keep").length;
         const minus = el("button", { type: "button", text: "−", title: "one keeper fewer (-)" });
         const plus = el("button", { type: "button", text: "+", title: "one keeper more (=)" });
-        minus.onclick = () => setKeepCount(id, setKeepers(id) - 1);
-        plus.onclick = () => setKeepCount(id, setKeepers(id) + 1);
+        minus.onclick = () => { holdScroll = true; setKeepCount(id, setKeepers(id) - 1); };
+        plus.onclick = () => { holdScroll = true; setKeepCount(id, setKeepers(id) + 1); };
         const grid2 = el("div", { cls: "setgrid" });
         block = el("div", { cls: "setblock" + setTint(c.group) },
           el("div", { cls: "sethead" }, el("strong", { text: groupName(c.group) }), el("span", { text: `${ms.length} frames · keepers ${setKeepers(id)}` }),
@@ -358,6 +365,7 @@ function fmtEV(ev) { return !ev ? "0" : (ev > 0 ? "+" : "") + (Math.round(ev * 1
       block.grid.appendChild(renderCard(i, k));
     });
     grid.replaceChildren(...out);
+    if (hold) { window.scrollTo(0, y); return; }
     const s = grid.querySelector(".sel");
     if (s) s.scrollIntoView({ block: "nearest" });
   }

@@ -314,3 +314,19 @@ func TestPageShowsKeywordsAndTags(t *testing.T) {
 		}
 	}
 }
+
+// A click on a set's − / + or a keeper toggle keeps the page where it is: the grid
+// re-renders, and used to jump to the selected card, which may be far up the page.
+// (Checked in a browser: scrolled to the bottom, each click left scrollY unchanged.)
+func TestPageKeeperClicksHoldScroll(t *testing.T) {
+	for _, want := range []string{
+		"holdScroll = true; setKeepCount(id, setKeepers(id) - 1)",
+		"holdScroll = true; setKeepCount(id, setKeepers(id) + 1)",
+		"holdScroll = true; toggleKeeper(i)",
+		"if (hold) { window.scrollTo(0, y); return; }",
+	} {
+		if !strings.Contains(pageTemplate, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+}

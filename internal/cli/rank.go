@@ -46,7 +46,7 @@ the stored order for free, so save --force for when the frames themselves change
 
 Unless --backend/--model are given, they default to the values the report was
 judged with (--batch always uses anthropic). It only updates the report; write
-sidecars or move culls with a following 'cull decide --write-xmp --sort'.`,
+sidecars or move culls with a following 'cull decide --sort'.`,
 		Example: `  cull rank ~/Pictures/2026-09-26
   cull rank --backend claude-code ~/Pictures/2026-09-26
   cull rank --force ~/Pictures/2026-09-26

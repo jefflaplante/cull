@@ -40,12 +40,11 @@ func run(t *testing.T, args ...string) (string, error) {
 func TestFlagValidation(t *testing.T) {
 	dir := t.TempDir()
 	cases := map[string][]string{
-		"xmp-develop without write-xmp":   {"judge", "--xmp-develop", dir},
-		"overwrite-xmp without write-xmp": {"judge", "--overwrite-xmp", dir},
-		"bad min-crop-area":               {"judge", "--min-crop-area", "1.5", dir},
-		"missing dir arg":                 {"judge"},
-		"not a directory":                 {"scan", dir + "/nope"},
-		"fresh with resume":               {"judge", "--fresh", "--resume", dir},
+		"overwrite-xmp with no-xmp": {"judge", "--overwrite-xmp", "--no-xmp", dir},
+		"bad min-crop-area":         {"judge", "--min-crop-area", "1.5", dir},
+		"missing dir arg":           {"judge"},
+		"not a directory":           {"scan", dir + "/nope"},
+		"fresh with resume":         {"judge", "--fresh", "--resume", dir},
 	}
 	for name, args := range cases {
 		if _, err := run(t, args...); err == nil || strings.Contains(err.Error(), "unknown command") {
@@ -202,7 +201,7 @@ func TestSortCullsThenRestoreEndToEnd(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
 
-	out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--write-xmp", "--sort=culls", dir)
+	out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--sort=culls", dir)
 	if err != nil {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
@@ -1300,7 +1299,7 @@ func TestApplyC1ProbeNeedsNoDir(t *testing.T) {
 }
 
 func TestDecideOverwriteNeedsWriteXMP(t *testing.T) {
-	if _, err := run(t, "decide", "--overwrite-xmp", t.TempDir()); err == nil || !strings.Contains(err.Error(), "--write-xmp") {
+	if _, err := run(t, "decide", "--overwrite-xmp", "--no-xmp", t.TempDir()); err == nil || !strings.Contains(err.Error(), "--no-xmp") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -1545,6 +1544,75 @@ func TestReviewSortRefusals(t *testing.T) {
 	for _, mode := range []string{"--static", "--prepare"} {
 		if _, err := run(t, "review", "--sort", mode, jd); err == nil || !strings.Contains(err.Error(), "--sort") {
 			t.Errorf("--sort %s: %v", mode, err)
+		}
+	}
+}
+
+// judge and decide write cull's sidecars by default; --no-xmp writes none.
+func TestSidecarsByDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "L1000001.xmp")); err != nil {
+		t.Fatal("judge wrote no sidecar by default")
+	}
+
+	quiet := t.TempDir()
+	tinyDNG(t, filepath.Join(quiet, "L1000001.DNG"))
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--no-xmp", quiet); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(quiet, "L1000001.xmp")); err == nil {
+		t.Fatal("--no-xmp wrote a sidecar")
+	}
+	if out, err := run(t, "decide", "--no-xmp", quiet); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(quiet, "L1000001.xmp")); err == nil {
+		t.Fatal("decide --no-xmp wrote a sidecar")
+	}
+	if out, err := run(t, "decide", quiet); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(quiet, "L1000001.xmp")); err != nil {
+		t.Fatal("decide wrote no sidecar by default")
+	}
+}
+
+// A sidecar cull didn't write is never touched by the new default.
+func TestDefaultSidecarsLeaveForeignOnes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	foreign := []byte("<x:xmpmeta>someone else's</x:xmpmeta>")
+	os.WriteFile(filepath.Join(dir, "L1000001.xmp"), foreign, 0o644)
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, err := run(t, "decide", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "L1000001.xmp")); string(b) != string(foreign) {
+		t.Fatalf("foreign sidecar changed:\n%s", b)
+	}
+}
+
+// The retired sidecar flags still parse, warn, and change nothing harmful.
+func TestDeprecatedSidecarFlags(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	for _, flag := range []string{"--write-xmp", "--xmp-develop"} {
+		out, err := run(t, "judge", "--estimate", flag, dir)
+		if err != nil || !strings.Contains(out, flag+" has been deprecated") {
+			t.Errorf("%s: err=%v\n%s", flag, err, out)
 		}
 	}
 }

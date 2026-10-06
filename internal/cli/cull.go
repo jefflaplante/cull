@@ -21,6 +21,7 @@ type cullOpts struct {
 	resume       bool
 	fresh        bool
 	writeXMP     bool
+	noXMP        bool
 	xmpDevelop   bool
 	overwriteXMP bool
 	moveCulled   bool
@@ -73,7 +74,7 @@ Backends (--backend):
 		Example: `  cull judge ~/Pictures/2026-09-26
   cull judge --backend claude-code -o cc.json ~/Pictures/2026-09-26
   cull judge --backend openai --model <model> ~/Pictures/2026-09-26
-  cull judge --resume --write-xmp ~/Pictures/2026-09-26
+  cull judge --resume ~/Pictures/2026-09-26
   cull judge --sort=culls ~/Pictures/2026-09-26`,
 		Args: sortArgs(1),
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -86,11 +87,8 @@ Backends (--backend):
 				}
 				o.sort = sortCulls
 			}
-			if o.xmpDevelop && !o.writeXMP {
-				return fmt.Errorf("--xmp-develop requires --write-xmp")
-			}
-			if o.overwriteXMP && !o.writeXMP {
-				return fmt.Errorf("--overwrite-xmp requires --write-xmp")
+			if o.overwriteXMP && (o.noXMP || !o.writeXMP) {
+				return fmt.Errorf("--overwrite-xmp can't be used with --no-xmp")
 			}
 			if _, err := o.policy.policy(); err != nil {
 				return err
@@ -211,11 +209,11 @@ Backends (--backend):
 			cfg.Concurrency = o.backendFlags.concurrencyOrDefault(o.concurrency)
 			cfg.Resume = o.resume
 			cfg.Fresh = o.fresh
-			cfg.WriteXMP = o.writeXMP
-			cfg.XMPDevelop = o.xmpDevelop
+			cfg.WriteXMP = o.writeXMP && !o.noXMP
+			cfg.XMPDevelop = false
 			cfg.OverwriteXMP = o.overwriteXMP
 			cfg.MoveCulled, cfg.Sort = o.sort.flags()
-			if o.sort != sortNone || o.writeXMP {
+			if o.sort != sortNone || cfg.WriteXMP {
 				if cfg.Labels, err = userLabels(cmd.ErrOrStderr(), cfg.ReportPath, o.labelsPath, o.noLabels); err != nil {
 					return err
 				}
@@ -284,8 +282,11 @@ Backends (--backend):
 	f.IntVarP(&o.concurrency, "concurrency", "j", 0, "parallel evaluations (0 = backend default: anthropic 4, claude-code 2, openai 4)")
 	f.BoolVar(&o.resume, "resume", false, "skip files already evaluated in the existing report")
 	f.BoolVar(&o.fresh, "fresh", false, "replace an existing report that holds assessments (default: refuse; see --resume)")
-	f.BoolVar(&o.writeXMP, "write-xmp", false, "write XMP sidecars (rating, label, keyword)")
+	f.BoolVar(&o.noXMP, "no-xmp", false, "don't write sidecars (by default cull keeps its own sidecars current: rating, label, keywords; never over ones it didn't write)")
+	f.BoolVar(&o.writeXMP, "write-xmp", true, "write sidecars (the default; --no-xmp turns them off)")
 	f.BoolVar(&o.xmpDevelop, "xmp-develop", false, "also write Adobe crs exposure/crop (not applied by Capture One)")
+	f.MarkDeprecated("write-xmp", "sidecars are written by default; --no-xmp turns them off")
+	f.MarkDeprecated("xmp-develop", "Capture One ignores Adobe develop settings in sidecars; set exposure and crop with cull apply-c1 --exposure --crop")
 	f.BoolVar(&o.overwriteXMP, "overwrite-xmp", false, "overwrite existing sidecars (default: never clobber)")
 	f.StringVar(&o.labelsPath, "labels", "", "your labels log (default: cull-labels.jsonl beside the report, when it exists)")
 	f.BoolVar(&o.noLabels, "no-labels", false, "ignore your labels (cull-labels.jsonl beside the report): moves and sidecar rewrites follow the model's verdicts")
@@ -296,7 +297,7 @@ Backends (--backend):
 	f.BoolVar(&o.noRank, "no-rank", false, "after judging, don't rank the sets that need it (run 'cull rank' separately later); until then each set is ordered by scores and --outranked applies to that order")
 	o.policy.register(f)
 	f.IntVar(&o.checkpoint, "checkpoint", 25, "save the report every N results")
-	setSection(f, secSidecars, "overwrite-xmp", "labels", "no-labels", "write-xmp", "xmp-develop", "move-culled")
+	setSection(f, secSidecars, "overwrite-xmp", "labels", "no-labels", "write-xmp", "xmp-develop", "no-xmp", "move-culled")
 	setSection(f, secTuning, "locate", "raw-clip", "checkpoint", "batch-poll", "no-rank")
 	setSection(f, secExperimental, "escalate-backend", "escalate-model", "escalate-on", "second-opinion", "rank-twice")
 	f.MarkDeprecated("move-culled", "use --sort=culls (culls now go into cull/)")

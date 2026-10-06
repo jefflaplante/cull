@@ -53,7 +53,7 @@ func newTagCmd(so *sharedOpts) *cobra.Command {
 		Use:   "tag <dir>",
 		Short: "Show or change the shoot's keywords (project, event, location, extra keywords)",
 		Long: `tag shows the keywords stored in the folder's report, or changes them. Every
-frame's sidecar carries them: run 'cull decide --write-xmp <dir>' afterwards to
+frame's sidecar carries them: run 'cull decide <dir>' afterwards to
 rewrite the sidecars, and 'cull apply-c1' for frames already in Capture One.`,
 		Example: `  cull tag ~/Pictures/"2026-10-02 Smith wedding"
   cull tag --event Ceremony --clear-location ~/Pictures/"2026-10-02 Smith wedding"`,
@@ -106,7 +106,7 @@ rewrite the sidecars, and 'cull apply-c1' for frames already in Capture One.`,
 				}
 			}
 			if changed {
-				fmt.Fprintf(w, "saved; rewrite the sidecars with: cull decide --write-xmp %q\n", args[0])
+				fmt.Fprintf(w, "saved; rewrite the sidecars with: cull decide %q\n", args[0])
 			}
 			return nil
 		},

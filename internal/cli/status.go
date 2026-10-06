@@ -190,7 +190,7 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 		if inCull > 0 && inKeepReview == 0 {
 			move = "--sort=culls"
 		}
-		next = "cull calibrate " + dir + ", then cull decide --write-xmp " + move + " " + dir
+		next = "cull calibrate " + dir + ", then cull decide " + move + " " + dir
 	}
 	fmt.Fprintf(w, "next: %s\n", next)
 }

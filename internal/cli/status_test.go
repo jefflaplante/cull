@@ -197,7 +197,7 @@ func TestStatusAfterSort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{": 3 DNGs (3 sorted into folders)", "decide --write-xmp --sort"} {
+	for _, want := range []string{": 3 DNGs (3 sorted into folders)", "decide --sort"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("lacks %q:\n%s", want, out)
 		}
@@ -215,7 +215,7 @@ func TestStatusAfterSortCulls(t *testing.T) {
 		labelAll(t, dir)
 		moveTo(t, dir, "L3.DNG", folder)
 		out, _ := run(t, "status", dir)
-		for _, want := range []string{"(1 sorted into folders)", "decide --write-xmp --sort=culls"} {
+		for _, want := range []string{"(1 sorted into folders)", "decide --sort=culls"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s/: lacks %q:\n%s", folder, want, out)
 			}
@@ -226,7 +226,7 @@ func TestStatusAfterSortCulls(t *testing.T) {
 func TestStatusNothingMovedSuggestsSort(t *testing.T) {
 	dir := statusShoot(t)
 	labelAll(t, dir)
-	if out, _ := run(t, "status", dir); !strings.Contains(out, "decide --write-xmp --sort") {
+	if out, _ := run(t, "status", dir); !strings.Contains(out, "decide --sort") {
 		t.Errorf("%s", out)
 	}
 }

@@ -4,7 +4,7 @@ This is a whole session, in order: copy the card, judge the frames, check them, 
 import into Capture One. Every command has `--help` with examples; `--help-all` adds the tuning and experimental flags. The full flag
 reference is in the [README](README.md).
 
-**Every example here is real output, recorded 2026-10-03** (the screenshots are rendered
+**Every example here is real output** (the judge run recorded 2026-10-03; offload, estimate, tag, sort and status re-run with v0.2.0 on 2026-10-06) (the screenshots are rendered
 from recordings of the live terminal). It's a 17-frame M11-P shoot: a small card made
 from the repo's sample frames, judged with `--backend claude-code`. Paths are relative
 to where the commands ran. Your numbers will differ. Lines are trimmed only where the

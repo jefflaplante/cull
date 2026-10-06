@@ -263,8 +263,8 @@
 
   /* ---------- terminal replays ----------
      Two real runs on 17 M11-P frames, played back when their
-     terminal comes into view. The text is what cull printed, verbatim, except that
-     local paths are shortened and each ranking reason is cut after its first
+     terminal comes into view. The text is what cull printed, trimmed (some lines left
+     out), with local paths shortened and each ranking reason is cut after its first
      sentence. Time is compressed; the "left" figures are the run's own. The judge run was
      recorded on 2026-10-03; the offload run was re-run with v0.2.0 on 2026-10-06. */
   var SCAN = [

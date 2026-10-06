@@ -35,8 +35,8 @@ import (
 //
 // The tests, each logging MB/s as median [min–max], CPU (user+sys) as a share of wall
 // time, and a breakdown in seconds per run (one run = the N frames):
-//   - TestProfileCardRead: the card alone. F_NOCACHE (as the engine opens it), plain
-//     (cached, kernel read-ahead), F_NOCACHE + F_RDAHEAD, and F_NOCACHE with two reads in
+//   - TestProfileCardRead: the card alone. F_NOCACHE (the engine until 2026-10-06), plain
+//     (cached, kernel read-ahead: the engine since), F_NOCACHE + F_RDAHEAD, and F_NOCACHE with two reads in
 //     flight; 1, 4, 8 and 16 MiB reads.
 //   - TestProfileHash: SHA-256 in memory; the card read with the hash inline on the
 //     reading goroutine (the engine's reader) vs on another goroutine.
@@ -48,8 +48,8 @@ import (
 //     hooks; then profStream, a copy of stream with the buffer size, the buffer count and
 //     the hashing goroutine as parameters and every wait timed.
 //   - TestProfileRun: Run, pipelined and serial, with stage A, stage B's fsync and evict,
-//     and the main goroutine's wait for stage B split out; the card opened as the engine
-//     does (F_NOCACHE) and plainly (through the open hook), and the card pages left cached.
+//     and the main goroutine's wait for stage B split out; the card opened F_NOCACHE (the
+//     engine until 2026-10-06) and plainly (the engine since; both through the open hook), and the card pages left cached.
 //   - TestProfilePipeline: profPipeline, Run's two stages with stage A's parameters (card
 //     open mode, ring size, hashing goroutine) and how far stage A may run ahead of B.
 //   - TestProfileEvict, TestProfileReadUnderWrite, TestProfileEvictDuringRead: what an
@@ -69,6 +69,17 @@ import (
 // SHA-256 runs at 2.6 GB/s; ring size and count made no measurable difference.
 
 const mib = 1 << 20
+
+// openNoCache opens a card file F_NOCACHE, as openSource did until 2026-10-06 (it now
+// opens plainly, for the kernel's read-ahead): the profile's "nocache" mode.
+func openNoCache(src string) (*os.File, error) {
+	f, err := os.Open(src)
+	if err != nil {
+		return nil, err
+	}
+	noCache(f)
+	return f, nil
+}
 
 type profEnv struct {
 	frames []string
@@ -353,7 +364,7 @@ func TestProfileHash(t *testing.T) {
 		})
 		e.measure(t, fmt.Sprintf("read, hash on another goroutine, %2d MiB ×4", chunk), true, e.bytes, func(parts map[string]time.Duration) error {
 			for _, f := range e.frames {
-				in, err := openSource(f, hooks{})
+				in, err := openNoCache(f)
 				if err != nil {
 					return err
 				}
@@ -697,7 +708,7 @@ func TestProfileStageA(t *testing.T) {
 
 // profWriteStage is writeStage with profStream's parameters; it discards its temp.
 // profWriteStage is writeStage with profStream's parameters; it discards its temp. src
-// is how the card is opened: "nocache" (as the engine: F_NOCACHE), "plain" (kernel
+// is how the card is opened: "nocache" (F_NOCACHE: the engine until 2026-10-06), "plain" (kernel
 // read-ahead on, pages left cached), or "plain+evict" (each frame's card pages evicted
 // once it's read: msync MS_INVALIDATE, read only; timed as "src evict").
 func profWriteStage(ctx context.Context, src, name, dir string, size int64, bufSize, n int, where hashWhere, srcMode string, parts map[string]time.Duration) (sum [32]byte, err error) {
@@ -714,7 +725,7 @@ func profWriteStage(ctx context.Context, src, name, dir string, size int64, bufS
 func profStageA(ctx context.Context, src, name, dir string, size int64, bufSize, n int, where hashWhere, srcMode string, parts map[string]time.Duration) (w *written, err error) {
 	var in io.ReadCloser
 	if srcMode == "nocache" {
-		in, err = openSource(src, hooks{})
+		in, err = openNoCache(src)
 	} else {
 		in, err = os.Open(src)
 	}
@@ -958,7 +969,7 @@ func TestProfileRun(t *testing.T) {
 					if err != nil {
 						return nil, err
 					}
-					if c.src == "nocache" { // as openSource; "plain" leaves the kernel's read-ahead on
+					if c.src == "nocache" { // as openSource did until 2026-10-06; "plain" (now the engine) leaves the kernel's read-ahead on
 						noCache(f)
 					}
 					mu.Lock()
@@ -1199,7 +1210,7 @@ func TestProfileEvictDuringRead(t *testing.T) {
 }
 
 // TestProfilePipeline: the pipeline with stage A's parameters varied, under stage B's
-// real contention on the destination: the card opened plainly or as the engine does, the
+// real contention on the destination: the card opened plainly (the engine) or F_NOCACHE, the
 // ring's size, and how many files stage A may run ahead of stage B (depth). Integrity
 // steps are finishStage's own, unchanged.
 func TestProfilePipeline(t *testing.T) {
@@ -1211,8 +1222,8 @@ func TestProfilePipeline(t *testing.T) {
 			where          hashWhere
 			src            string
 		}{
-			{4, 4, 1, hashInReader, "nocache"}, // the engine
-			{4, 4, 1, hashInReader, "plain"},
+			{4, 4, 1, hashInReader, "nocache"}, // the engine until 2026-10-06
+			{4, 4, 1, hashInReader, "plain"},   // the engine since
 			{4, 16, 1, hashInReader, "plain"},
 			{4, 4, 2, hashInReader, "plain"},
 			{4, 16, 2, hashInReader, "plain"},

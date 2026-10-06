@@ -109,6 +109,10 @@ func (r *runner) warn(format string, args ...any) {
 	r.emit(ui.Event{Note: &ui.Note{Sev: ui.Warn, Text: fmt.Sprintf(format, args...)}})
 }
 
+func (r *runner) verbose(format string, args ...any) {
+	r.emit(ui.Event{Note: &ui.Note{Level: ui.Verbose, Text: fmt.Sprintf(format, args...)}})
+}
+
 // skip counts a file the plan skips.
 func (r *runner) skip(f File) {
 	r.res.Skipped++
@@ -128,7 +132,7 @@ func (r *runner) serial() {
 		if r.ctx.Err() != nil {
 			return
 		}
-		sum, err := copyWithRetries(r.ctx, f, r.p.h, r.warn)
+		sum, err := r.copyWithRetries(f)
 		if !r.settle(i, f, sum, err) {
 			return
 		}
@@ -189,7 +193,7 @@ func (r *runner) pipeline() {
 		if err != nil {
 			// The pipelined read was try 0; the retries are serial, re-reading the card,
 			// as copyWithRetries does. Nothing else is in flight meanwhile.
-			sum, err := retryFailed(r.ctx, f, r.p.h, r.warn, err)
+			sum, err := r.retryFailed(f, err)
 			if !r.settle(i, f, sum, err) {
 				return
 			}
@@ -216,7 +220,7 @@ func (r *runner) pipeline() {
 func (r *runner) settleStageB(b *inB) bool {
 	sum, err := b.w.sum, b.err
 	if err != nil {
-		sum, err = retryFailed(r.ctx, b.f, r.p.h, r.warn, err)
+		sum, err = r.retryFailed(b.f, err)
 	}
 	return r.settle(b.i, b.f, sum, err)
 }
@@ -268,17 +272,20 @@ func (r *runner) record(f File, sum [32]byte) {
 	r.emit(ui.Event{Note: &ui.Note{Level: ui.Verbose, Text: fmt.Sprintf("%s → %s (sha256 %s…)", filepath.Base(f.Src), f.Name, hexOf(sum[:4]))}})
 }
 
-func copyWithRetries(ctx context.Context, f File, h hooks, warn func(string, ...any)) ([32]byte, error) {
-	sum, err := copyFile(ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, h)
+func (r *runner) copyWithRetries(f File) ([32]byte, error) {
+	sum, err := copyFile(r.ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, r.p.h)
 	if err == nil {
 		return sum, nil
 	}
-	return retryFailed(ctx, f, h, warn, err)
+	return r.retryFailed(f, err)
 }
 
 // retryFailed carries on after try 0 of f failed with err: it copies f again with
-// copyFile, from the card, up to len(retryDelays) more times.
-func retryFailed(ctx context.Context, f File, h hooks, warn func(string, ...any), err error) ([32]byte, error) {
+// copyFile, from the card, up to len(retryDelays) more times. Before each retry it
+// evicts the card file from the page cache, so the retry reads the card, not RAM.
+// Nothing else is in flight then, so the eviction can't slow a card read.
+func (r *runner) retryFailed(f File, err error) ([32]byte, error) {
+	ctx, h := r.ctx, r.p.h
 	var sum [32]byte
 	for try := 0; ; try++ {
 		// Retried: card reads and verify mismatches (a flaky reader, a reseated card).
@@ -287,13 +294,30 @@ func retryFailed(ctx context.Context, f File, h hooks, warn func(string, ...any)
 		if err == nil || ctx.Err() != nil || try == len(retryDelays) || destinationFull(err) || errors.Is(err, fs.ErrExist) {
 			return sum, err
 		}
-		warn("%s: %v; retrying in %s", f.Name, err, retryDelays[try])
+		r.warn("%s: %v; retrying in %s", f.Name, err, retryDelays[try])
 		select {
 		case <-time.After(retryDelays[try]):
 		case <-ctx.Done():
 			return sum, ctx.Err()
 		}
+		r.evictSource(f)
 		sum, err = copyFile(ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, h)
+	}
+}
+
+// evictSource drops f's card file from the page cache (read-only: evictPasses) before a
+// retry. Best effort: if it fails, or pages stay cached, the retry still runs (those
+// pages come from RAM, as every retry's did before), with one verbose note.
+func (r *runner) evictSource(f File) {
+	ev := r.p.h.evictSource
+	if ev == nil {
+		ev = evictPasses
+	}
+	switch res, n, err := ev(f.Src); {
+	case err != nil:
+		r.verbose("%s: couldn't drop the card file from the page cache before retrying (%v); retrying anyway", f.Name, err)
+	case res > 0:
+		r.verbose("%s: %d of %d pages of the card file stay in the page cache; the retry reads those from RAM", f.Name, res, n)
 	}
 }
 

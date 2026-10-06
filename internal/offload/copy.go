@@ -26,6 +26,9 @@ type hooks struct {
 	afterWrite   func(tmp string)
 	beforeVerify func(tmp string)
 	write        func(f *os.File, p []byte) (int, error)
+	// evictSource drops a card file from the page cache before each retry of it
+	// (default evictPasses), returning how many of its pages stayed cached.
+	evictSource func(src string) (resident, pages int, err error)
 	// serial makes Run copy one file at a time, each finished before the next card
 	// read starts: the engine before the pipeline, for tests and the bench to compare.
 	serial bool
@@ -170,12 +173,14 @@ func openSource(src string, h hooks) (io.ReadCloser, error) {
 	if h.open != nil {
 		return h.open(src)
 	}
-	f, err := os.Open(src)
-	if err != nil {
-		return nil, err
-	}
-	noCache(f) // best effort: the card's pages are read once; keeping them only evicts others
-	return f, nil
+	// Read-only, and without F_NOCACHE (unlike the temps and the verify read), so the
+	// kernel reads ahead. Measured 2026-10-06 on the LEICA M card (exFAT): a plain read
+	// streams at 262 MB/s, steady; F_NOCACHE turns read-ahead off and gets ~210 (177–254),
+	// and still leaves 98% of the card's pages cached, so it didn't spare the cache
+	// either. Nothing here relies on the card's pages being uncached: the hash is taken
+	// from the bytes read, and every copy is verified from its own device. A retry evicts
+	// the card file first (evictPasses), so it reads the card again, not RAM.
+	return os.Open(src)
 }
 
 // createTemp makes ".<name>.cull-<random>.tmp" in dir, as rsync does: a crash leaves
@@ -261,19 +266,30 @@ func stream(ctx context.Context, in io.Reader, hs hash.Hash, outs []*os.File, h 
 // can't be dropped, the copy can't be verified from disk, and it fails rather than
 // be checked against RAM.
 func dropCache(p string) error {
+	r, n, err := evictPasses(p)
+	if err != nil {
+		return err
+	}
+	if r != 0 {
+		return fmt.Errorf("%d of %d pages of %s stay in the page cache: can't verify the copy from disk", r, n, p)
+	}
+	return nil
+}
+
+// evictPasses evicts p's pages from the page cache and counts what stayed (mincore), in
+// up to 5 passes until none did, and returns the last count. It only reads p: the
+// file is opened read-only and mapped PROT_READ (mapFile), so it's safe on the card too.
+func evictPasses(p string) (resident, pages int, err error) {
 	for try := 0; ; try++ {
 		if err := evict(p); err != nil {
-			return fmt.Errorf("drop %s from the page cache: %w", p, err)
+			return 0, 0, fmt.Errorf("drop %s from the page cache: %w", p, err)
 		}
 		r, n, err := residentPages(p)
 		if err != nil {
-			return fmt.Errorf("check %s in the page cache: %w", p, err)
+			return 0, 0, fmt.Errorf("check %s in the page cache: %w", p, err)
 		}
-		if r == 0 {
-			return nil
-		}
-		if try == 4 {
-			return fmt.Errorf("%d of %d pages of %s stay in the page cache: can't verify the copy from disk", r, n, p)
+		if r == 0 || try == 4 {
+			return r, n, nil
 		}
 		time.Sleep(time.Duration(try+1) * 20 * time.Millisecond)
 	}

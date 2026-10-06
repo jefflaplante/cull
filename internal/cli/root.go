@@ -74,6 +74,7 @@ fresh, force, run, overwrite-xmp, resume, -q/-v) can't be set there.`,
 	pf.StringVarP(&so.report, "report", "o", "", "report path (default <dir>/cull-report.json)")
 	pf.BoolVarP(&so.recursive, "recursive", "r", false, "recurse into subdirectories")
 	so.out.register(pf)
+	installHelp(root)
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		l, err := so.out.level()
 		if err != nil {
@@ -87,6 +88,7 @@ fresh, force, run, overwrite-xmp, resume, -q/-v) can't be set there.`,
 		so.registerPrep(c.Flags())
 		so.tags.register(c.Flags())
 	}
+	setSection(scan.Flags(), secCommon, "save-inputs")
 	for _, c := range []*cobra.Command{scan, judge, rank, decide} {
 		so.registerSeq(c.Flags())
 	}
@@ -108,6 +110,8 @@ func (so *sharedOpts) registerPrep(f *pflag.FlagSet) {
 	f.StringVar(&so.saveInputs, "save-inputs", "", "write exactly what the model sees (JPEGs + inputs.json) to this directory")
 	f.BoolVar(&so.landedWithSubject, "landed-with-subject", false, "also send \"where focus landed\" tiles when a subject crop exists (can bias the model toward texture)")
 	f.BoolVar(&so.noReviewImages, "no-review-images", false, "don't write the review sheet's images (cull-review/assets) while previews are decoded; review renders them later")
+	setSection(f, secTuning, "max-edge", "tiles", "min-preview-edge", "face-min-q", "save-inputs", "no-review-images")
+	setSection(f, secExperimental, "landed-with-subject")
 }
 
 // registerSeq adds the grouping flags (the commands that group frames into sets).
@@ -118,6 +122,7 @@ func (so *sharedOpts) registerSeq(f *pflag.FlagSet) {
 func registerSeqVars(f *pflag.FlagSet, gap *time.Duration, look *float64) {
 	f.DurationVar(gap, "seq-gap", defaultSeqGap, "frames this close in capture time can link into a sequence (0 = no sequence grouping)")
 	f.Float64Var(look, "seq-look", group.DefaultLook, "max look distance (0-1) to the previous frame for it to link into the same sequence")
+	setSection(f, secPolicy, "seq-gap", "seq-look")
 }
 
 // base builds the pipeline config common to all subcommands from a dir argument.

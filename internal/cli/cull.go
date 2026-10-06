@@ -293,6 +293,9 @@ Backends (--backend):
 	f.BoolVar(&o.noRank, "no-rank", false, "after judging, don't rank the sets that need it (run 'cull rank' separately later); until then each set is ordered by scores and --outranked applies to that order")
 	o.policy.register(f)
 	f.IntVar(&o.checkpoint, "checkpoint", 25, "save the report every N results")
+	setSection(f, secSidecars, "overwrite-xmp", "labels", "no-labels", "write-xmp", "xmp-develop", "move-culled")
+	setSection(f, secTuning, "locate", "raw-clip", "checkpoint", "batch-poll", "no-rank")
+	setSection(f, secExperimental, "escalate-backend", "escalate-model", "escalate-on", "second-opinion", "rank-twice")
 	cmd.MarkFlagFilename("api-key-file")
 	return cmd
 }

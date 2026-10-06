@@ -150,6 +150,8 @@ Capture One or Lightroom: they lose track of files that move; use apply-c1 inste
 	f.BoolVar(&overwrite, "overwrite-xmp", false, "also overwrite sidecars not written by cull")
 	f.StringVar(&labelsPath, "labels", "", "the labels log to save to (default: cull-labels.jsonl beside the report)")
 	f.IntVar(&port, "port", 0, "port (default: fixed per report, so a restarted server keeps the page's origin and its queued changes; 0 = any free port)")
+	setSection(f, secSidecars, "no-xmp", "overwrite-xmp", "labels")
+	setSection(f, secTuning, "out", "concurrency", "force", "port")
 	return cmd
 }
 

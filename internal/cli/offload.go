@@ -171,6 +171,7 @@ judge it next.`,
 	f.StringSliceVar(&o.SplitAt, "split-at", nil, "start a new event at each of these files (camera order), e.g. M1103402,M1103777; for a card whose clock can't be trusted")
 	so.tags.register(f)
 	f.BoolVar(&verify, "verify", false, "re-check a shoot folder's copies against the checksums recorded when they were made")
+	setSection(f, secTuning, "checksum")
 	return cmd
 }
 

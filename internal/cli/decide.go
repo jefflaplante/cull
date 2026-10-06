@@ -89,6 +89,7 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 	f.BoolVar(&sortF, "sort", false, "sync keep/, review/, cull/ with the current verdicts (your labels first); undo with 'cull restore'")
 	f.StringVar(&labelsPath, "labels", "", "your labels log (default: cull-labels.jsonl beside the report, when it exists)")
 	f.BoolVar(&noLabels, "no-labels", false, "ignore your labels: sidecars and moves follow the model's verdicts")
+	setSection(f, secSidecars, "write-xmp", "xmp-develop", "overwrite-xmp", "labels", "no-labels", "move-culled")
 	return cmd
 }
 

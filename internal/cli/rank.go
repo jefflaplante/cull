@@ -188,6 +188,8 @@ sidecars or move culls with a following 'cull decide --write-xmp --move-culled'.
 	f.BoolVar(&o.batch, "batch", false, "use the Message Batches API (anthropic): half price, results within minutes to hours; Ctrl-C is safe, rerun re-attaches")
 	f.DurationVar(&o.batchPoll, "batch-poll", 30*time.Second, "how often --batch checks progress")
 	o.policy.register(f)
+	setSection(f, secTuning, "batch-poll")
+	setSection(f, secExperimental, "rank-twice")
 	cmd.MarkFlagFilename("api-key-file")
 	return cmd
 }

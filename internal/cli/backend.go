@@ -37,6 +37,8 @@ func (o *backendFlags) register(f *pflag.FlagSet) {
 	f.StringVar(&o.effort, "effort", "", "model effort for evaluations and rankings: low, medium, high, xhigh or max (default: the model's own); recorded in the report")
 	f.StringVar(&o.locateEffort, "locate-effort", "", "model effort for the locate call (default: the model's own); recorded in the report")
 	f.Float64Var(&o.quotaStop, "quota-stop", 0.9, "stop when this fraction of the 5-hour or 7-day subscription window is used (claude-code backend)")
+	setSection(f, secBackend, "api-key-file", "base-url", "openai-key-file", "effort", "quota-stop")
+	setSection(f, secTuning, "openai-stream", "claude-bin", "locate-effort")
 }
 
 // validate checks the flags common to every backend. Callers with extra

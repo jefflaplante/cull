@@ -36,6 +36,8 @@ func (pf *policyFlags) register(f *pflag.FlagSet) {
 	f.Float64Var(&pf.rawClipThreshold, "raw-clip-threshold", 0.5, "percent of raw samples at the white level that counts as clipped")
 	f.StringVar(&pf.junk, "junk", "cull", "what to do with blank frames (near-black, blown white, uniform): cull, review, or ignore (judge them anyway)")
 	f.IntVar(&pf.keepBest, "keep-best", 3, "per set, keep this many best-ranked frames (0-5: a chunked final ranking round tops out at 8 frames)")
+	setSection(f, secPolicy, "min-crop-area", "review-below-sharpness", "cull-max-sharpness", "eyes-closed",
+		"outranked", "raw-clipped", "raw-clip-threshold", "junk", "keep-best")
 }
 
 func (pf *policyFlags) policy() (eval.Policy, error) {

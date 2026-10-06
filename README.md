@@ -197,7 +197,7 @@ Every step, with its full output and screenshots of the live progress view, is i
   numbered in camera file order, not by capture time.
 - **Speed (measured on an M11-P card over USB):** the card reads at about 280 MB/s. A
   992-frame, 67.7 GB card went to a USB SSD in 8 minutes, every file verified; to the
-  Mac's SSD, the measured 210 MB/s below would take about 5 minutes.
+  Mac's SSD, the measured 194 MB/s below would take about 6 minutes.
 
   `go test -tags cardbench -run CardBench ./internal/offload` compares the copy engine with
   the usual tools on the mounted card. Every read must come from the card, not RAM: each
@@ -214,10 +214,15 @@ Every step, with its full output and screenshots of the live progress view, is i
 
   | MB/s | Mac SSD | USB SSD (exFAT) | NAS, SMB over Wi-Fi | NAS, SMB over 10 GbE |
   |---|---|---|---|---|
-  | cull engine, every byte re-read and compared | 210 | 153 | 17 | 91 |
+  | cull (pipelined), every byte re-read and compared | 194 | 153 | 17 | 107 |
   | `ditto` (macOS's built-in copy command), no check | 147 (249) | 143 (200) | 40 | 75 (206) |
   | `cp`, no check | 138 (226) | 145 (194) | 32 | 52 (98) |
   | `rsync -a` (openrsync), no check | 123 (157) | 100 (118) | 21 | 41 (66) |
+
+  The cull row is `offload.Run` as shipped since 2026-10-06, which reads the next file off the
+  card while the last one is synced and verified. In the same runs the one-file-at-a-time
+  engine measured 190, 142 and 92 MB/s on the Mac SSD, USB SSD and 10 GbE share; the Wi-Fi
+  figure is that older engine's.
 
   The 10 GbE column is 3 rounds (1.8 GB per tool) to a TrueNAS SMB share over a 10GBASE-T
   link with 0.4 ms round trips. On local disks and on the 10 GbE share, the verified copy

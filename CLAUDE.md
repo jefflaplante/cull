@@ -81,9 +81,11 @@ make vet
 - `internal/c1` — Capture One AppleScript generator, read-only probe, osascript runner
 - `internal/offload` — `cull offload`: plan.go (hygienic card walk, one folder per run or per event with
   `--split` (capture-time gap or new day; refused when `clockBroken`) / `--split-at` (file names), `MakePlans`,
-  names/--rename counter, skips, clashes, free space; nothing written), copy.go (single-read
-  tee, SHA-256 while reading, F_NOCACHE temp, evict + mincore check, uncached verify,
-  link-based no-replace rename), run.go (retries, verified-only manifest
+  names/--rename counter, skips, clashes, free space; nothing written), copy.go (two stages:
+  `writeStage` single-read tee, SHA-256 while reading, F_NOCACHE temps; `finishStage` fsync,
+  evict + mincore check, uncached verify, link-based no-replace rename), run.go (pipeline: file
+  N's `finishStage` overlaps N+1's card read, settled in plan order; `hooks.serial` is the old
+  one-at-a-time engine for tests and cardbench; retries, verified-only manifest
   `cull-offload.jsonl`, F_FULLFSYNC per destination, `Safe`, `Verify`), sys_darwin.go
   (fcntl/msync/mincore; no-ops elsewhere). `go test -tags cardbench` benchmarks against
   `cp` on the LEICA M card.
@@ -463,8 +465,26 @@ balance`, but no run has tested them yet.
     Durable writes top out near 160 MB/s, under the card's ~270 MB/s read.
 - Offload benchmark, 20 real frames per tool, read from the card uncached: the `cull`
   engine runs at 216 MB/s (hash, uncached write, evict, verify from disk, F_FULLFSYNC);
-  `cp` runs at 264 MB/s. The gap is the verify re-read, which isn't overlapped with the
-  next file's card read. A dry run over 992 frames plans in about 1 s.
+  `cp` runs at 264 MB/s. The gap was the verify re-read, which wasn't overlapped with the
+  next file's card read until the pipeline (below). A dry run over 992 frames plans in about 1 s.
+- **Pipelined Run (2026-10-06): file N's fsync, verify and naming overlap file N+1's card read.**
+  cardbench now times `offload.Run` itself, pipelined and with the serial seam, 3 rounds × the
+  card's 10 frames (1.8 GB per arm), the card's pages evicted before every run (one frame
+  sometimes stays cached; the bench logs it). Durable MB/s, serial → pipelined:
+  - Mac SSD 190 → 194 (within round-to-round noise, 177–224; 1 of 3 pipelined runs started with
+    a frame cached). The card read is ~88% of the serial engine's time there, so there's little
+    to overlap.
+  - Grey (USB SSD, exFAT) 142 → 153 (+8%). All 3 pipelined runs started with one of the 10
+    frames still cached on the card side (1 of 3 serial runs did), so part of the gain is that.
+  - NAS over 10 GbE (`/Volumes/photos-1`) 92 → 107 (+16%); no cache bias against serial.
+  - A per-stage probe on the NAS (serial, per 602 MB): card read + writes 2.1–3.3 s, fsync about
+    2.5 s, verify + link + manifest 1.3 s. Pipelined, stage B (fsync then verify) bounds the run:
+    111–114 MB/s. More would need two files in stage B at once (two concurrent writers measured
+    229 MB/s), which the manifest's plan order would then have to reorder: not built.
+  - **Live:** `cull offload "/Volumes/LEICA M" /Volumes/photos-1/cull-pipe-tmp --name pipetest
+    --no-scan` with the card's pages evicted first: 10 of 10, 0.6 GB in 6.2 s (102 MB/s), "safe to
+    format", peak memory 50 MB; `--verify` 10/10; every copy byte-identical to the card, manifest
+    in card order. A run straight after other reads of the card said 138 MB/s: warm card pages.
 - Page cache (internal SSD, `mincore`):
   - a normal write leaves every page cached, so a re-read verifies RAM;
   - with `F_NOCACHE` on the write handle, 0 of 4097 pages stayed cached in a quiet probe;

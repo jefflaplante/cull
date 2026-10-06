@@ -29,8 +29,9 @@ type rankOpts struct {
 func newRankCmd(so *sharedOpts) *cobra.Command {
 	var o rankOpts
 	cmd := &cobra.Command{
-		Use:   "rank <dir>",
-		Short: "Rank the sets judge found, without judging again",
+		Use:        "rank <dir>",
+		Deprecated: "use 'cull judge <dir>': it ranks the sets that need it at the end of every run (--rerank re-ranks them all)",
+		Short:      "(deprecated) Rank the sets judge found, without judging again",
 		Long: `rank compares each set of similar frames (formed by judge from --seq-gap and
 --seq-look) side by side with one model call per set (more for large sets, chunked
 and merged into a final call, whether sent one wave at a time or, with --batch, all

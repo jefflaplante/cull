@@ -17,7 +17,7 @@ import (
 var notInDotfile = map[string]bool{
 	"yes": true, "fresh": true, "force": true, "run": true, "probe": true, "verify": true,
 	"dry-run": true, "estimate": true, "prepare": true, "clear-cache": true,
-	"overwrite-xmp": true, "report": true, "help": true, "version": true,
+	"overwrite-xmp": true, "rerank": true, "report": true, "help": true, "version": true,
 	"quiet": true, "verbose": true, "debug": true, "log-level": true,
 }
 

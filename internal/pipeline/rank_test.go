@@ -642,3 +642,28 @@ func TestRankCallsCountsReversedCalls(t *testing.T) {
 		t.Fatalf("calls %d err %v", calls, err)
 	}
 }
+
+// A judge run over a finished report ranks nothing new; with Rerank it ranks every
+// set again.
+func TestJudgeRerank(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 3; i++ {
+		texturedDNG(t, filepath.Join(dir, fmt.Sprintf("L%07d.DNG", i)))
+	}
+	c := moveCfg(dir)
+	c.MoveCulled, c.WriteXMP, c.Rank = false, false, true
+	c.Seq = group.Options{Gap: time.Minute, MaxLook: group.DefaultLook}
+	c.Policy.KeepBest, c.Policy.Outranked = 1, eval.ActionReview
+	b := &judgeRankBackend{fakeBackend: fakeBackend{status: "sharp"}, rank: rankBackend{order: reverse}}
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatal(err)
+	}
+	c.Resume = true
+	if _, _, err := Run(context.Background(), c, b); err != nil || b.rank.calls != 1 {
+		t.Fatalf("plain re-run: err %v, %d rank calls (want 1)", err, b.rank.calls)
+	}
+	c.Rerank = true
+	if _, _, err := Run(context.Background(), c, b); err != nil || b.rank.calls != 2 {
+		t.Fatalf("--rerank: err %v, %d rank calls (want 2)", err, b.rank.calls)
+	}
+}

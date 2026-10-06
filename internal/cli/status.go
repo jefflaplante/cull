@@ -174,13 +174,13 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	case judgeBatch:
 		next = "cull judge --batch " + dir + "   (re-attaches; already paid for)"
 	case rankBatch:
-		next = "cull rank --batch " + dir + "   (re-attaches; already paid for)"
+		next = "cull judge --batch " + dir + "   (re-attaches; already paid for)"
 	case rep.Backend == "":
 		next = "cull judge --estimate " + dir + "   (then cull judge)"
 	case unjudged > 0:
 		next = "cull judge " + dir
 	case byScores > 0:
-		next = "cull rank --estimate " + dir + "   (then cull rank)"
+		next = fmt.Sprintf("cull judge --estimate %s   (then cull judge: it ranks the %d unranked set(s))", dir, byScores)
 	case labelled < min(labelSampleTarget, len(rep.Results)):
 		next = fmt.Sprintf("label a sample in cull review %s (%d/%d so far), then cull calibrate %s", dir, labelled, min(labelSampleTarget, len(rep.Results)), dir)
 	default:

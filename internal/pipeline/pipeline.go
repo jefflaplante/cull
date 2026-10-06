@@ -30,15 +30,15 @@ import (
 )
 
 type Config struct {
-	Dir            string
-	Recursive      bool
-	ReportPath     string
-	Concurrency    int
-	DryRun         bool // extract + prepare only; no API calls
+	Dir         string
+	Recursive   bool
+	ReportPath  string
+	Concurrency int
+	DryRun      bool // extract + prepare only; no API calls
 	// ReviewImages is the review sheet's folder (cull-review beside the report): each
 	// frame's thumbnail and subject crop are written into its cache while the full
 	// preview is decoded anyway, so review renders nothing. "" = off.
-	ReviewImages string
+	ReviewImages   string
 	Resume         bool
 	Fresh          bool // replace a report holding assessments; refused while it records moved frames
 	WriteXMP       bool
@@ -73,6 +73,7 @@ type Config struct {
 	Rank              bool          // at the end of the run, rank the sets that need it with the run's backend
 	RankTokens        int           // max output tokens per rank call; 0 = defaultRankTokens
 	RankTwice         bool          // rank each single-call set again with its frames reversed (Set.Reversed)
+	Rerank            bool          // at the end of the run, re-rank every set of two or more rankable frames, even ones with a model order (judge --rerank)
 	Effort            string        // model effort for evaluations and rankings; "" = the model's default
 	LocateEffort      string        // the same for locate calls
 
@@ -684,7 +685,7 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 		if budget == nil {
 			budget = &spend{}
 		}
-		used, run, rankErr = rankSets(ctx, rep, cfg, cfg.rankWith, false, budget)
+		used, run, rankErr = rankSets(ctx, rep, cfg, cfg.rankWith, cfg.Rerank, budget)
 		for _, i := range decideAll(rep, cfg.Policy, cfg.Seq) {
 			changed[i] = true
 		}

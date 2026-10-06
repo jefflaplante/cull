@@ -1043,3 +1043,22 @@ func TestRankBatchRankTwice(t *testing.T) {
 		t.Fatalf("batches %d, set %+v", len(fb.submitted), s)
 	}
 }
+
+// judge --batch over a judged report whose set is unranked ranks it through the
+// Message Batches API, and submits no evaluations: what cull rank --batch did.
+func TestJudgeBatchRanksAJudgedReport(t *testing.T) {
+	c, _ := seqShoot(t, 3) // judged, Rank off: the set is ordered by scores
+	p := llm.Price{In: 2, Out: 10}
+	c.Price, c.Batch, c.Rank, c.Resume = &p, true, true, true // same (empty) backend and model as seqShoot judged with
+	fb := &fakeBatch{}
+	rep, _, err := RunBatch(context.Background(), c, fb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fb.submitted) != 1 || len(fb.submitted[0]) != 1 {
+		t.Fatalf("want one batch holding one rank request, got %d batches", len(fb.submitted))
+	}
+	if rep.Sets[0].By != "model" {
+		t.Fatalf("set not ranked: %+v", rep.Sets[0])
+	}
+}

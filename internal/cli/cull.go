@@ -34,6 +34,7 @@ type cullOpts struct {
 	estimate     bool
 	maxCost      float64
 	noRank       bool
+	rerank       bool
 	second       bool
 	rankTwice    bool
 	yes          bool
@@ -61,7 +62,7 @@ tiles) to the model and applies the policy:
 Frames judged similar (a sequence: --seq-gap, --seq-look) are grouped into a set and,
 once every frame in it is judged, ranked with one model call (more for large sets,
 chunked and merged): the --keep-best best of each set keep their decision, the rest
-get --outranked. --no-rank skips ranking (run it later with 'cull rank').
+get --outranked. --no-rank skips ranking (judge ranks them on its next run); --rerank ranks every set again.
 
 Backends (--backend):
   anthropic    Messages API; key from --api-key-file, $ANTHROPIC_API_KEY, then
@@ -85,6 +86,9 @@ model and effort default to the report's. --fresh replaces it.`,
 			// the default now and changes nothing.
 			if o.fresh && cmd.Flags().Changed("resume") {
 				return fmt.Errorf("--fresh and --resume contradict each other")
+			}
+			if o.rerank && o.noRank {
+				return fmt.Errorf("--rerank and --no-rank contradict each other")
 			}
 			if o.moveCulled {
 				if o.sort == sortAll {
@@ -267,6 +271,7 @@ model and effort default to the report's. --fresh replaces it.`,
 			cfg.Rank = !o.noRank
 			cfg.SecondOpinion = o.second
 			cfg.RankTwice = o.rankTwice
+			cfg.Rerank = o.rerank
 			cfg.Effort, cfg.LocateEffort = o.effort, o.locateEffort
 
 			var rep *report.Report
@@ -323,7 +328,8 @@ model and effort default to the report's. --fresh replaces it.`,
 	registerSort(f, &o.sort, "move judged frames (with their .xmp) into folders beside them: --sort or --sort=all into keep/, review/, cull/; --sort=culls only culls into cull/. Undo with 'cull restore'")
 	f.BoolVar(&o.second, "second-opinion", false, "ask the model again about soft-or-worse frames (one more evaluation each, typically a minority of frames); when the two disagree, review")
 	f.BoolVar(&o.rankTwice, "rank-twice", false, "rank each set of up to 8 frames a second time with its frames reversed; only places both orders agree on count (inside --keep-best in both: best; outside in both: outranked; else disputed, review). Doubles those calls")
-	f.BoolVar(&o.noRank, "no-rank", false, "after judging, don't rank the sets that need it (run 'cull rank' separately later); until then each set is ordered by scores and --outranked applies to that order")
+	f.BoolVar(&o.noRank, "no-rank", false, "after judging, don't rank the sets that need it (judge ranks them on its next run); until then each set is ordered by scores")
+	f.BoolVar(&o.rerank, "rerank", false, "rank every set again, even ones the model already ranked (after re-judging, or adding frames); a policy change alone needs only cull decide, free")
 	o.policy.register(f)
 	f.IntVar(&o.checkpoint, "checkpoint", 25, "save the report every N results")
 	setSection(f, secSidecars, "overwrite-xmp", "labels", "no-labels", "write-xmp", "xmp-develop", "no-xmp", "move-culled")

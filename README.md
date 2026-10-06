@@ -132,7 +132,7 @@ undoes `--sort`.
 ```
 $ cull offload LEICA_M Pictures --name "Forest portraits" --location "Forest Park, Portland"
 …
-copied 17, skipped 0 (already there), failed 0: 1.1 GB in 2s (624 MB/s, verified)
+copied 17, skipped 0 (already there), failed 0: 1.1 GB in 2s (601 MB/s, verified)
 all 17 files verified on Pictures/2025-12-28 Forest portraits: safe to format the card
 
 $ cull judge --backend claude-code "Pictures/2025-12-28 Forest portraits"
@@ -144,6 +144,8 @@ ranked set 1 (2 frames): M1104115.DNG wins — … Sharpness at the eyes is the 
 results: map[cull:1 keep:14 review:2]
 
 $ cull decide --sort "Pictures/2025-12-28 Forest portraits"
+writing sidecars: 17 files
+sorting frames into keep/, review/ and cull/: 17 frames
 decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull/, 0 back into the shoot folder
 ```
 
@@ -761,7 +763,7 @@ plain lines. Ctrl-C works as before: in-flight frames finish, the report is save
 
 <!-- v0.2.0 renames -->
 For v0.1 users. Every old form below still works in v0.2.0, with a warning, and goes in
-the next release.
+the next release, except the `calibrate` sweep, which the policy grid replaced.
 
 | Old | New |
 |---|---|

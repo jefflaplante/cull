@@ -301,7 +301,7 @@ M1103817 and M1103865 in `photos/c1-kw-test/live/`; the report went to a temp fo
 The user labelled 979 of the 992 frames from the LEICA M card (keep or cull only), in
 `/Volumes/photos/2026/2025-12-27 Card-Offload` on the NAS. The frames were judged with
 `--backend claude-code` (Sonnet → claude-sonnet-5-5), with `--keep-best 2` and otherwise
-default policy; 174 sets were ranked. (`cull calibrate` now prints this grid, 20 policy rows, for any labelled report.)
+default policy; 174 sets were ranked. (`cull calibrate` now prints a grid of policy rows for any labelled report.)
 
 `cull calibrate` (rows: the user's label; columns: cull's verdict):
 

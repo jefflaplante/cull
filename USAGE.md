@@ -1,7 +1,7 @@
 # Using `cull`: from the card to Capture One
 
 This is a whole session, in order: copy the card, judge the frames, check them, then
-import into Capture One. Every command has `--help` with examples. The full flag
+import into Capture One. Every command has `--help` with examples; `--help-all` adds the tuning and experimental flags. The full flag
 reference is in the [README](README.md).
 
 **Every example here is real output, recorded 2026-10-03** (the screenshots are rendered
@@ -70,7 +70,7 @@ with a live progress bar:
 When the copy is done:
 
 ```
-copied 17, skipped 0 (already there), failed 0: 1.1 GB in 2s (624 MB/s, verified)
+copied 17, skipped 0 (already there), failed 0: 1.1 GB in 2s (601 MB/s, verified)
 all 17 files verified on Pictures/2025-12-28 Forest portraits: safe to format the card
 ```
 
@@ -79,7 +79,7 @@ all 17 files verified on Pictures/2025-12-28 Forest portraits: safe to format th
   match before it gets its real name.
 - **"Safe to format"** appears only when every file verified and the drive's own write
   cache was flushed.
-- **Speed:** 624 MB/s here, because this "card" is a folder on the same SSD. A real
+- **Speed:** 601 MB/s here, because this "card" is a folder on the same SSD. A real
   M11-P card over USB runs at about 140–216 MB/s; 992 frames (67.7 GB) took 8 minutes.
 - **The folder date** comes from the earliest capture time. This camera's clock was
   wrong, which is why it says 2025. Use `--date 2026-10-02` to set it yourself.
@@ -118,13 +118,11 @@ next: cull judge --estimate "Pictures/2025-12-28 Forest portraits"
 ```
 $ cull judge --estimate "Pictures/2025-12-28 Forest portraits"
 estimate: 17 frames × ~6k in / ~1k out tokens ≈ 102000 in / 17000 out ≈ $0.37 at list price (claude-sonnet-5-5)
-ranking ≈ 3 call(s), $0.09 at list price, if every frame lands in an 8-frame set (pairs cost more per frame; frames in no set cost nothing)
+ranking ≈ 2 call(s) for 2 set(s) already found, $0.06 at list price (at most: frames judged cull leave their sets)
 ```
 
-That output is from before the scan's sets were counted. Now the ranking line prices the
-sets the scan found: `ranking ≈ N call(s) for M set(s) already found, $X at list price
-(at most: frames judged cull leave their sets)`. Without a scan it assumes full 8-frame
-sets, which runs high.
+The ranking line prices the sets the scan already found. Without a scan it assumes full
+8-frame sets, which runs high.
 With `--backend claude-code` nothing is billed per token; it uses your subscription
 quota instead.
 
@@ -185,13 +183,13 @@ The whole run took 1 minute 56 seconds.
 
 ```
 $ cull status "Pictures/2025-12-28 Forest portraits"
-/Users/jeff/git/cull/photos/demo/Pictures/2025-12-28 Forest portraits: 17 DNGs; report cull-report.json (claude-code/sonnet → claude-sonnet-5-5, effort default)
+Pictures/2025-12-28 Forest portraits: 17 DNGs; report cull-report.json (claude-code/sonnet → claude-sonnet-5-5, effort default)
   assessed 17 · junk 0 · errors 0 · not yet judged 0
   model: keep 14 · review 2 · cull 1 · moved out of the shoot folder (keep/ review/ cull/) 0
   you: labelled 0/17 · rated 0 · disagree with the model 0
   sets: 2 (ranked 2, by scores 0)
   spent: not billed per token (claude-code)
-next: label a sample in cull review /Users/jeff/git/cull/photos/demo/Pictures/2025-12-28 Forest portraits (0/30 so far), then cull calibrate /Users/jeff/git/cull/photos/demo/Pictures/2025-12-28 Forest portraits
+next: label a sample in cull review 'Pictures/2025-12-28 Forest portraits' (0/17 so far), then cull calibrate 'Pictures/2025-12-28 Forest portraits'
 ```
 
 ## 4. Review in your browser
@@ -276,6 +274,8 @@ cull decide --keep-best 3 --outranked cull "Pictures/2025-12-28 Forest portraits
 
 ```
 $ cull decide --sort "Pictures/2025-12-28 Forest portraits"
+writing sidecars: 17 files
+sorting frames into keep/, review/ and cull/: 17 frames
 decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull/, 0 back into the shoot folder
 ```
 

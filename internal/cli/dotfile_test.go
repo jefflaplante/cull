@@ -129,3 +129,48 @@ func TestDotfileDeprecatedKeys(t *testing.T) {
 		t.Fatalf("resume key: %v\n%s", err, out)
 	}
 }
+
+func TestDotfileSortBoolWarns(t *testing.T) {
+	dir := judgedShoot(t)
+	dotfile(t, "sort = true\n")
+	out, err := run(t, "decide", dir)
+	if err != nil || !strings.Contains(out, "sort: deprecated") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep", "L1.DNG")); err != nil {
+		t.Fatal("sort = true did not sort all")
+	}
+}
+
+func TestDotfileMoveCulled(t *testing.T) {
+	dir := judgedShoot(t)
+	dotfile(t, "move-culled = true\n")
+	out, err := run(t, "decide", dir)
+	if err != nil || !strings.Contains(out, "move-culled: deprecated") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cull", "L3.DNG")); err != nil {
+		t.Fatalf("L3 not in cull/:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "L1.DNG")); err != nil {
+		t.Fatal("L1 left home expected")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep")); err == nil {
+		t.Fatal("keep/ should not exist")
+	}
+}
+
+func TestDotfileSortAndMoveCulled(t *testing.T) {
+	dir := judgedShoot(t)
+	dotfile(t, "sort = true\nmove-culled = true\n")
+	if out, err := run(t, "decide", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep", "L1.DNG")); err != nil {
+		t.Fatal("sort should win: L1 in keep/")
+	}
+	dir2 := judgedShoot(t)
+	if out, err := run(t, "decide", "--sort", "--move-culled", dir2); err == nil {
+		t.Fatalf("typed both should fail:\n%s", out)
+	}
+}

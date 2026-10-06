@@ -90,11 +90,9 @@ model and effort default to the report's. --fresh replaces it.`,
 			if o.rerank && o.noRank {
 				return fmt.Errorf("--rerank and --no-rank contradict each other")
 			}
-			if o.moveCulled {
-				if o.sort == sortAll {
-					return fmt.Errorf("--sort and --move-culled can't be combined: --sort already puts culls in cull/")
-				}
-				o.sort = sortCulls
+			o.sort = resolveMoveCulled(cmd, o.moveCulled, o.sort)
+			if o.sort == sortAll && o.moveCulled && cmd.Flags().Changed("sort") && cmd.Flags().Changed("move-culled") {
+				return fmt.Errorf("--sort and --move-culled can't be combined: --sort already puts culls in cull/")
 			}
 			if o.overwriteXMP && (o.noXMP || !o.writeXMP) {
 				return fmt.Errorf("--overwrite-xmp can't be used with --no-xmp")

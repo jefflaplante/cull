@@ -66,3 +66,17 @@ func sortArgs(n int) cobra.PositionalArgs {
 		return cobra.ExactArgs(n)(cmd, args)
 	}
 }
+
+// resolveMoveCulled folds the deprecated --move-culled into the sort mode. The
+// flag typed on the command line wins over one from ~/.cull; with neither
+// typed, --sort wins over the alias.
+func resolveMoveCulled(cmd *cobra.Command, moveCulled bool, m sortMode) sortMode {
+	if !moveCulled {
+		return m
+	}
+	f := cmd.Flags()
+	if f.Changed("sort") || (!f.Changed("move-culled") && m != sortNone) {
+		return m
+	}
+	return sortCulls
+}

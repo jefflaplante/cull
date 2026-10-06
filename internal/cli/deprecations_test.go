@@ -17,7 +17,9 @@ func TestDeprecations(t *testing.T) {
 		t.Fatalf("scan: %v\n%s", err, out)
 	}
 	export := filepath.Join(t.TempDir(), "labels.jsonl")
-	os.WriteFile(export, nil, 0o644)
+	if err := os.WriteFile(export, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		args []string
 		hint string

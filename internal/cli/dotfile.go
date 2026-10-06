@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -66,6 +67,11 @@ func applyDotfile(cmd *cobra.Command, w io.Writer, quiet bool) error {
 			f := cmd.Flags().Lookup(st.Key)
 			if f == nil || f.Changed {
 				continue // another command's flag, or typed on the command line
+			}
+			if st.Key == "sort" {
+				if _, err := strconv.ParseBool(st.Value); err == nil {
+					fmt.Fprintf(w, "warning: %s: deprecated, use sort = all (or sort = culls, or leave it out)\n", at)
+				}
 			}
 			if f.Deprecated != "" {
 				fmt.Fprintf(w, "warning: %s: deprecated, %s\n", at, f.Deprecated)

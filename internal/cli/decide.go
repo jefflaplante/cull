@@ -38,12 +38,10 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
   cull decide --sort=culls ~/Pictures/2026-09-26`,
 		Args: sortArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if moveC {
-				if sortF == sortAll {
-					return fmt.Errorf("--sort and --move-culled can't be combined: --sort already puts culls in cull/")
-				}
-				sortF = sortCulls
+			if sortF == sortAll && moveC && cmd.Flags().Changed("sort") && cmd.Flags().Changed("move-culled") {
+				return fmt.Errorf("--sort and --move-culled can't be combined: --sort already puts culls in cull/")
 			}
+			sortF = resolveMoveCulled(cmd, moveC, sortF)
 			moveCulls, sortAllF := sortF.flags()
 			write := writeXMP && !noXMP
 			if overwrite && !write {

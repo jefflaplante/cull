@@ -30,11 +30,12 @@ func newCalibrateCmd() *cobra.Command {
 sheet (cull-labels.jsonl beside the first report, unless --labels): a
 confusion matrix, the false-cull rate (you said keep, it culled), the missed-cull
 rate, and the review rate. Star ratings without a label don't count. It also
-re-decides the stored assessments across --review-below-sharpness values, so
-thresholds can be tuned without new model calls; apply the chosen ones with
-'cull decide'. Reports with multi-frame sets get a sets section: how often a
-labeled keep was ranked out of the keep-best cut, how often a labeled cull or
-review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
+re-decides the stored assessments and ranks under every --keep-best 1-5 ×
+--outranked review/cull × --raw-clipped review/ignore combination (the other settings from
+the report's policy or your flags), marking rows with false culls under 1%; apply the one
+you choose with 'cull decide'. Reports with multi-frame sets get a sets section: how often
+a labeled keep was ranked out of the keep-best cut, and how often a labeled cull or review
+was ranked into it.`,
 		Example: `  cull calibrate sonnet.json local.json
   cull calibrate --compare run1.json run2.json   # run-to-run stability; no labels needed`,
 		Args: cobra.MinimumNArgs(1),
@@ -91,7 +92,7 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 				if dups := labels.Duplicates(rep.Results); len(dups) > 0 {
 					return fmt.Errorf("%s: frames share a file name, so your labels can't tell them apart (rename them): %s", path, strings.Join(dups, "; "))
 				}
-				// Each report's sweep starts from the policy and grouping its decisions came from.
+				// Each report's grid starts from the policy and grouping its decisions came from.
 				p, notes, err := pol.resolve(cmd.Flags(), rep.Policy)
 				if err != nil {
 					return fmt.Errorf("%s: %w", path, err)
@@ -103,8 +104,8 @@ review was ranked into it, and a keep-best 1..5 sweep from the stored ranks.`,
 				noteStoredPolicy(cmd.ErrOrStderr(), append(notes, seqNotes...))
 				redecide := func(p eval.Policy) *report.Report { return pipeline.DecideCopy(rep, p, seq) }
 				calib.Format(w, path, rep, calib.Compare(rep, verdicts))
-				calib.FormatSweep(w, calib.Sweep(rep, verdicts, p, []float64{0, 3, 4, 5, 6, 7, 8}, redecide))
-				calib.FormatSets(w, calib.Sets(rep, verdicts, p.KeepBest), calib.SweepKeepBest(rep, verdicts, []int{1, 2, 3, 4, 5}))
+				calib.FormatGrid(w, calib.Grid(verdicts, p, redecide))
+				calib.FormatSets(w, calib.Sets(rep, verdicts, p.KeepBest))
 				fmt.Fprintln(w)
 			}
 			return nil

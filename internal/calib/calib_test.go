@@ -43,17 +43,6 @@ func TestCompareRatesAndMissing(t *testing.T) {
 	}
 }
 
-func TestSweepReviewBelowSharpness(t *testing.T) {
-	labels := map[string]string{"A.DNG": "keep", "B.DNG": "keep", "C.DNG": "cull", "D.DNG": "review"}
-	rows := Sweep(testReport(), labels, eval.Policy{}, []float64{0, 5.5, 9.5}, nil)
-	if len(rows) != 3 {
-		t.Fatalf("rows %d", len(rows))
-	}
-	if rows[0].Matrix.Counts["cull"]["keep"] != 1 || rows[1].Matrix.Counts["cull"]["review"] != 1 || rows[2].Matrix.Counts["keep"]["review"] != 2 {
-		t.Fatalf("sweep %+v %+v %+v", rows[0].Matrix.Counts, rows[1].Matrix.Counts, rows[2].Matrix.Counts)
-	}
-}
-
 func TestSetsAgreement(t *testing.T) {
 	g := func(rank int, best bool) *report.Group {
 		return &report.Group{ID: 1, Size: 4, Rank: rank, Of: 4, Best: best}
@@ -67,10 +56,6 @@ func TestSetsAgreement(t *testing.T) {
 	s := Sets(rep, labels, 2)
 	if s.Kept != 2 || s.KeptRankedOut != 1 || s.Culled != 2 || s.CulledInBest != 1 || s.Sets != 1 {
 		t.Fatalf("%+v", s)
-	}
-	sw := SweepKeepBest(rep, labels, []int{1, 3})
-	if sw[0].KeptRankedOut != 1 || sw[1].KeptRankedOut != 0 || sw[1].CulledInBest != 1 {
-		t.Fatalf("%+v", sw)
 	}
 }
 
@@ -90,28 +75,6 @@ func TestSetsRankOnlyKeepBest0(t *testing.T) {
 	}
 }
 
-// With a decide function (the pipeline's, sets and all), the sweep reports what
-// it decided, not the per-frame policy alone.
-func TestSweepUsesTheDecideFunction(t *testing.T) {
-	rep := testReport()
-	var seen []float64
-	demoteAll := func(p eval.Policy) *report.Report {
-		seen = append(seen, p.ReviewBelowSharpness)
-		cp := *rep
-		cp.Results = append([]report.Result(nil), rep.Results...)
-		for i := range cp.Results {
-			if cp.Results[i].Evaluation != nil {
-				cp.Results[i].Decision = eval.Review
-			}
-		}
-		return &cp
-	}
-	rows := Sweep(rep, map[string]string{"A.DNG": "keep"}, eval.Policy{}, []float64{0, 7}, demoteAll)
-	if rows[0].Matrix.Counts["keep"]["review"] != 1 || len(seen) != 2 || seen[1] != 7 {
-		t.Fatalf("counts %+v thresholds seen %v", rows[0].Matrix.Counts, seen)
-	}
-}
-
 func TestJunkFramesCountAndAreListed(t *testing.T) {
 	rep := testReport()
 	rep.Results = append(rep.Results, report.Result{File: "/shoot/J.DNG", Decision: eval.Cull,
@@ -128,13 +91,50 @@ func TestJunkFramesCountAndAreListed(t *testing.T) {
 	}
 }
 
-// Sweep's nil decide (each frame re-decided alone) must cope with junk frames,
-// which have a decision but no assessment.
-func TestSweepWithJunkFrame(t *testing.T) {
-	rep := testReport()
-	rep.Results = append(rep.Results, report.Result{File: "/shoot/J.DNG", Decision: eval.Cull, Junk: &report.JunkInfo{Kind: "black"}})
-	rows := Sweep(rep, map[string]string{"A.DNG": "keep", "J.DNG": "keep"}, eval.Policy{}, []float64{0, 7}, nil)
-	if len(rows) != 2 || rows[0].Matrix.N != 2 {
-		t.Fatalf("rows %+v", rows)
+// The grid tries every keep-best × outranked × raw-clipped combination through the
+// caller's decide, marks the current one, and stars rows under 1% false culls.
+func TestGrid(t *testing.T) {
+	labels := map[string]string{"a.DNG": "keep", "b.DNG": "cull"}
+	decide := func(p eval.Policy) *report.Report {
+		// b is outranked at keep-best 1; a is clipped. Each setting decides one frame.
+		b, a := eval.Keep, eval.Keep
+		if p.KeepBest < 2 && p.Outranked == eval.ActionCull {
+			b = eval.Cull
+		}
+		if p.RawClipped == eval.ActionReview {
+			a = eval.Review
+		}
+		ev := &eval.Evaluation{}
+		return &report.Report{Results: []report.Result{
+			{File: "/s/a.DNG", Decision: a, Evaluation: ev},
+			{File: "/s/b.DNG", Decision: b, Evaluation: ev},
+		}}
 	}
+	base := eval.Policy{KeepBest: 3, Outranked: eval.ActionReview, RawClipped: eval.ActionReview}
+	rows := Grid(labels, base, decide)
+	if len(rows) != 20 {
+		t.Fatalf("%d rows", len(rows))
+	}
+	current := 0
+	for _, r := range rows {
+		if r.Current {
+			current++
+			if r.KeepBest != 3 || r.Outranked != eval.ActionReview || r.RawClipped != eval.ActionReview {
+				t.Fatalf("wrong current row %+v", r)
+			}
+		}
+		caught := r.Matrix.Counts["cull"]["cull"]
+		if want := r.KeepBest == 1 && r.Outranked == eval.ActionCull; (caught == 1) != want {
+			t.Errorf("row %+v caught %d", r, caught)
+		}
+	}
+	if current != 1 {
+		t.Fatalf("%d current rows", current)
+	}
+	var b strings.Builder
+	FormatGrid(&b, rows)
+	if !strings.Contains(b.String(), "policy grid") || !strings.Contains(b.String(), "← current") || !strings.Contains(b.String(), "*") {
+		t.Fatalf("format:\n%s", b.String())
+	}
+	t.Log("\n" + b.String())
 }

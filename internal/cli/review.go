@@ -30,7 +30,7 @@ func newReviewCmd(so *sharedOpts) *cobra.Command {
 		jobs, port               int
 		force, static            bool
 		prepare, clearCache      bool
-		sortAfter                bool
+		sortAfter                sortMode
 		noOpen, noXMP, overwrite bool
 		labelsPath               string
 	)
@@ -69,7 +69,7 @@ Capture One or Lightroom: they lose track of files that move; use apply-c1 inste
   cull review --prepare ~/Pictures/2026-09-26    # fill the image cache now, open later
   cull review --clear-cache ~/Pictures/2026-09-26
   cull review --sort ~/Pictures/2026-09-26       # re-sort by your labels when you stop`,
-		Args: cobra.ExactArgs(1),
+		Args: sortArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fl := cmd.Flags()
 			for mode, on := range map[string]bool{"static": static, "prepare": prepare} {
@@ -93,7 +93,7 @@ Capture One or Lightroom: they lose track of files that move; use apply-c1 inste
 			if err != nil {
 				return fmt.Errorf("no report: %w (run scan or judge first, or pass -o)", err)
 			}
-			if sortAfter && rep.Backend == "" {
+			if sortAfter != sortNone && rep.Backend == "" {
 				return fmt.Errorf("--sort sorts by verdict, and %s is a scan report with no judged frames: run cull judge first", cfg.ReportPath)
 			}
 			if rep.Relocate(cfg.ReportPath, cfg.Dir) { // the folder was renamed: the server reloads the report, so save the new paths
@@ -131,10 +131,10 @@ Capture One or Lightroom: they lose track of files that move; use apply-c1 inste
 			if err := serveSheet(cmd, sheet, rep, review.ServeOptions{
 				ReportPath: cfg.ReportPath, LabelsPath: labelsOr(labelsPath, cfg.ReportPath),
 				WriteXMP: !noXMP, OverwriteXMP: overwrite,
-			}, port, fl.Changed("port"), !noOpen, sortAfter); err != nil || !sortAfter {
+			}, port, fl.Changed("port"), !noOpen, sortAfter != sortNone); err != nil || sortAfter == sortNone {
 				return err
 			}
-			return sortAfterReview(cmd, so, cfg, labelsPath)
+			return sortAfterReview(cmd, so, cfg, labelsPath, sortAfter)
 		},
 	}
 	f := cmd.Flags()
@@ -142,7 +142,7 @@ Capture One or Lightroom: they lose track of files that move; use apply-c1 inste
 	f.IntVarP(&jobs, "concurrency", "j", min(runtime.NumCPU(), 8), "parallel image rendering (~200 MB RAM each)")
 	f.BoolVar(&force, "force", false, "render every image again, even current ones")
 	f.BoolVar(&prepare, "prepare", false, "render missing or changed images into the cache, then exit (no server)")
-	f.BoolVar(&sortAfter, "sort", false, "when the server stops (Ctrl-C), re-sort the frames into keep/, review/ and cull/ by your labels, as decide --sort does; don't use it once those folders are imported")
+	registerSort(f, &sortAfter, "when the server stops (Ctrl-C), re-sort the frames by your labels, as decide --sort does (--sort=culls: only culls into cull/); don't use it once the folders are imported")
 	f.BoolVar(&clearCache, "clear-cache", false, "delete the sheet's cached images and exit (with --prepare: then render them again)")
 	f.BoolVar(&static, "static", false, "write an offline index.html instead of serving (labels stay in the browser)")
 	f.BoolVar(&noOpen, "no-open", false, "don't open the browser; open the printed URL yourself")
@@ -233,7 +233,7 @@ func labelsOr(path, reportPath string) string {
 // --sort with the report's stored policy (review has no policy flags, so verdicts
 // stay as decided) and the labels just saved. It runs on its own context, since the
 // command's was cancelled by the Ctrl-C that stopped the server.
-func sortAfterReview(cmd *cobra.Command, so *sharedOpts, cfg pipeline.Config, labelsPath string) error {
+func sortAfterReview(cmd *cobra.Command, so *sharedOpts, cfg pipeline.Config, labelsPath string, mode sortMode) error {
 	w := cmd.ErrOrStderr()
 	rep, err := report.Load(cfg.ReportPath)
 	if err != nil {
@@ -256,13 +256,14 @@ func sortAfterReview(cmd *cobra.Command, so *sharedOpts, cfg pipeline.Config, la
 	}
 	fmt.Fprintln(w, "re-sorting by your labels (--sort)…")
 	out := so.out.newOutput(cmd, true)
+	moveCulls, sortEverything := mode.flags()
 	sum, err := pipeline.Decide(context.Background(), cfg.ReportPath, pipeline.DecideOptions{
-		Dir: cfg.Dir, Policy: p, Sort: true, Seq: seq, Labels: lab, UI: out.UI,
+		Dir: cfg.Dir, Policy: p, MoveCulled: moveCulls, Sort: sortEverything, Seq: seq, Labels: lab, UI: out.UI,
 	}, out.Log)
 	out.Close()
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(w, describeDecide(sum, true))
+	fmt.Fprintln(w, describeDecide(sum, mode == sortAll))
 	return nil
 }

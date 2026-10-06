@@ -71,7 +71,7 @@ func TestMoveCulledMovesOnlyCullsWithTheirSidecars(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	culled := filepath.Join(dir, "culled")
+	culled := filepath.Join(dir, "cull")
 	if exists(filepath.Join(dir, "L1000001.DNG")) || exists(filepath.Join(dir, "L1000001.xmp")) {
 		t.Fatal("culled frame or its sidecar left in the shoot folder")
 	}
@@ -96,7 +96,7 @@ func TestMoveCulledMovesOnlyCullsWithTheirSidecars(t *testing.T) {
 func TestMoveCulledNeverOverwrites(t *testing.T) {
 	for _, clash := range []string{"L1000001.DNG", "L1000001.xmp"} {
 		dir, b := shoot(t)
-		culled := filepath.Join(dir, "culled")
+		culled := filepath.Join(dir, "cull")
 		os.MkdirAll(culled, 0o755)
 		os.WriteFile(filepath.Join(culled, clash), []byte("already here"), 0o644)
 		rep, _, err := Run(context.Background(), moveCfg(dir), b)
@@ -118,7 +118,7 @@ func TestMoveCulledNeverOverwrites(t *testing.T) {
 
 func TestMoveCulledLeavesFileWhenFolderCannotBeMade(t *testing.T) {
 	dir, b := shoot(t)
-	os.WriteFile(filepath.Join(dir, "culled"), []byte("a file, not a folder"), 0o644)
+	os.WriteFile(filepath.Join(dir, "cull"), []byte("a file, not a folder"), 0o644)
 	rep, _, err := Run(context.Background(), moveCfg(dir), b)
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestRestoreUndoesTheMove(t *testing.T) {
 	if _, _, err := Run(context.Background(), c, b); err != nil {
 		t.Fatal(err)
 	}
-	if !exists(filepath.Join(dir, "culled", "L1000001.xmp")) {
+	if !exists(filepath.Join(dir, "cull", "L1000001.xmp")) {
 		t.Fatal("pre-existing sidecar did not travel with its frame")
 	}
 
@@ -182,7 +182,7 @@ func TestRestoreUndoesTheMove(t *testing.T) {
 	if err != nil || n != 1 {
 		t.Fatalf("restored %d, err %v\n%s", n, err, log.String())
 	}
-	if !exists(filepath.Join(dir, "L1000001.DNG")) || exists(filepath.Join(dir, "culled")) {
+	if !exists(filepath.Join(dir, "L1000001.DNG")) || exists(filepath.Join(dir, "cull")) {
 		t.Fatal("frame not back, or empty culled/ left behind")
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, "L1000001.xmp")); string(got) != "user sidecar" {
@@ -211,7 +211,7 @@ func TestRestoreNeverOverwrites(t *testing.T) {
 	if got, _ := os.ReadFile(filepath.Join(dir, "L1000001.DNG")); string(got) != "new file at the old path" {
 		t.Fatal("restore overwrote a file")
 	}
-	if !exists(filepath.Join(dir, "culled", "L1000001.DNG")) || !strings.Contains(log.String(), "exists") {
+	if !exists(filepath.Join(dir, "cull", "L1000001.DNG")) || !strings.Contains(log.String(), "exists") {
 		t.Fatalf("culled copy should stay, with a note:\n%s", log.String())
 	}
 }
@@ -238,7 +238,7 @@ func TestRestoreAdoptsUnrecordedMove(t *testing.T) {
 	if _, _, err := Run(context.Background(), c, b); err != nil {
 		t.Fatal(err)
 	}
-	culled := filepath.Join(dir, "culled")
+	culled := filepath.Join(dir, "cull")
 	os.MkdirAll(culled, 0o755)
 	for _, n := range []string{"L1000001.DNG", "L1000001.xmp"} { // the move, without the save
 		if err := os.Rename(filepath.Join(dir, n), filepath.Join(culled, n)); err != nil {
@@ -261,7 +261,7 @@ func TestMoveCulledAdoptsUnrecordedMove(t *testing.T) {
 	if _, _, err := Run(context.Background(), c, b); err != nil {
 		t.Fatal(err)
 	}
-	culled := filepath.Join(dir, "culled")
+	culled := filepath.Join(dir, "cull")
 	os.MkdirAll(culled, 0o755)
 	os.Rename(filepath.Join(dir, "L1000001.DNG"), filepath.Join(culled, "L1000001.DNG"))
 	sum, err := Decide(context.Background(), filepath.Join(dir, "r.json"), DecideOptions{MoveCulled: true, Policy: eval.Policy{MinCropArea: 0.6}}, io.Discard)
@@ -282,7 +282,7 @@ func TestRestoreForgetsAlreadyRestoredMove(t *testing.T) {
 	if _, _, err := Run(context.Background(), moveCfg(dir), b); err != nil {
 		t.Fatal(err)
 	}
-	culled := filepath.Join(dir, "culled")
+	culled := filepath.Join(dir, "cull")
 	os.Rename(filepath.Join(culled, "L1000001.DNG"), filepath.Join(dir, "L1000001.DNG"))
 	os.Rename(filepath.Join(culled, "L1000001.xmp"), filepath.Join(dir, "L1000001.xmp"))
 	var log bytes.Buffer
@@ -314,7 +314,7 @@ func TestRenameNoReplaceRefusesExistingDestination(t *testing.T) {
 
 func TestMoveFixupRecordedOnce(t *testing.T) {
 	dir, b := shoot(t)
-	culled := filepath.Join(dir, "culled")
+	culled := filepath.Join(dir, "cull")
 	os.MkdirAll(culled, 0o755)
 	os.WriteFile(filepath.Join(culled, "L1000001.DNG"), []byte("already here"), 0o644)
 	if _, _, err := Run(context.Background(), moveCfg(dir), b); err != nil {
@@ -360,7 +360,7 @@ func TestFreshRefusedForUnrecordedMove(t *testing.T) {
 	if _, _, err := Run(context.Background(), c, b); err != nil {
 		t.Fatal(err)
 	}
-	culled := filepath.Join(dir, "culled")
+	culled := filepath.Join(dir, "cull")
 	os.MkdirAll(culled, 0o755)
 	os.Rename(filepath.Join(dir, "L1000001.DNG"), filepath.Join(culled, "L1000001.DNG"))
 	c.Fresh = true
@@ -378,7 +378,7 @@ func TestReconcileNeverAdoptsAStranger(t *testing.T) {
 	if _, _, err := Run(context.Background(), c, b); err != nil {
 		t.Fatal(err)
 	}
-	culled := filepath.Join(dir, "culled")
+	culled := filepath.Join(dir, "cull")
 	os.MkdirAll(culled, 0o755)
 	os.Remove(filepath.Join(dir, "L1000001.DNG"))
 	os.WriteFile(filepath.Join(culled, "L1000001.DNG"), []byte("someone else's file"), 0o644)

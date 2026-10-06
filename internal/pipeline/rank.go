@@ -263,7 +263,7 @@ func fillLooks(ctx context.Context, rep *report.Report, w io.Writer, s ui.Sink) 
 // Rank ranks an existing report's sets without judging again (cull rank). It loads
 // the report, computes missing looks from the DNGs (a schema-v3 report), decides,
 // ranks the sets that need it (every multi-frame set when force) on b, decides
-// again, then writes sidecars and syncs culled/ as Decide does (cfg's WriteXMP,
+// again, then writes sidecars and syncs the sort folders as Decide does (cfg's WriteXMP,
 // XMPDevelop, OverwriteXMP, MoveCulled, Labels), and saves the report as the
 // current schema. A ranking stop (budget, quota, Ctrl-C) is returned after the
 // report, with every ranking paid for so far, is saved.

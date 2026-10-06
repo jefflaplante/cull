@@ -130,7 +130,7 @@ func TestQuietStillReportsMoves(t *testing.T) {
 	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
 	bin := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
-	out, err := run(t, "judge", "-q", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--move-culled", dir)
+	out, err := run(t, "judge", "-q", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--sort=culls", dir)
 	if err != nil {
 		t.Fatalf("judge: %v\n%s", err, out)
 	}

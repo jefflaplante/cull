@@ -202,7 +202,7 @@ func TestRankImagesSizesAndMovedFrames(t *testing.T) {
 	}
 
 	r.FocusTarget = &report.FocusTarget{Source: "face", Box: &eval.NormBox{Left: 0.45, Top: 0.4, Right: 0.55, Bottom: 0.55}}
-	moved := filepath.Join(filepath.Dir(r.File), CulledDir, filepath.Base(r.File))
+	moved := filepath.Join(filepath.Dir(r.File), CullDir, filepath.Base(r.File))
 	if err := os.MkdirAll(filepath.Dir(moved), 0o755); err != nil {
 		t.Fatal(err)
 	}

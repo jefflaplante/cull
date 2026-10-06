@@ -15,9 +15,11 @@ import (
 	"github.com/jefflaplante/cull/internal/xmp"
 )
 
-// The folders, beside a frame's home, that frames are moved into: CulledDir by
-// --move-culled, the sort folders by --sort. Discover skips all of them, so resumed
-// and recursive runs never re-process moved frames.
+// The folders, beside a frame's home, that frames are moved into: the sort folders
+// (--sort=culls uses only CullDir). CulledDir is where v0.1 --move-culled put culls;
+// it is only read now: reconcileMove and Restore find frames there, and the next sort
+// moves them out. Discover skips all of them, so resumed and recursive runs never
+// re-process moved frames.
 const (
 	CulledDir = "culled"
 	KeepDir   = "keep"
@@ -32,7 +34,7 @@ type placement int
 
 const (
 	placeNone   placement = iota
-	placeCulled           // --move-culled: culls into culled/, everything else home
+	placeCulls            // --sort=culls: culls into cull/, everything else home
 	placeSorted           // --sort: keep/, review/, cull/ by verdict
 )
 
@@ -45,9 +47,9 @@ func want(r report.Result, lab labels.Entry, mode placement) string {
 	}
 	d, _ := labels.Effective(r, lab)
 	switch mode {
-	case placeCulled:
+	case placeCulls:
 		if d == eval.Cull {
-			return CulledDir
+			return CullDir
 		}
 	case placeSorted:
 		switch d {
@@ -132,8 +134,8 @@ func placeShown(rep *report.Report, lab map[string]labels.Entry, mode placement,
 	switch {
 	case toHome:
 		name, text = "home", "moving frames back into the shoot folder"
-	case mode == placeCulled:
-		name, text = "move", "moving culls into culled/"
+	case mode == placeCulls:
+		name, text = "move", "moving culls into cull/"
 	}
 	t := ui.Track(s, name, text, "frames", total)
 	defer t.Done()
@@ -141,9 +143,9 @@ func placeShown(rep *report.Report, lab map[string]labels.Entry, mode placement,
 }
 
 // moveCulled moves every frame whose effective verdict is cull, and that isn't
-// moved yet, into CulledDir beside it (see place).
+// moved yet, into CullDir beside it (see place; --sort=culls).
 func moveCulled(rep *report.Report, lab map[string]labels.Entry, log io.Writer, s ui.Sink) int {
-	return placeShown(rep, lab, placeCulled, log, false, s)
+	return placeShown(rep, lab, placeCulls, log, false, s)
 }
 
 // Restore moves every frame recorded as moved back to its original path (under

@@ -181,3 +181,64 @@ func TestOffloadKnowsThePlaceDirs(t *testing.T) {
 		t.Fatalf("offload.MovedDirs %v != placeDirs %v", offload.MovedDirs, placeDirs)
 	}
 }
+
+// Culls-only placement (--sort=culls) uses cull/, the same folder full sorting uses.
+func TestCullsOnlyUsesCullDir(t *testing.T) {
+	dir, b := shoot(t)
+	c := moveCfg(dir) // MoveCulled: culls only
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(filepath.Join(dir, CullDir, "L1000001.DNG")) || exists(filepath.Join(dir, CulledDir)) {
+		t.Fatal("the cull must be in cull/, and culled/ must not exist")
+	}
+	if !exists(filepath.Join(dir, "L1000002.DNG")) || !exists(filepath.Join(dir, "L1000003.DNG")) {
+		t.Fatal("keep and review frames stay home")
+	}
+}
+
+// A frame an older version moved into culled/ is found, re-placed by the next sort,
+// and restore brings it home from wherever it is.
+func TestLegacyCulledFolderIsResortedAndRestored(t *testing.T) {
+	dir, b := shoot(t)
+	c := moveCfg(dir)
+	c.MoveCulled = false
+	if _, _, err := Run(context.Background(), c, b); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate v0.1.x: L1 (cull) moved into culled/ with its sidecar, recorded.
+	legacy := filepath.Join(dir, CulledDir)
+	os.MkdirAll(legacy, 0o755)
+	for _, ext := range []string{".DNG", ".xmp"} {
+		if err := os.Rename(filepath.Join(dir, "L1000001"+ext), filepath.Join(legacy, "L1000001"+ext)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rep, _ := report.Load(c.ReportPath)
+	for i := range rep.Results {
+		if r := &rep.Results[i]; filepath.Base(r.File) == "L1000001.DNG" {
+			r.MovedTo, r.XMP = filepath.Join(legacy, "L1000001.DNG"), filepath.Join(legacy, "L1000001.xmp")
+		}
+	}
+	rep.Save(c.ReportPath)
+
+	if _, err := Decide(context.Background(), c.ReportPath, DecideOptions{Policy: c.Policy, Sort: true, WriteXMP: true}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	for _, ext := range []string{".DNG", ".xmp"} {
+		if !exists(filepath.Join(dir, CullDir, "L1000001"+ext)) {
+			t.Fatalf("L1000001%s not moved culled/ → cull/", ext)
+		}
+	}
+	if exists(legacy) {
+		t.Fatal("the emptied culled/ folder should be removed")
+	}
+	if _, err := Restore(c.ReportPath, dir, io.Discard, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"L1000001", "L1000002", "L1000003"} {
+		if !exists(filepath.Join(dir, n+".DNG")) {
+			t.Fatalf("%s not restored home", n)
+		}
+	}
+}

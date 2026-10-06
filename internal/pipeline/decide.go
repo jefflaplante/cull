@@ -23,7 +23,7 @@ type DecideOptions struct {
 	WriteXMP     bool
 	XMPDevelop   bool
 	OverwriteXMP bool                    // also overwrite sidecars the report doesn't record as ours
-	MoveCulled   bool                    // sync culled/: move new culls, restore frames no longer culled
+	MoveCulled   bool                    // --sort=culls: sync cull/, move new culls, restore frames no longer culled
 	Sort         bool                    // sync keep/, review/, cull/ with the effective verdicts
 	Seq          group.Options           // sequences of similar frames; Seq.Gap 0 = no grouping
 	Labels       map[string]labels.Entry // the user's labels by base name; nil = the model's verdicts alone
@@ -38,7 +38,7 @@ type DecideSummary struct {
 }
 
 // Decide re-runs the policy on every stored evaluation without calling a model,
-// then optionally rewrites sidecars and syncs culled/. Policy is the only place
+// then optionally rewrites sidecars and syncs cull/. Policy is the only place
 // decisions come from, so tuning it after calibration costs nothing. A schema-v3
 // report gets its looks computed from the DNGs and is saved as the current
 // schema. ctx bounds only that look computation: mirroring pipeline.Rank, a
@@ -47,7 +47,7 @@ type DecideSummary struct {
 // is moved.
 func Decide(ctx context.Context, reportPath string, o DecideOptions, log io.Writer) (DecideSummary, error) {
 	if o.Sort && o.MoveCulled {
-		return DecideSummary{Changed: map[string]int{}}, errors.New("--sort and --move-culled can't be combined: --sort already puts culls in cull/")
+		return DecideSummary{Changed: map[string]int{}}, errors.New("--sort=all and --sort=culls can't be combined")
 	}
 	rep, err := report.Load(reportPath)
 	if err != nil {
@@ -120,7 +120,7 @@ func redecide(rep *report.Report, o DecideOptions, log io.Writer, between func()
 	mode := placeNone
 	switch {
 	case o.MoveCulled:
-		mode = placeCulled
+		mode = placeCulls
 	case o.Sort:
 		mode = placeSorted
 	}

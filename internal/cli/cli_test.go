@@ -156,18 +156,6 @@ func TestRestoreWithoutReportFails(t *testing.T) {
 	}
 }
 
-func TestCullHasMoveCulledFlag(t *testing.T) {
-	for _, c := range NewRootCmd().Commands() {
-		if c.Name() == "judge" {
-			if f := c.Flags().Lookup("move-culled"); f == nil || f.DefValue != "false" {
-				t.Fatalf("move-culled flag: %+v", f)
-			}
-			return
-		}
-	}
-	t.Fatal("no cull command")
-}
-
 // tinyDNG writes a minimal DNG: IFD0 marked reduced-resolution, strip = a JPEG.
 func tinyDNG(t *testing.T, path string) {
 	t.Helper()
@@ -206,7 +194,7 @@ echo '{"type":"system","subtype":"init","apiKeySource":"none"}'
 echo '{"type":"result","is_error":false,"structured_output":{"sharpness":{"score":2,"status":"missed_focus","focus_target":"x"},"exposure":{"score":7,"status":"good","ev_adjust":0,"clipping":"none","reason":""},"composition":{"score":6,"status":"good","issues":[],"crop":{"apply":false,"left":0,"top":0,"right":1,"bottom":1}},"people":{"present":true,"eyes":"open","expression":"good"},"notes":"","keywords":["portrait","forest"]},"usage":{"input_tokens":10,"output_tokens":5}}'
 `
 
-func TestCullMoveCulledThenRestoreEndToEnd(t *testing.T) {
+func TestSortCullsThenRestoreEndToEnd(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	frame := filepath.Join(dir, "L1000001.DNG")
@@ -214,15 +202,15 @@ func TestCullMoveCulledThenRestoreEndToEnd(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
 
-	out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--write-xmp", "--move-culled", dir)
+	out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--write-xmp", "--sort=culls", dir)
 	if err != nil {
 		t.Fatalf("cull: %v\n%s", err, out)
 	}
-	moved := filepath.Join(dir, "culled", "L1000001.DNG")
+	moved := filepath.Join(dir, "cull", "L1000001.DNG")
 	if _, err := os.Stat(moved); err != nil {
-		t.Fatalf("frame not moved into culled/:\n%s", out)
+		t.Fatalf("frame not moved into cull/:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "culled", "L1000001.xmp")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "cull", "L1000001.xmp")); err != nil {
 		t.Fatal("sidecar not moved with the frame")
 	}
 	if !strings.Contains(out, "cull restore") {
@@ -579,7 +567,7 @@ func culledOne(t *testing.T) (dir, bin string) {
 func TestDecideUsesYourLabelsByDefault(t *testing.T) {
 	dir, _ := culledOne(t)
 	os.WriteFile(filepath.Join(dir, labels.FileName), []byte(`{"file":"L1000001.DNG","label":"keep","stars":5,"at":"2026-09-27T20:00:00Z"}`+"\n"), 0o644)
-	out, err := run(t, "decide", "--write-xmp", "--move-culled", dir)
+	out, err := run(t, "decide", "--write-xmp", "--sort=culls", dir)
 	if err != nil || !strings.Contains(out, "using your labels") {
 		t.Fatalf("decide: %v\n%s", err, out)
 	}
@@ -589,10 +577,10 @@ func TestDecideUsesYourLabelsByDefault(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(dir, "L1000001.xmp")); !strings.Contains(string(b), `xmp:Rating="5"`) || !strings.Contains(string(b), `xmp:Label="Green"`) {
 		t.Fatalf("your stars and verdict missing:\n%s", b)
 	}
-	if out, err := run(t, "decide", "--no-labels", "--write-xmp", "--move-culled", dir); err != nil {
+	if out, err := run(t, "decide", "--no-labels", "--write-xmp", "--sort=culls", dir); err != nil {
 		t.Fatalf("--no-labels: %v\n%s", err, out)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "culled", "L1000001.DNG")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "cull", "L1000001.DNG")); err != nil {
 		t.Fatal("--no-labels should follow the model's cull")
 	}
 	if _, err := run(t, "decide", "--no-labels", "--labels", "x.jsonl", dir); err == nil {
@@ -603,11 +591,11 @@ func TestDecideUsesYourLabelsByDefault(t *testing.T) {
 func TestCullResumeRespectsYourLabels(t *testing.T) {
 	dir, bin := culledOne(t)
 	os.WriteFile(filepath.Join(dir, labels.FileName), []byte(`{"file":"L1000001.DNG","label":"keep","stars":0,"at":"2026-09-27T20:00:00Z"}`+"\n"), 0o644)
-	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--resume", "--move-culled", dir); err != nil {
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--resume", "--sort=culls", dir); err != nil {
 		t.Fatalf("resume: %v\n%s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "L1000001.DNG")); err != nil {
-		t.Fatal("cull --move-culled moved a frame you labeled keep")
+		t.Fatal("cull --sort=culls moved a frame you labeled keep")
 	}
 }
 

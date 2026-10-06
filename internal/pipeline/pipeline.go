@@ -43,7 +43,7 @@ type Config struct {
 	Fresh          bool // replace a report holding assessments; refused while it records moved frames
 	WriteXMP       bool
 	OverwriteXMP   bool
-	MoveCulled     bool                    // move cull decisions (and sidecars) into CulledDir after processing
+	MoveCulled     bool                    // move cull decisions (and sidecars) into CullDir after processing (--sort=culls)
 	Sort           bool                    // move every judged frame (and sidecar) into keep/, review/ or cull/
 	Tags           *report.Tags            // given on this command; merged over the folder's stored tags
 	Labels         map[string]labels.Entry // your labels by base name: drive moves and sidecar rewrites at the end; nil = the model's
@@ -644,8 +644,8 @@ func guardOverwrite(cfg *Config) error {
 	}
 	evaluated, moved := prev.PaidWork()
 	if moved > 0 {
-		return fmt.Errorf("%s records %d frame(s) moved into %s/: run `cull restore %s` first, or use --resume or -o",
-			cfg.ReportPath, moved, CulledDir, cfg.Dir)
+		return fmt.Errorf("%s records %d frame(s) moved into sort folders: run `cull restore %s` first, or use -o for a separate report",
+			cfg.ReportPath, moved, cfg.Dir)
 	}
 	if evaluated > 0 && !cfg.Fresh {
 		return fmt.Errorf("%s holds %d assessed frame(s) ($%.2f): use --resume to continue it, --fresh to replace it, or -o for a separate report",
@@ -694,7 +694,7 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 		// grouping exists and from the model's verdict alone. Rewrite every frame whose
 		// decision didn't change above but that is left in a set (Group != nil, set by
 		// decideAll), so its sidecar gets cull:best, or that you labelled, so it carries
-		// your verdict and stars as --sort and --move-culled do.
+		// your verdict and stars as --sort does.
 		for i := range rep.Results {
 			r := &rep.Results[i]
 			if changed[i] || r.Evaluation == nil || r.Error != "" {
@@ -725,7 +725,7 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 				cfg.note(ui.Quiet, "sorted %d frame(s) into %s/, %s/ and %s/ (undo: cull restore %s)", n, KeepDir, ReviewDir, CullDir, cfg.Dir)
 			}
 		} else if n := moveCulled(rep, lab, cfg.warnWriter(), cfg.UI); n > 0 {
-			cfg.note(ui.Quiet, "moved %d culled frame(s) into %s/ (undo: cull restore %s)", n, CulledDir, cfg.Dir)
+			cfg.note(ui.Quiet, "moved %d culled frame(s) into %s/ (undo: cull restore %s)", n, CullDir, cfg.Dir)
 		}
 	}
 	if err := rep.Save(cfg.ReportPath); err != nil {

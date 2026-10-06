@@ -158,8 +158,8 @@ type Result struct {
 	CostUSD     float64          `json:"cost_usd,omitempty"` // list price of this frame's calls
 	XMP         string           `json:"xmp,omitempty"`
 	XMPDevelop  bool             `json:"xmp_develop,omitempty"` // the sidecar at XMP carries crs: develop settings
-	MovedTo     string           `json:"moved_to,omitempty"`
-	Junk        *JunkInfo        `json:"junk,omitempty"` // an unmistakably empty frame (see imageprep.Junk)    // set by --move-culled; cleared by restore
+	MovedTo     string           `json:"moved_to,omitempty"`    // set by --sort; cleared by restore
+	Junk        *JunkInfo        `json:"junk,omitempty"`        // an unmistakably empty frame (see imageprep.Junk)
 	Error       string           `json:"error,omitempty"`
 }
 
@@ -214,7 +214,7 @@ func (r Result) LookBytes() ([]uint8, bool) {
 }
 
 // PaidWork counts what a report holds that a fresh run would lose: frames with a
-// model assessment (paid for) and frames moved into culled/ (only the report
+// model assessment (paid for) and frames moved into sort folders (only the report
 // knows where they came from).
 func (r *Report) PaidWork() (evaluated, moved int) {
 	for _, x := range r.Results {

@@ -156,7 +156,7 @@ func TestRankCallsMakesNoModelCallsAndMovesNothing(t *testing.T) {
 	if _, _, _, err := RankCalls(context.Background(), rep, c, false, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(c.Dir, "culled")); err == nil {
+	if _, err := os.Stat(filepath.Join(c.Dir, "cull")); err == nil {
 		t.Fatal("RankCalls must not move anything")
 	}
 	for i := 1; i <= 3; i++ {

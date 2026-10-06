@@ -79,7 +79,7 @@ func TestDecideRewritesOnlyOurSidecars(t *testing.T) {
 
 func TestDecideSyncsMovedFrames(t *testing.T) {
 	dir, c := culledShoot(t, func(c *Config) { c.MoveCulled = true })
-	if !exists(filepath.Join(dir, "culled", "L1000001.DNG")) {
+	if !exists(filepath.Join(dir, "cull", "L1000001.DNG")) {
 		t.Fatal("setup: L1 not moved")
 	}
 	// Simulate a re-evaluation: L1 is fine after all, L2 blinked.
@@ -101,7 +101,7 @@ func TestDecideSyncsMovedFrames(t *testing.T) {
 	if sum.Moved != 1 || sum.Restored != 1 {
 		t.Fatalf("summary %+v", sum)
 	}
-	if !exists(filepath.Join(dir, "L1000001.DNG")) || !exists(filepath.Join(dir, "culled", "L1000002.DNG")) {
+	if !exists(filepath.Join(dir, "L1000001.DNG")) || !exists(filepath.Join(dir, "cull", "L1000002.DNG")) {
 		t.Fatal("L1 not restored or L2 not moved")
 	}
 }
@@ -159,7 +159,7 @@ func TestDecideStopsOnCancelledContextBeforeMovingAnything(t *testing.T) {
 	if sum.Frames != 0 || len(sum.Changed) != 0 {
 		t.Fatalf("decide must not have run: %+v", sum)
 	}
-	if exists(filepath.Join(dir, "culled")) {
+	if exists(filepath.Join(dir, "cull")) {
 		t.Fatal("nothing should have moved")
 	}
 	for _, n := range []string{"L1000001", "L1000002", "L1000003"} {
@@ -450,7 +450,7 @@ func TestMovedForeignSidecarStaysForeign(t *testing.T) {
 	if _, _, err := Run(context.Background(), c, b); err != nil {
 		t.Fatal(err)
 	}
-	moved := filepath.Join(dir, "culled", "L1000001.xmp")
+	moved := filepath.Join(dir, "cull", "L1000001.xmp")
 	opts := DecideOptions{Policy: eval.Policy{MinCropArea: 0.6}, WriteXMP: true}
 	if _, err := Decide(context.Background(), c.ReportPath, opts, io.Discard); err != nil {
 		t.Fatal(err)
@@ -475,7 +475,7 @@ func TestDecideLabelsDriveSidecarsAndMoves(t *testing.T) {
 	if _, err := Decide(context.Background(), c.ReportPath, DecideOptions{Policy: pol, MoveCulled: true}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, CulledDir, "L1000001.DNG")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, CullDir, "L1000001.DNG")); err != nil {
 		t.Fatal("the model's cull was not moved")
 	}
 	lab := map[string]labels.Entry{
@@ -489,7 +489,7 @@ func TestDecideLabelsDriveSidecarsAndMoves(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "L1000001.DNG")); err != nil {
 		t.Error("frame you labeled keep was not restored")
 	}
-	if _, err := os.Stat(filepath.Join(dir, CulledDir, "L1000002.DNG")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, CullDir, "L1000002.DNG")); err != nil {
 		t.Error("frame you labeled cull was not moved")
 	}
 	rep, _ := report.Load(c.ReportPath)
@@ -500,7 +500,7 @@ func TestDecideLabelsDriveSidecarsAndMoves(t *testing.T) {
 	if s := read(filepath.Join(dir, "L1000001.xmp")); !strings.Contains(s, `xmp:Label="Green"`) || !strings.Contains(s, "<rdf:li>cull:labeled</rdf:li>") {
 		t.Errorf("L1 sidecar:\n%s", s)
 	}
-	if s := read(filepath.Join(dir, CulledDir, "L1000002.xmp")); !strings.Contains(s, `xmp:Label="Red"`) {
+	if s := read(filepath.Join(dir, CullDir, "L1000002.xmp")); !strings.Contains(s, `xmp:Label="Red"`) {
 		t.Errorf("L2 sidecar did not follow the frame into culled/:\n%s", s)
 	}
 	if s := read(filepath.Join(dir, "L1000003.xmp")); !strings.Contains(s, `xmp:Rating="5"`) || !strings.Contains(s, `xmp:Label="Yellow"`) || strings.Contains(s, "labeled") {
@@ -525,7 +525,7 @@ func TestLabelsWithDuplicateNames(t *testing.T) {
 	if _, err := Decide(context.Background(), rp, DecideOptions{Labels: lab, MoveCulled: true}, io.Discard); err == nil || !strings.Contains(err.Error(), "share a file name") {
 		t.Fatalf("decide: %v", err)
 	}
-	if exists(filepath.Join(dir, "a", CulledDir, "L1.DNG")) || exists(filepath.Join(dir, "b", CulledDir, "L1.DNG")) {
+	if exists(filepath.Join(dir, "a", CullDir, "L1.DNG")) || exists(filepath.Join(dir, "b", CullDir, "L1.DNG")) {
 		t.Fatal("decide moved frames before refusing")
 	}
 	// cull (the end of a paid run) warns and falls back to the model's verdicts.
@@ -533,7 +533,7 @@ func TestLabelsWithDuplicateNames(t *testing.T) {
 	if _, err := finishRun(context.Background(), rep, Config{ReportPath: rp, Dir: dir, MoveCulled: true, Labels: lab, Log: &log}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(log.String(), "share a file name") || !exists(filepath.Join(dir, "a", CulledDir, "L1.DNG")) {
+	if !strings.Contains(log.String(), "share a file name") || !exists(filepath.Join(dir, "a", CullDir, "L1.DNG")) {
 		t.Fatalf("cull fallback: %s", log.String())
 	}
 }

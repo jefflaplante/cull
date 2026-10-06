@@ -156,8 +156,7 @@ func TestEstimateOnResumeCountsOnlyWhatsLeft(t *testing.T) {
 	}
 }
 
-// moveTo moves a shoot's frame into a sub-folder and records it, as --sort and
-// --move-culled do.
+// moveTo moves a shoot's frame into a sub-folder and records it, as --sort does.
 func moveTo(t *testing.T, dir, name, sub string) {
 	t.Helper()
 	rp := filepath.Join(dir, "cull-report.json")
@@ -186,7 +185,7 @@ func labelAll(t *testing.T, dir string) {
 	}
 }
 
-// A sorted shoot counts its sorted frames and suggests --sort, not --move-culled;
+// A sorted shoot counts its sorted frames and suggests --sort, not --sort=culls;
 // a shoot smaller than the label sample, fully labelled, still gets that far.
 func TestStatusAfterSort(t *testing.T) {
 	dir := statusShoot(t)
@@ -203,17 +202,24 @@ func TestStatusAfterSort(t *testing.T) {
 			t.Errorf("lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "--move-culled") {
-		t.Errorf("suggests --move-culled for a sorted shoot:\n%s", out)
+	if strings.Contains(out, "--sort=culls") {
+		t.Errorf("suggests --sort=culls for a sorted shoot:\n%s", out)
 	}
 }
 
-func TestStatusAfterMoveCulled(t *testing.T) {
-	dir := statusShoot(t)
-	labelAll(t, dir)
-	moveTo(t, dir, "L3.DNG", "culled")
-	if out, _ := run(t, "status", dir); !strings.Contains(out, "decide --write-xmp --move-culled") {
-		t.Errorf("a shoot using culled/ should keep --move-culled:\n%s", out)
+// A shoot whose only moved frames are culls (cull/, or the old culled/) suggests
+// --sort=culls and counts them.
+func TestStatusAfterSortCulls(t *testing.T) {
+	for _, folder := range []string{"cull", "culled"} {
+		dir := statusShoot(t)
+		labelAll(t, dir)
+		moveTo(t, dir, "L3.DNG", folder)
+		out, _ := run(t, "status", dir)
+		for _, want := range []string{"(1 sorted into folders)", "decide --write-xmp --sort=culls"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s/: lacks %q:\n%s", folder, want, out)
+			}
+		}
 	}
 }
 

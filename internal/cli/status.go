@@ -81,29 +81,25 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	if effort == "" {
 		effort = "default"
 	}
-	// Frames moved into keep/ review/ cull/ (--sort) or culled/ (--move-culled) are
-	// the shoot's too, though the folder walk skips those folders.
-	var sorted, culledDir int
+	// Frames moved into keep/ review/ cull/ (--sort; cull/ alone for --sort=culls, or
+	// the old culled/ folder) are the shoot's too, though the folder walk skips them.
+	var inCull, inKeepReview int
 	for _, r := range rep.Results {
 		if r.MovedTo == "" || !exists(r.MovedTo) {
 			continue
 		}
-		if filepath.Base(filepath.Dir(r.MovedTo)) == pipeline.CulledDir {
-			culledDir++
-		} else {
-			sorted++
+		switch filepath.Base(filepath.Dir(r.MovedTo)) {
+		case pipeline.CullDir, pipeline.CulledDir:
+			inCull++
+		default:
+			inKeepReview++
 		}
 	}
 	where := ""
-	switch {
-	case sorted > 0 && culledDir > 0:
-		where = fmt.Sprintf(" (%d sorted into folders, %d in %s/)", sorted, culledDir, pipeline.CulledDir)
-	case sorted > 0:
-		where = fmt.Sprintf(" (%d sorted into folders)", sorted)
-	case culledDir > 0:
-		where = fmt.Sprintf(" (%d in %s/)", culledDir, pipeline.CulledDir)
+	if n := inCull + inKeepReview; n > 0 {
+		where = fmt.Sprintf(" (%d sorted into folders)", n)
 	}
-	fmt.Fprintf(w, "%s: %d DNGs%s; report %s (%s, effort %s)\n", cfg.Dir, len(files)+sorted+culledDir, where, filepath.Base(cfg.ReportPath), model, effort)
+	fmt.Fprintf(w, "%s: %d DNGs%s; report %s (%s, effort %s)\n", cfg.Dir, len(files)+inCull+inKeepReview, where, filepath.Base(cfg.ReportPath), model, effort)
 
 	inReport := map[string]bool{}
 	var assessed, junk, errs, moved int
@@ -144,7 +140,7 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	}
 	fmt.Fprintf(w, "  assessed %d · junk %d · errors %d · not yet judged %d\n", assessed, junk, errs, unjudged)
 	if assessed+junk > 0 {
-		fmt.Fprintf(w, "  model: keep %d · review %d · cull %d · moved out of the shoot folder (culled/ or keep/ review/ cull/) %d\n", counts["keep"], counts["review"], counts["cull"], moved)
+		fmt.Fprintf(w, "  model: keep %d · review %d · cull %d · moved out of the shoot folder (keep/ review/ cull/) %d\n", counts["keep"], counts["review"], counts["cull"], moved)
 	}
 	fmt.Fprintf(w, "  you: labelled %d/%d · rated %d · disagree with the model %d\n", labelled, len(rep.Results), rated, disagree)
 	byModel, byScores := 0, 0
@@ -188,11 +184,11 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	case labelled < min(labelSampleTarget, len(rep.Results)):
 		next = fmt.Sprintf("label a sample in cull review %s (%d/%d so far), then cull calibrate %s", dir, labelled, min(labelSampleTarget, len(rep.Results)), dir)
 	default:
-		// The same placement the shoot already uses: --move-culled only for a shoot
-		// whose culls went into culled/; otherwise --sort, the usual workflow.
+		// The same placement the shoot already uses: --sort=culls for a shoot whose
+		// only moved frames are culls; otherwise --sort, the usual workflow.
 		move := "--sort"
-		if culledDir > 0 && sorted == 0 {
-			move = "--move-culled"
+		if inCull > 0 && inKeepReview == 0 {
+			move = "--sort=culls"
 		}
 		next = "cull calibrate " + dir + ", then cull decide --write-xmp " + move + " " + dir
 	}

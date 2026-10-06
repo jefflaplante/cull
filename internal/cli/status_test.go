@@ -48,7 +48,7 @@ func TestStatusCountsAndNextStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"4 DNGs", "assessed 3", "not yet judged 1", "keep 1 · review 1 · cull 1", "labelled 1/3", "rated 1", "next: cull judge --resume"} {
+	for _, want := range []string{"4 DNGs", "assessed 3", "not yet judged 1", "keep 1 · review 1 · cull 1", "labelled 1/3", "rated 1", "next: cull judge "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("lacks %q:\n%s", want, out)
 		}
@@ -65,7 +65,7 @@ func TestStatusSuggestsReviewThenCalibrate(t *testing.T) {
 func TestStatusSeesPendingBatch(t *testing.T) {
 	dir := statusShoot(t)
 	os.WriteFile(filepath.Join(dir, "cull-report.json.batch.json"), []byte("{}"), 0o644)
-	if out, _ := run(t, "status", dir); !strings.Contains(out, "--batch --resume") {
+	if out, _ := run(t, "status", dir); !strings.Contains(out, "cull judge --batch ") {
 		t.Fatalf("%s", out)
 	}
 }
@@ -141,18 +141,19 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-// On --resume the estimate prices only the frames still to judge, not the folder.
+// Continuing a report (the default), the estimate prices only the frames still to
+// judge, not the folder; --fresh prices them all.
 func TestEstimateOnResumeCountsOnlyWhatsLeft(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := statusShoot(t) // 3 judged
 	tinyDNG(t, filepath.Join(dir, "L4.DNG"))
-	out, err := run(t, "judge", "--estimate", "--resume", "--backend", "claude-code", dir)
+	out, err := run(t, "judge", "--estimate", "--backend", "claude-code", dir)
 	if err != nil || !strings.Contains(out, "estimate: 1 frames") || !strings.Contains(out, "3 already judged") {
 		t.Fatalf("err=%v\n%s", err, out)
 	}
-	out, err = run(t, "judge", "--estimate", "--backend", "claude-code", dir)
+	out, err = run(t, "judge", "--estimate", "--fresh", "--backend", "claude-code", dir)
 	if err != nil || !strings.Contains(out, "estimate: 4 frames") {
-		t.Fatalf("without --resume: err=%v\n%s", err, out)
+		t.Fatalf("with --fresh: err=%v\n%s", err, out)
 	}
 }
 

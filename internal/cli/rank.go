@@ -216,12 +216,7 @@ sidecars or move culls with a following 'cull decide --sort'.`,
 // moving to anthropic, and an explicit non-anthropic --backend would print a
 // warning for a run that's about to fail anyway.
 func (o *rankOpts) applyBackendModel(cfg *pipeline.Config, backendChanged, modelChanged bool, rep *report.Report) (warning string, err error) {
-	if !backendChanged && rep.Backend != "" {
-		o.backend = rep.Backend
-	}
-	if !modelChanged && rep.Model != "" && o.backend == rep.Backend {
-		o.model = rep.Model
-	}
+	o.backendFlags.fromReport(backendChanged, modelChanged, rep)
 	if o.model == "" {
 		o.model = backendDefaults[o.backend].model
 	}

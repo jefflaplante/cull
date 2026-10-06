@@ -133,7 +133,7 @@ func Discover(dir string, recursive bool) ([]string, error) {
 func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Usage, error) {
 	var total llm.Usage
 	if _, err := os.Stat(batchStatePath(cfg)); err == nil {
-		return nil, total, fmt.Errorf("an unfinished batch run is recorded in %s: finish it with --batch --resume (or delete that file to start over)", batchStatePath(cfg))
+		return nil, total, fmt.Errorf("an unfinished batch run is recorded in %s: finish it with cull judge --batch (or delete that file to start over)", batchStatePath(cfg))
 	}
 	// Refuse before judging any frame, not after: with ranking on, a sync run
 	// whose rank state is still pending a batch would pay to judge again just
@@ -178,7 +178,7 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 			for f := range jobs {
 				select {
 				case <-stop:
-					continue // drained unprocessed; --resume picks it up
+					continue // drained unprocessed; the next judge picks it up
 				default:
 				}
 				res, escUsage, serr := processOne(ctx, cfg, b, f)
@@ -482,12 +482,12 @@ func withEffort(b llm.Backend, cfg Config) llm.Backend {
 	return effortBackend{b, cfg}
 }
 
-// kept is whether --resume keeps a stored result instead of processing its frame again.
+// kept is whether a resumed run keeps a stored result instead of processing its frame again.
 func kept(r report.Result, dryRun bool, p eval.Policy) bool {
 	return r.Error == "" && (r.Evaluation != nil || dryRun || junked(r, p))
 }
 
-// Pending is the files a judge --resume would still process, given the stored report
+// Pending is the files a resumed judge would still process, given the stored report
 // (nil: all of them): what --estimate prices on a resume.
 func Pending(files []string, prev *report.Report, p eval.Policy) []string {
 	done := map[string]bool{}
@@ -522,7 +522,18 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 		}
 		cfg.detect = func(f *imageprep.Frame) []focus.Face { return d.Detect(f.Luma, f.W, f.H) }
 	}
-	if !cfg.Resume {
+	resume := cfg.Resume
+	if resume && !cfg.DryRun {
+		// A scan report holds nothing judged: judging replaces it (its tags carry over
+		// below). Tests judge with an empty backend name, so "nothing assessed" decides,
+		// not the name alone.
+		if prev, err := report.Load(cfg.ReportPath); err == nil && prev.Backend == "" {
+			if evaluated, _ := prev.PaidWork(); evaluated == 0 {
+				resume = false
+			}
+		}
+	}
+	if !resume {
 		if err := guardOverwrite(cfg); err != nil {
 			return nil, nil, err
 		}
@@ -538,7 +549,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 	}
 	rep.Tags = report.MergeTags(stored, cfg.Tags)
 	cfg.Tags = rep.Tags // every sidecar this run writes carries the merged tags
-	if cfg.Resume {
+	if resume {
 		prev, err := report.Load(cfg.ReportPath)
 		if err == nil && prev.Relocate(cfg.ReportPath, cfg.Dir) {
 			fmt.Fprintf(cfg.Log, "the report's frames moved to %s (the folder was renamed): continuing with their new paths\n", cfg.Dir)
@@ -555,34 +566,26 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 			}
 			if prev.SchemaVersion != report.SchemaVersion || prev.Backend != cfg.Backend || !sameModel ||
 				prev.Escalation != rep.Escalation {
-				scan := ""
-				if prev.Backend == "" {
-					scan = " (a scan report)"
-				}
 				// An older-schema report (e.g. from before sequence ranking) has a free
-				// upgrade: cull decide rewrites it in place with no model call. Dropping
-				// --resume instead would re-judge, and pay for, the whole shoot again.
+				// upgrade: cull decide rewrites it in place with no model call. --fresh
+				// instead would re-judge, and pay for, the whole shoot again.
 				if prev.SchemaVersion < report.SchemaVersion {
-					return nil, nil, fmt.Errorf("resume: %s%s was produced by schema v%d; this run is schema v%d: "+
-						"run `cull decide %s` (free; it upgrades the report in place), then --resume",
-						cfg.ReportPath, scan, prev.SchemaVersion, report.SchemaVersion, cfg.Dir)
+					return nil, nil, fmt.Errorf("resume: %s was produced by schema v%d; this run is schema v%d: "+
+						"run `cull decide %s` (free; it upgrades the report in place), then judge again",
+						cfg.ReportPath, prev.SchemaVersion, report.SchemaVersion, cfg.Dir)
 				}
-				// Dropping --resume is no escape: the overwrite guard refuses it, and
-				// --fresh would pay for the shoot again. Name what continues the report.
-				fix := fmt.Sprintf("rerun with --backend %s --model %q (and the same --escalate-* flags) to continue it", prev.Backend, prev.Model)
-				if prev.Backend == "" {
-					fix = "judge it without --resume (a scan report holds nothing paid for)"
-				}
-				return nil, nil, fmt.Errorf("resume: %s%s was produced by schema v%d, backend %q, model %q, escalation %q; "+
-					"this run is schema v%d, backend %q, model %q, escalation %q: %s, or use -o for a separate report",
-					cfg.ReportPath, scan, prev.SchemaVersion, prev.Backend, prev.Model, prev.Escalation,
-					report.SchemaVersion, cfg.Backend, cfg.Model, rep.Escalation, fix)
+				// --fresh would pay for the shoot again: name what continues the report.
+				return nil, nil, fmt.Errorf("%s was judged with backend %q, model %q, escalation %q (schema v%d); "+
+					"this run is backend %q, model %q, escalation %q (schema v%d): drop --backend/--model to continue it "+
+					"(give the same --escalate-* flags), use --fresh to replace it, or -o for a separate report",
+					cfg.ReportPath, prev.Backend, prev.Model, prev.Escalation, prev.SchemaVersion,
+					cfg.Backend, cfg.Model, rep.Escalation, report.SchemaVersion)
 			}
 			// Effort changes what the model answers, so like the model it can't change
 			// within one report: calibration compares reports, not mixtures.
 			if prev.Effort != cfg.Effort || prev.LocateEffort != cfg.LocateEffort {
 				return nil, nil, fmt.Errorf("resume: %s was judged with --effort %q --locate-effort %q (\"\" = the model's default); "+
-					"rerun with those to continue it, or -o for a separate report", cfg.ReportPath, prev.Effort, prev.LocateEffort)
+					"drop --effort/--locate-effort to continue it with those, use --fresh to replace it, or -o for a separate report", cfg.ReportPath, prev.Effort, prev.LocateEffort)
 			}
 			// Paid rankings carry over: decideAll reuses a stored order while it still
 			// covers its set, and ranking spend never leaves the report.
@@ -648,7 +651,7 @@ func guardOverwrite(cfg *Config) error {
 			cfg.ReportPath, moved, cfg.Dir)
 	}
 	if evaluated > 0 && !cfg.Fresh {
-		return fmt.Errorf("%s holds %d assessed frame(s) ($%.2f): use --resume to continue it, --fresh to replace it, or -o for a separate report",
+		return fmt.Errorf("%s holds %d assessed frame(s) ($%.2f): judge continues it unless --fresh; use -o for a separate report",
 			cfg.ReportPath, evaluated, prev.Cost())
 	}
 	return nil

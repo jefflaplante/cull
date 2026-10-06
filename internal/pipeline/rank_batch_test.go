@@ -509,8 +509,8 @@ func TestBatchJudgeRankReattachesOnResume(t *testing.T) {
 		t.Fatalf("after the failed ranking: %v, judge state %v, rank state %v", err, exists(c.ReportPath+".batch.json"), exists(c.ReportPath+".rank-batch.json"))
 	}
 	fb.statusErr = nil
-	if _, _, err := RunBatch(context.Background(), c, fb); err == nil || !strings.Contains(err.Error(), "--resume") {
-		t.Fatalf("a rerun without --resume must refuse (it would judge again), got %v", err)
+	if _, _, err := RunBatch(context.Background(), c, fb); err == nil || !strings.Contains(err.Error(), "--batch (without --fresh)") {
+		t.Fatalf("a rerun with --fresh (Resume off) must refuse (it would judge again), got %v", err)
 	}
 	c.Resume = true
 	rep, _, err := RunBatch(context.Background(), c, fb)
@@ -840,7 +840,7 @@ func TestRankBatchPendingKeepsStateWithRankHint(t *testing.T) {
 }
 
 // The same stuck-polling case reached through judge --batch's ranking round
-// (RunBatch): the hint says to rerun with --batch --resume, judge's own re-run.
+// (RunBatch): the hint says to rerun cull judge with --batch, judge's own re-run.
 func TestJudgeBatchPendingHintSaysResume(t *testing.T) {
 	c, _ := rankShoot(t)
 	c.BatchPoll = time.Hour
@@ -852,7 +852,7 @@ func TestJudgeBatchPendingHintSaysResume(t *testing.T) {
 		}
 	}}
 	_, _, err := RunBatch(ctx, c, fb)
-	if err == nil || !strings.Contains(err.Error(), "--batch --resume") {
+	if err == nil || !strings.Contains(err.Error(), "rerun cull judge with --batch") {
 		t.Fatalf("got %v", err)
 	}
 	if !exists(rankBatchStatePath(c)) {
@@ -880,7 +880,7 @@ func TestSubmitChunkCtrlCKeepsCallersOwnHint(t *testing.T) {
 	}
 }
 
-// judge's own submit gives its own "--batch --resume" hint on a pre-submit
+// judge's own submit gives its own "cull judge with --batch" hint on a pre-submit
 // Ctrl-C, reached through RunBatch (not a direct submitChunk call, so this
 // guards the real wiring judge uses).
 func TestJudgeSubmitCtrlCGivesResumeHint(t *testing.T) {
@@ -889,7 +889,7 @@ func TestJudgeSubmitCtrlCGivesResumeHint(t *testing.T) {
 	cancel()
 	fb := &fakeBatch{}
 	_, _, err := RunBatch(ctx, c, fb)
-	if err == nil || !strings.Contains(err.Error(), "state saved; rerun with --batch --resume to re-attach") {
+	if err == nil || !strings.Contains(err.Error(), "state saved; rerun cull judge with --batch to re-attach") {
 		t.Fatalf("got %v", err)
 	}
 	if len(fb.submitted) != 0 {

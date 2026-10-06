@@ -68,13 +68,16 @@ Backends (--backend):
                ~/.anthropic/api_key, ~/.config/anthropic/api_key, ~/.anthropic_api_key,
                ~/.anthropic. Billed per token.
   claude-code  runs 'claude -p' on your Claude subscription (never an API key).
-               Stops cleanly at --quota-stop of the 5-hour or 7-day window; resume later.
+               Stops cleanly at --quota-stop of the 5-hour or 7-day window; run judge
+               again later to continue.
   openai       any OpenAI-compatible server at --base-url (default: a local server on 127.0.0.1:8000).
-               --model is required; key optional (--openai-key-file, $OPENAI_API_KEY).`,
+               --model is required; key optional (--openai-key-file, $OPENAI_API_KEY).
+
+An existing report is continued: frames already judged are skipped, and the backend,
+model and effort default to the report's. --fresh replaces it.`,
 		Example: `  cull judge ~/Pictures/2026-09-26
   cull judge --backend claude-code -o cc.json ~/Pictures/2026-09-26
   cull judge --backend openai --model <model> ~/Pictures/2026-09-26
-  cull judge --resume ~/Pictures/2026-09-26
   cull judge --sort=culls ~/Pictures/2026-09-26`,
 		Args: sortArgs(1),
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -98,9 +101,6 @@ Backends (--backend):
 			}
 			if err := o.backendFlags.validate(); err != nil {
 				return err
-			}
-			if o.batch && o.backend != "anthropic" {
-				return fmt.Errorf("--batch uses the Message Batches API: --backend anthropic only")
 			}
 			if o.batch && o.second {
 				return fmt.Errorf("--second-opinion needs a synchronous run: drop --batch")
@@ -137,8 +137,54 @@ Backends (--backend):
 			if err != nil {
 				return err
 			}
+			fl := cmd.Flags()
+			// The report this run continues (nil: none, or --fresh). A scan report
+			// holds nothing judged, so it fixes no backend and no policy.
+			var prev *report.Report
+			if !o.fresh {
+				if r, err := report.Load(cfg.ReportPath); err == nil {
+					prev = r
+				}
+			}
+			judged := prev != nil && prev.Backend != ""
+			if judged {
+				o.backendFlags.fromReport(fl.Changed("backend"), fl.Changed("model"), prev)
+				// Effort follows the report only on its backend, as the model does: on
+				// another one the resume guard refuses (naming --fresh) anyway, and an
+				// effort the user never typed mustn't fail validation first.
+				if o.backend == prev.Backend {
+					if !fl.Changed("effort") {
+						o.effort = prev.Effort
+					}
+					if !fl.Changed("locate-effort") {
+						o.locateEffort = prev.LocateEffort
+					}
+				}
+				if err := o.backendFlags.validate(); err != nil {
+					return err
+				}
+			}
+			if o.batch && o.backend != "anthropic" {
+				if judged && !fl.Changed("backend") {
+					return fmt.Errorf("--batch uses the Message Batches API (anthropic), and %s was judged with %s: use -o for a separate report, or --fresh to replace it", cfg.ReportPath, o.backend)
+				}
+				return fmt.Errorf("--batch uses the Message Batches API: --backend anthropic only")
+			}
 			if o.model == "" {
 				o.model = backendDefaults[o.backend].model
+			}
+			cfg.Policy, _ = o.policy.policy() // validated in PreRunE
+			// Continuing: keep the policy and grouping its decisions came from.
+			if judged {
+				var notes, seqNotes []string
+				if cfg.Policy, notes, err = o.policy.resolve(fl, prev.Policy); err != nil {
+					return err
+				}
+				cfg.Seq, seqNotes = resolveSeq(fl, cfg.Seq, prev.Seq)
+				if err := validSeq(cfg.Seq); err != nil {
+					return fmt.Errorf("the report's stored grouping: %w", err)
+				}
+				noteStoredPolicy(cmd.ErrOrStderr(), append(notes, seqNotes...))
 			}
 			if err := checkPriced(cmd, o.backend, o.model, o.maxCost); err != nil {
 				return err
@@ -159,23 +205,19 @@ Backends (--backend):
 				if err != nil {
 					return err
 				}
-				if o.resume { // only what's left costs anything
-					if prev, err := report.Load(cfg.ReportPath); err == nil {
-						p, _ := o.policy.policy()
-						if rp, _, err := o.policy.resolve(cmd.Flags(), prev.Policy); err == nil {
-							p = rp
-						}
-						todo := pipeline.Pending(files, prev, p)
-						fmt.Fprintf(cmd.ErrOrStderr(), "resume: %d already judged, %d to go\n", len(files)-len(todo), len(todo))
-						files = todo
+				pending := files
+				if prev != nil { // only what's left costs anything
+					pending = pipeline.Pending(files, prev, cfg.Policy)
+					if judged {
+						fmt.Fprintf(cmd.ErrOrStderr(), "resume: %d already judged, %d to go\n", len(files)-len(pending), len(pending))
 					}
 				}
-				usd := printEstimate(cmd, len(files), o.backend, o.model, price, priced, o.batch, !o.noRank, o.rankTwice)
+				usd := printEstimate(cmd, len(pending), o.backend, o.model, price, priced, o.batch, !o.noRank, o.rankTwice)
 				if escPriced {
 					// Only frames the first pass doubts escalate, and which those are isn't
 					// known before judging: price the bound, so the question and --max-cost
 					// advice aren't blind to it.
-					eusd, _, _ := llm.Estimate(len(files), escPrice, false)
+					eusd, _, _ := llm.Estimate(len(pending), escPrice, false)
 					fmt.Fprintf(cmd.ErrOrStderr(), "escalation to %s/%s ≤ $%.2f at list price, if every frame escalates (only frames the first pass calls %s do)\n",
 						o.escalateBackend, o.escalateModel, eusd, o.escalateOnList)
 					usd += eusd
@@ -207,7 +249,7 @@ Backends (--backend):
 			cfg.Model = o.model
 			cfg.Locate = o.locate == "model"
 			cfg.Concurrency = o.backendFlags.concurrencyOrDefault(o.concurrency)
-			cfg.Resume = o.resume
+			cfg.Resume = !o.fresh
 			cfg.Fresh = o.fresh
 			cfg.WriteXMP = o.writeXMP && !o.noXMP
 			cfg.XMPDevelop = false
@@ -219,22 +261,6 @@ Backends (--backend):
 				}
 			}
 			cfg.RawClip = o.rawClip
-			cfg.Policy, _ = o.policy.policy() // validated in PreRunE
-			// Continuing a report: keep the policy its decisions came from.
-			if o.resume {
-				if prev, err := report.Load(cfg.ReportPath); err == nil {
-					var notes []string
-					if cfg.Policy, notes, err = o.policy.resolve(cmd.Flags(), prev.Policy); err != nil {
-						return err
-					}
-					var seqNotes []string
-					cfg.Seq, seqNotes = resolveSeq(cmd.Flags(), cfg.Seq, prev.Seq)
-					if err := validSeq(cfg.Seq); err != nil {
-						return fmt.Errorf("the report's stored grouping: %w", err)
-					}
-					noteStoredPolicy(cmd.ErrOrStderr(), append(notes, seqNotes...))
-				}
-			}
 			cfg.CheckpointN = o.checkpoint
 			cfg.Rank = !o.noRank
 			cfg.SecondOpinion = o.second
@@ -259,10 +285,10 @@ Backends (--backend):
 			out.Close()
 			printSummary(cmd, cfg.ReportPath, rep, usage, b.Name(), o.batch)
 			if errors.Is(err, llm.ErrBudget) {
-				fmt.Fprintln(cmd.ErrOrStderr(), "stopped at --max-cost; rerun with --resume (and a higher --max-cost) to continue")
+				fmt.Fprintln(cmd.ErrOrStderr(), "stopped at --max-cost; run the same command again (with a higher --max-cost) to continue")
 			}
 			if errors.Is(err, llm.ErrQuotaStop) {
-				fmt.Fprintln(cmd.ErrOrStderr(), "stopped early to protect your subscription quota; rerun later with --resume")
+				fmt.Fprintln(cmd.ErrOrStderr(), "stopped early to protect your subscription quota; run the same command later to continue")
 			}
 			return err
 		},
@@ -280,8 +306,9 @@ Backends (--backend):
 	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price, or batch price with --batch (0 = no limit); resume later")
 	f.StringVar(&o.locate, "locate", "model", "when no face is found, ask the model for the focus target: model or off")
 	f.IntVarP(&o.concurrency, "concurrency", "j", 0, "parallel evaluations (0 = backend default: anthropic 4, claude-code 2, openai 4)")
-	f.BoolVar(&o.resume, "resume", false, "skip files already evaluated in the existing report")
-	f.BoolVar(&o.fresh, "fresh", false, "replace an existing report that holds assessments (default: refuse; see --resume)")
+	f.BoolVar(&o.resume, "resume", false, "continue the existing report (the default now)")
+	f.MarkDeprecated("resume", "judge continues an existing report by default; --fresh replaces it")
+	f.BoolVar(&o.fresh, "fresh", false, "replace an existing report that holds assessments (default: continue it)")
 	f.BoolVar(&o.noXMP, "no-xmp", false, "don't write sidecars (by default cull keeps its own sidecars current: rating, label, keywords; never over ones it didn't write)")
 	f.BoolVar(&o.writeXMP, "write-xmp", true, "write sidecars (the default; --no-xmp turns them off)")
 	f.BoolVar(&o.xmpDevelop, "xmp-develop", false, "also write Adobe crs exposure/crop (not applied by Capture One)")

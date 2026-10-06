@@ -172,13 +172,13 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	var next string
 	switch {
 	case judgeBatch:
-		next = "cull judge --batch --resume " + dir + "   (re-attaches; already paid for)"
+		next = "cull judge --batch " + dir + "   (re-attaches; already paid for)"
 	case rankBatch:
 		next = "cull rank --batch " + dir + "   (re-attaches; already paid for)"
 	case rep.Backend == "":
 		next = "cull judge --estimate " + dir + "   (then cull judge)"
 	case unjudged > 0:
-		next = "cull judge --resume " + dir
+		next = "cull judge " + dir
 	case byScores > 0:
 		next = "cull rank --estimate " + dir + "   (then cull rank)"
 	case labelled < min(labelSampleTarget, len(rep.Results)):

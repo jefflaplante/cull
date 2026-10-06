@@ -9,6 +9,7 @@ import (
 
 	"github.com/jefflaplante/cull/internal/config"
 	"github.com/jefflaplante/cull/internal/llm"
+	"github.com/jefflaplante/cull/internal/report"
 )
 
 // backendFlags select and construct a model backend: shared by judge and rank so
@@ -64,6 +65,18 @@ func (o *backendFlags) validate() error {
 		}
 	}
 	return nil
+}
+
+// fromReport defaults --backend and --model to what rep was judged with, unless
+// typed. A ~/.cull value isn't typed, so the report wins over it, as a stored policy
+// does. The model follows the report only while the backend matches it.
+func (o *backendFlags) fromReport(backendTyped, modelTyped bool, rep *report.Report) {
+	if !backendTyped && rep.Backend != "" {
+		o.backend = rep.Backend
+	}
+	if !modelTyped && rep.Model != "" && o.backend == rep.Backend {
+		o.model = rep.Model
+	}
 }
 
 // newBackend builds the selected backend and describes its credential source

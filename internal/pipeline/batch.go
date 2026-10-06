@@ -71,19 +71,19 @@ func frameID(path string) string {
 // RunBatch evaluates the shoot through the Message Batches API: half price,
 // asynchronous. Round 1 sends evaluations for frames with a face and locate
 // requests for the rest; round 2 evaluates the located frames. Polling can be
-// interrupted: rerun with Resume to re-attach to batches already paid for.
+// interrupted: rerun with Resume (judge without --fresh) to re-attach to batches already paid for.
 func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Report, llm.Usage, error) {
 	var total llm.Usage
 	statePath := batchStatePath(cfg)
 	if p := rankBatchStatePath(cfg); fileExists(p) && !cfg.Resume {
-		// Without --resume every frame would be judged (and paid for) again.
-		return nil, total, fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun with --batch --resume to re-attach, "+
+		// With --fresh every frame would be judged (and paid for) again.
+		return nil, total, fmt.Errorf("an unfinished batch ranking is recorded in %s: rerun cull judge with --batch (without --fresh) to re-attach, "+
 			"or delete %s to abandon it (what it already cost is paid; its answers are lost)", p, p)
 	}
 	st, err := loadBatchState(statePath)
 	switch {
 	case err == nil && !cfg.Resume:
-		return nil, total, fmt.Errorf("an unfinished batch run is recorded in %s: rerun with --batch --resume to re-attach (or delete it to start over)", statePath)
+		return nil, total, fmt.Errorf("an unfinished batch run is recorded in %s: rerun cull judge with --batch to re-attach (or delete it to start over)", statePath)
 	case err == nil && (st.Backend != cfg.Backend || st.Model != cfg.Model):
 		return nil, total, fmt.Errorf("%s belongs to %s/%s, not %s/%s", statePath, st.Backend, st.Model, cfg.Backend, cfg.Model)
 	case errors.Is(err, fs.ErrNotExist):
@@ -223,7 +223,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 		return rep, total, err
 	}
 	if err := os.Remove(statePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		cfg.warn("couldn't remove %s (%v); a later --resume skips the frames it holds", statePath, err)
+		cfg.warn("couldn't remove %s (%v); a later judge skips the frames it holds", statePath, err)
 	}
 	if cfg.Rank && !cfg.DryRun {
 		cfg.rankWith = batchExec{client: client, cfg: cfg, statePath: rankBatchStatePath(cfg), rerun: rerunJudgeBatch}
@@ -289,7 +289,7 @@ func prepareRound(cfg Config, files []string, st *batchState, build func(*prepar
 // submit sends requests in size-capped chunks (submitChunk), stopping at the first
 // chunk that fails. what ("judge") and round are for the log and the record. rerun
 // is the hint a Ctrl-C before any chunk is sent gives, naming the caller's own
-// re-run command (judge's "--batch --resume", cull rank's own hint): submitChunk
+// re-run command (judge's "cull judge with --batch", cull rank's own hint): submitChunk
 // itself doesn't know which command called it, so it never hard-codes one.
 func submit(ctx context.Context, cfg Config, client BatchClient, recs *[]*batchRecord, reqs []llm.BatchRequest, what string, round int, rerun string, save func() error) error {
 	t := ui.Track(cfg.UI, "upload", "uploading the batch", "requests", len(reqs))
@@ -383,7 +383,7 @@ func collect(ctx context.Context, cfg Config, client BatchClient, st *batchState
 		}
 		status, err := await(ctx, cfg, client, b.ID)
 		if err != nil {
-			return fmt.Errorf("%w (state saved; rerun with --batch --resume to re-attach)", err)
+			return fmt.Errorf("%w (state saved; rerun cull judge with --batch to re-attach)", err)
 		}
 		schemaFor := func(id string) map[string]any {
 			if strings.HasPrefix(id, "L-") {
@@ -393,7 +393,7 @@ func collect(ctx context.Context, cfg Config, client BatchClient, st *batchState
 		}
 		err = client.BatchResults(ctx, status.ResultsURL, schemaFor, func(r llm.BatchResult) { applyResult(cfg, st, r) })
 		if err != nil {
-			return fmt.Errorf("batch %s results: %w (rerun with --batch --resume)", b.ID, err)
+			return fmt.Errorf("batch %s results: %w (rerun cull judge with --batch)", b.ID, err)
 		}
 		b.Status = "collected"
 		if err := save(); err != nil {
@@ -423,7 +423,7 @@ func await(ctx context.Context, cfg Config, client BatchClient, id string) (llm.
 			}
 		}
 		if t == nil {
-			t = ui.Track(cfg.UI, "batch", "waiting for the batch (Ctrl-C is safe; --resume re-attaches)", "requests", total)
+			t = ui.Track(cfg.UI, "batch", "waiting for the batch (Ctrl-C is safe; running the same command again re-attaches)", "requests", total)
 		}
 		t.Add(finished - shown)
 		shown = max(shown, finished)

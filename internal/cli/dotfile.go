@@ -16,7 +16,7 @@ import (
 // (a dotfile -q would clash with a typed -v). Type them when you mean them.
 var notInDotfile = map[string]bool{
 	"yes": true, "fresh": true, "force": true, "run": true, "probe": true, "verify": true,
-	"dry-run": true, "estimate": true, "prepare": true, "clear-cache": true, "resume": true,
+	"dry-run": true, "estimate": true, "prepare": true, "clear-cache": true,
 	"overwrite-xmp": true, "report": true, "help": true, "version": true,
 	"quiet": true, "verbose": true, "debug": true, "log-level": true,
 }
@@ -24,7 +24,7 @@ var notInDotfile = map[string]bool{
 // applyDotfile sets flag defaults from the user's dotfile (config.SettingsPath) on
 // cmd, after its flags are parsed and before it runs. A flag typed on the command
 // line wins; a dotfile value is not "typed", so a report's stored policy (decide,
-// rank, judge --resume) still wins over it: the dotfile replaces only the built-in
+// rank, judge continuing a report) still wins over it: the dotfile replaces only the built-in
 // defaults. Lines without a section apply to every command with the flag; a
 // [command] section applies to that command, after the lines without one. It notes
 // the values it used on w unless quiet.

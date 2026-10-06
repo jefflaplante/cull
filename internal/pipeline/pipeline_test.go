@@ -226,9 +226,8 @@ func TestResumeRefusesDifferentBackendOrSchema(t *testing.T) {
 	}
 }
 
-// Dropping --resume is no longer an escape (the overwrite guard refuses it, and
-// --fresh would pay for the shoot again): a model mismatch names the flags that
-// continue the report.
+// --fresh would pay for the shoot again: a model mismatch names the report's model
+// and says to drop --backend/--model to continue it.
 func TestResumeModelMismatchNamesTheReportsModel(t *testing.T) {
 	dir := t.TempDir()
 	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
@@ -239,14 +238,15 @@ func TestResumeModelMismatchNamesTheReportsModel(t *testing.T) {
 	}
 	c.Resume, c.Model = true, "claude-sonnet-5-5"
 	_, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
-	if err == nil || !strings.Contains(err.Error(), `--model "claude-sonnet-5"`) || strings.Contains(err.Error(), "drop --resume") {
+	if err == nil || !strings.Contains(err.Error(), `model "claude-sonnet-5"`) || !strings.Contains(err.Error(), "drop --backend/--model") ||
+		!strings.Contains(err.Error(), "--fresh") {
 		t.Fatalf("got %v", err)
 	}
 }
 
 // A report from an older schema (e.g. saved before sequence ranking) advises the
-// free fix (cull decide upgrades it in place), not dropping --resume: that would
-// re-judge, and pay for, the whole shoot again.
+// free fix (cull decide upgrades it in place), not --fresh: that would re-judge, and
+// pay for, the whole shoot again.
 func TestResumeOnOlderSchemaAdvisesDecideNotRejudging(t *testing.T) {
 	dir := t.TempDir()
 	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
@@ -258,11 +258,11 @@ func TestResumeOnOlderSchemaAdvisesDecideNotRejudging(t *testing.T) {
 	if err == nil {
 		t.Fatal("want a refusal")
 	}
-	if !strings.Contains(err.Error(), "cull decide") || !strings.Contains(err.Error(), "--resume") {
-		t.Fatalf("want advice to run cull decide then --resume, got %v", err)
+	if !strings.Contains(err.Error(), "cull decide") || !strings.Contains(err.Error(), "judge again") {
+		t.Fatalf("want advice to run cull decide then judge again, got %v", err)
 	}
-	if strings.Contains(err.Error(), "drop --resume") {
-		t.Fatalf("must not advise dropping --resume (that re-judges and pays again): %v", err)
+	if strings.Contains(err.Error(), "--fresh") {
+		t.Fatalf("must not advise --fresh (that re-judges and pays again): %v", err)
 	}
 }
 
@@ -495,20 +495,6 @@ func TestBudgetStopKeepsResultsAndRecordsCost(t *testing.T) {
 	}
 }
 
-func TestResumeAfterScanSaysSo(t *testing.T) {
-	dir := t.TempDir()
-	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
-	c := cfg(dir)
-	c.DryRun = true
-	if _, _, err := Run(context.Background(), c, nil); err != nil {
-		t.Fatal(err)
-	}
-	c.DryRun, c.Resume, c.Backend, c.Model = false, true, "anthropic", "claude-sonnet-5"
-	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err == nil || !strings.Contains(err.Error(), "a scan report") {
-		t.Fatalf("got %v", err)
-	}
-}
-
 func TestLandedTileOnlyWithoutSubjectByDefault(t *testing.T) {
 	face := func(*imageprep.Frame) []focus.Face {
 		return []focus.Face{{Rect: image.Rect(400, 300, 600, 500), Q: 120}}
@@ -548,8 +534,8 @@ func TestRerunWithoutResumeRefusesPaidReport(t *testing.T) {
 		c := cfg(dir)
 		c.DryRun = dry
 		_, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
-		if err == nil || !strings.Contains(err.Error(), "--resume") || !strings.Contains(err.Error(), "--fresh") {
-			t.Fatalf("dry=%v: want a refusal naming --resume and --fresh, got %v", dry, err)
+		if err == nil || !strings.Contains(err.Error(), "judge continues it") || !strings.Contains(err.Error(), "--fresh") {
+			t.Fatalf("dry=%v: want a refusal saying judge continues it unless --fresh, got %v", dry, err)
 		}
 	}
 	if after, _ := os.ReadFile(filepath.Join(dir, "r.json")); !bytes.Equal(before, after) {
@@ -909,3 +895,25 @@ type pinnedRankBackend struct {
 
 func (p *pinnedRankBackend) Resolved() string { return "claude-sonnet-5" }
 func (p *pinnedRankBackend) Pin(model string) { p.pinned = model }
+
+// With Resume on, a scan report is nothing to continue: judging starts, and the
+// scan's tags carry over.
+func TestResumeOverAScanReportJudges(t *testing.T) {
+	dir := t.TempDir()
+	minimalDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	s := cfg(dir)
+	s.DryRun, s.Tags = true, &report.Tags{Project: "p"}
+	if _, _, err := Run(context.Background(), s, nil); err != nil {
+		t.Fatal(err)
+	}
+	c := cfg(dir)
+	c.Resume, c.Backend, c.Model = true, "fake", "m"
+	b := &fakeBackend{status: "sharp"}
+	rep, _, err := Run(context.Background(), c, b)
+	if err != nil {
+		t.Fatalf("resume over a scan report: %v", err)
+	}
+	if b.calls != 1 || rep.Backend != "fake" || rep.Tags == nil || rep.Tags.Project != "p" {
+		t.Fatalf("calls %d, backend %q, tags %+v", b.calls, rep.Backend, rep.Tags)
+	}
+}

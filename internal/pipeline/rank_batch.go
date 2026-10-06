@@ -29,8 +29,8 @@ type batchExec struct {
 	cfg       Config
 	statePath string
 	// rerun names the command that re-attaches to this executor's batches, for
-	// every message that mentions statePath: RunBatch sets "rerun with --batch
-	// --resume to re-attach" (judge, including its ranking round); RankBatch
+	// every message that mentions statePath: RunBatch sets "rerun cull judge with
+	// --batch to re-attach" (judge, including its ranking round); RankBatch
 	// sets "rerun cull rank with --batch to re-attach" (cull rank --batch).
 	rerun string
 }
@@ -44,7 +44,7 @@ var errBatchPending = errors.New("batch ranking unfinished")
 // rank's own re-run commands so every message about a recorded batch (judge's
 // own, or its ranking round; a rank-batch state) names the right one.
 const (
-	rerunJudgeBatch = "rerun with --batch --resume to re-attach"
+	rerunJudgeBatch = "rerun cull judge with --batch to re-attach"
 	rerunRankBatch  = "rerun cull rank with --batch to re-attach"
 )
 

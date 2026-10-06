@@ -1616,3 +1616,95 @@ func TestDeprecatedSidecarFlags(t *testing.T) {
 		}
 	}
 }
+
+// countingClaude is fakeClaudeCull that also appends a line to calls per run.
+func countingClaude(t *testing.T) (bin, calls string) {
+	t.Helper()
+	calls = filepath.Join(t.TempDir(), "calls")
+	bin = filepath.Join(t.TempDir(), "claude")
+	body := strings.TrimPrefix(fakeClaudeCull, "#!/bin/sh\n")
+	os.WriteFile(bin, []byte("#!/bin/sh\necho x >> '"+calls+"'\n"+body), 0o755)
+	return bin, calls
+}
+
+func lineCount(path string) int {
+	b, _ := os.ReadFile(path)
+	return strings.Count(string(b), "\n")
+}
+
+// Running judge again continues the report, on the backend it was judged with,
+// without --resume or --backend; a different typed backend is refused with --fresh named.
+func TestJudgeResumesByDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CULL_CONFIG", "/dev/null")
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin, calls := countingClaude(t)
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if n := lineCount(calls); n != 1 {
+		t.Fatalf("first run: %d calls", n)
+	}
+	out, err := run(t, "judge", "--claude-bin", bin, "--locate", "off", dir)
+	if err != nil {
+		t.Fatalf("second run: %v\n%s", err, out)
+	}
+	if n := lineCount(calls); n != 1 || !strings.Contains(out, "backend: claude-code") || !strings.Contains(out, "1 already done") {
+		t.Fatalf("second run made %d calls in total:\n%s", n, out)
+	}
+	_, err = run(t, "judge", "--backend", "openai", "--model", "m", dir)
+	if err == nil || !strings.Contains(err.Error(), "--fresh") {
+		t.Fatalf("a different typed backend must be refused naming --fresh: %v", err)
+	}
+}
+
+// The report's backend wins over ~/.cull (which only replaces built-in defaults).
+func TestReportBackendBeatsDotfile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin, _ := countingClaude(t)
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	dotfile(t, "backend = anthropic\n") // dotfile_test.go's helper
+	out, err := run(t, "judge", "--claude-bin", bin, "--locate", "off", dir)
+	if err != nil || !strings.Contains(out, "backend: claude-code") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+}
+
+// --batch on a report judged with another backend says why, rather than a bare
+// "anthropic only".
+func TestJudgeBatchOnClaudeCodeReport(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CULL_CONFIG", "/dev/null")
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin, _ := countingClaude(t)
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	_, err := run(t, "judge", "--batch", dir)
+	if err == nil || !strings.Contains(err.Error(), "judged with claude-code") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// A report's effort follows the report's backend only: typing another backend gets
+// the backend refusal naming --fresh, not an error about an --effort never typed.
+func TestReportEffortStaysWithItsBackend(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CULL_CONFIG", "/dev/null")
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin, _ := countingClaude(t)
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--effort", "low", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	_, err := run(t, "judge", "--backend", "openai", "--model", "m", dir)
+	if err == nil || !strings.Contains(err.Error(), "--fresh") || strings.Contains(err.Error(), "effort setting") {
+		t.Fatalf("got %v", err)
+	}
+}

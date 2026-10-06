@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cull · usage: card to catalogue</title>
-<meta name="description" content="cull is an open-source command-line tool that culls a shoot of DNG files before import. A vision model assesses each frame; deterministic Go rules decide keep, review or cull.">
+<meta name="description" content="cull is an open-source command-line tool that culls a shoot of DNG files before import. A vision model assesses each frame; fixed rules decide keep, review or cull.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0a0a0b">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23d9261c'/%3E%3C/svg%3E">
@@ -35,7 +35,7 @@
         <li><a href="index.html#judge">Judge</a></li>
         <li><a href="index.html#review">Review</a></li>
         <li><a href="index.html#delivery">Delivery</a></li>
-        <li><a href="index.html#specification">Specification</a></li>
+        <li><a href="index.html#specification">Comparison</a></li>
         <li><a href="index.html#install">Install</a></li>
         <li><a href="usage.html" aria-current="page">Usage</a></li>
       </ul>
@@ -65,7 +65,7 @@
     </div>
     <div class="hero-grid">
       <div class="reveal">
-        <p class="lede">This page follows one real shoot through <code>cull</code>: 17 frames from a Leica <span class="nb">M11-P</span>, copied off the card, judged by a vision model, checked by hand, sorted into folders and handed to Capture One. The walkthrough blocks are real output (the judge run was recorded on 3 October 2026; offload, estimate, tag, sort and status were re-run with v0.2.0 on 6 October), and the reference examples are real output with shoot names, paths and counts substituted, so your numbers will differ.</p>
+        <p class="lede">This page walks through a shoot from start to finish: copy the card, let a vision model judge every frame, check its calls yourself, sort the frames into folders, and import them into Capture One. Each step shows the command to type and what it prints back. You type the commands in Terminal (in Applications &rsaquo; Utilities). The examples come from a small Leica <span class="nb">M11-P</span> shoot; yours will have its own numbers.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="#install">Start with step one</a>
           <a class="btn btn-ghost" href="#commands">Every command and flag</a>
@@ -76,12 +76,12 @@
           <tbody>
             <tr><th><a href="#install">Install</a></th><td><code>brew install jefflaplante/tap/cull</code></td></tr>
             <tr><th><a href="#offload">Copy the card</a></th><td><code>cull offload</code></td></tr>
-            <tr><th><a href="#judge">Price the run</a></th><td><code>cull judge --estimate</code></td></tr>
+            <tr><th><a href="#judge">Check the price</a></th><td><code>cull judge --estimate</code></td></tr>
             <tr><th><a href="#judge">Judge</a></th><td><code>cull judge</code><span class="ai" title="Calls a vision model: spends API credits or subscription quota">AI</span></td></tr>
-            <tr><th><a href="#review">Check by eye</a></th><td><code>cull review</code></td></tr>
-            <tr><th><a href="#tune">Measure and tune</a></th><td><code>cull calibrate</code></td></tr>
-            <tr><th><a href="#sort">Before import</a></th><td><code>cull decide --sort</code></td></tr>
-            <tr><th><a href="#capture-one">After import</a></th><td><code>cull apply-c1</code></td></tr>
+            <tr><th><a href="#review">Look through the verdicts</a></th><td><code>cull review</code></td></tr>
+            <tr><th><a href="#tune">Measure it against your picks</a></th><td><code>cull calibrate</code></td></tr>
+            <tr><th><a href="#sort">Sort, before import</a></th><td><code>cull decide --sort</code></td></tr>
+            <tr><th><a href="#capture-one">Changes after import</a></th><td><code>cull apply-c1</code></td></tr>
           </tbody>
         </table>
       </div>
@@ -108,7 +108,7 @@
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>60</b> Install</p>
-      <div><h2 id="h-install">Install the binary, <span>then choose how to reach a model.</span></h2></div>
+      <div><h2 id="h-install">Install cull, <span>then pick the model that judges your frames.</span></h2></div>
     </header>
     <div class="cmds reveal">
       <div class="cmd">
@@ -135,19 +135,19 @@
     <div class="split">
       <div class="reveal">
         <ul class="notes">
-          <li>Everything except judging and ranking runs locally and is free: copying, scanning, the review sheet, calibration, sorting and the Capture One scripts.</li>
-          <li>Only <code>cull judge</code> calls a vision model, and you choose which one with <code>--backend</code>. The table shows what each choice needs.</li>
-          <li>Flags you&rsquo;d type on every run, such as <code>backend = claude-code</code>, can go in <code>~/.cull</code>: see <a href="#cmd-dotfile">Your defaults</a> for the format and which value wins.</li>
-          <li>Capture One features need macOS, because Capture One is scripted through AppleScript. Run <code>cull version</code> to check what you installed.</li>
+          <li><b>Only one step costs anything.</b> Copying, scanning, the review sheet, calibration, sorting and the Capture One scripts all run on your Mac for free. <code>cull judge</code> is the one command that sends frames to an AI model.</li>
+          <li><b>You choose that model</b> with <code>--backend</code> (a <em>flag</em>: an option typed after the command, starting with <code>--</code>). The table shows what each choice needs and what it costs.</li>
+          <li><b>Options you&rsquo;d type every time</b> can go in a settings file, <code>~/.cull</code>. The <code>~</code> means your home folder, so this is the file <code>.cull</code> in <code>/Users/<i>you</i></code>. A line such as <code>backend = claude-code</code> saves typing it. Finder hides files whose names start with a dot, so open it from Terminal: <code>touch ~/.cull &amp;&amp; open -e ~/.cull</code> opens it in TextEdit. See <a href="#cmd-dotfile">Your defaults</a>.</li>
+          <li><b>Capture One features need macOS</b>, because Capture One is controlled through AppleScript. <code>cull version</code> shows which version you installed.</li>
         </ul>
       </div>
       <div class="reveal">
         <table class="backends">
           <thead><tr><th class="eng">Backend</th><th class="eng">What it needs, and what it costs</th></tr></thead>
           <tbody>
-            <tr><td>Anthropic API<br><code>anthropic</code> (default)</td><td>An API key in <code>~/.anthropic/api_key</code>, <code>$ANTHROPIC_API_KEY</code> or <code>--api-key-file</code>. Billed per token: this 17-frame shoot was estimated at $0.37, about 2 cents a frame. <code>--batch</code> halves that.</td></tr>
-            <tr><td>Claude subscription<br><code>claude-code</code></td><td>The <code>claude</code> CLI, logged in to your plan. Nothing is billed per token; the run uses your plan&rsquo;s usage window and stops itself before it runs out.</td></tr>
-            <tr><td>Local model<br><code>openai</code></td><td>Any OpenAI-compatible server and <code>--model</code>. Free, but small vision models judge focus poorly: a 4B model culled three sharp frames on this sample.</td></tr>
+            <tr><td>Anthropic API<br><code>anthropic</code> (default)</td><td>An API key from the Claude Console, saved in the file <code>~/.anthropic/api_key</code>. Copy the key, then run <code>mkdir -p ~/.anthropic &amp;&amp; pbpaste &gt; ~/.anthropic/api_key</code> to save it there. Pay as you go: about 2 cents a frame, or about 1 cent with <code>--batch</code>, which waits minutes to hours for half price.</td></tr>
+            <tr><td>Claude subscription<br><code>claude-code</code></td><td>The <code>claude</code> command (Claude Code), signed in to your Claude plan. No per-frame charge: judging uses your plan&rsquo;s usage allowance, and stops itself before the allowance runs out.</td></tr>
+            <tr><td>Local model<br><code>openai</code></td><td>A model running on your own machine (any OpenAI-compatible server) and <code>--model</code>. Free, but small vision models judge focus poorly: in testing, one culled sharp frames that a larger model kept.</td></tr>
           </tbody>
         </table>
       </div>
@@ -161,7 +161,7 @@
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>125</b> Offload</p>
-      <div><h2 id="h-offload">Copy the card <span>and check every copy against it.</span></h2></div>
+      <div><h2 id="h-offload">Copy the card, <span>with every file checked against the original.</span></h2></div>
     </header>
     <div class="cmds reveal">
       <div class="cmd">
@@ -169,9 +169,10 @@
           <pre id="u-offload"><code><span class="p">$ </span>cull offload /Volumes/LEICA\ M ~/Pictures --name "Forest portraits" --location "Forest Park, Portland"</code></pre>
           <button class="copy" type="button" data-copy="u-offload" aria-label="Copy the offload command">Copy</button>
         </div>
+        <p class="cmd-lead" style="margin-top:14px">This copies the card mounted at <code>/Volumes/LEICA M</code> into a new shoot folder inside <code>~/Pictures</code>, your Pictures folder. The backslash tells Terminal that the space is part of the card&rsquo;s name. Your card will have its own name: type the command up to that point, then drag the card&rsquo;s icon from Finder into the Terminal window and its path is filled in for you.</p>
       </div>
       <div class="cmd">
-        <p class="cmd-lead">Offload creates the shoot folder <code>~/Pictures/2025-12-28 Forest portraits</code>. The rest of this page calls it <code>$SHOOT</code>:</p>
+        <p class="cmd-lead">Offload prints the name of the folder it made. Shoot folder names are long, so the rest of this page saves yours under a short name, <code>$SHOOT</code>. Type this once in each Terminal window, with your folder&rsquo;s name (or type <code>SHOOT=</code> and drag the folder in). Keep the quotes, here and around <code>"$SHOOT"</code> later: they hold a name with spaces together.</p>
         <div class="snippet">
           <pre id="u-shoot"><code><span class="p">$ </span>SHOOT=~/Pictures/"2025-12-28 Forest portraits"</code></pre>
           <button class="copy" type="button" data-copy="u-shoot" aria-label="Copy the SHOOT variable">Copy</button>
@@ -181,11 +182,11 @@
     <div class="split">
       <div class="reveal">
         <ul class="notes">
-          <li><b>It plans before writing anything.</b> The plan names the folder (<code>&lt;date&gt; &lt;name&gt;</code>) and says where the date came from. It counts the files to copy, and refuses up front on a name clash or too little free space.</li>
-          <li><b>The card is read once.</b> The SHA-256 is computed during that read, and the copy goes to a hidden temporary file. That file is flushed, dropped from memory, read back from the disk and compared. Only a matching copy gets its real name, so the check tests what is on the disk, not a cached copy in RAM.</li>
-          <li><b>&ldquo;Safe to format&rdquo;</b> prints only when every file matches on every destination and each drive has flushed its write cache. Running it again copies only what is missing.</li>
-          <li><b>The date reads 2025</b> because this camera&rsquo;s clock was wrong. <code>--date 2026-10-02</code> names the folder yourself.</li>
-          <li><b>Then it scans the folder, for free.</b> It reads each preview and its EXIF, finds faces, sets aside blank frames and groups near-identical frames into sets.</li>
+          <li><b>It plans before it writes.</b> It names the folder <code>&lt;date&gt; &lt;name&gt;</code>, counts what there is to copy, and stops before copying anything if the folder name is taken or the drive is too full.</li>
+          <li><b>Every copy is checked against the card.</b> As each file is read, cull computes a fingerprint of it (a SHA-256 checksum). After writing, it reads the copy back from the drive itself, not from memory, and compares fingerprints. Only a copy that matches is kept. A plain Finder copy checks nothing.</li>
+          <li><b>&ldquo;Safe to format the card&rdquo;</b> appears only when every file has been checked on every destination. If a copy is interrupted, run the same command again: it copies only what is missing.</li>
+          <li><b>The folder date comes from the photos.</b> If your camera&rsquo;s clock was wrong, set it yourself with <code>--date 2026-10-02</code>.</li>
+          <li><b>Then it scans the new folder, for free.</b> It reads each frame&rsquo;s preview, finds faces, sets blank frames aside, and groups near-identical frames (bursts) into sets.</li>
         </ul>
       </div>
       <div class="reveal terminal">
@@ -198,7 +199,7 @@
       <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
       <figure class="shot">
         <div class="replay" data-replay="offload" data-title="cull offload"><img class="replay-fallback" src="img/offload-scanning.png" width="972" height="306" decoding="async" loading="lazy" alt="The scan after offload: frames listed with their 9504x6320 preview and a detected face score."></div>
-        <figcaption><span class="eng">Replay</span><span>The recorded run: copy, verify, then the free scan. The &ldquo;card&rdquo; was a folder on the same SSD, hence 601 MB/s; a real <span class="nb">M11-P</span> card over USB measured 140&ndash;216 MB/s. Sped up; the text is what it printed.</span></figcaption>
+        <figcaption><span class="eng">Replay</span><span>Example output, sped up: copy, check, then the free scan. This example copied from a folder on the same SSD; from a fast card in a USB reader, expect roughly 150&ndash;210 MB/s.</span></figcaption>
       </figure>
     </div>
   </div>
@@ -210,7 +211,7 @@
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>250</b> Judge</p>
-      <div><h2 id="h-judge">Estimate the cost, <span>then judge every frame.</span><span class="ai" title="Calls a vision model: spends API credits or subscription quota">AI</span></h2></div>
+      <div><h2 id="h-judge">Check the price first, <span>then let the model judge every frame.</span><span class="ai" title="Calls a vision model: spends API credits or subscription quota">AI</span></h2></div>
     </header>
     <div class="cmds reveal">
       <div class="cmd">
@@ -231,25 +232,26 @@ ranking ≈ 2 call(s) for 2 set(s) already found, $0.06 at list price (at most: 
     <div class="split">
       <div class="reveal">
         <ul class="notes">
-          <li><b>The estimate is free.</b> It multiplies the frame count by measured token use (about 6k in and 1k out per frame). The ranking line is priced from the sets a scan already found, so run <code>cull scan</code> first (offload does) and it is close to what ranking will cost.</li>
-          <li><b>What the model sees:</b> a downscaled full frame for context, and a native-resolution crop of the focus target. That target is the face that detection found, or a subject the model locates first. Sharpness is judged on the crop, at 100%.</li>
-          <li><b>What it reports:</b> sharpness at the eyes, exposure, composition, eyes and expression, and up to eight content keywords.</li>
-          <li><b>The model only assesses; Go decides.</b> A fixed policy turns the assessments into verdicts. Missed focus or motion blur culls, soft goes to review, and fixable exposure gets a suggested EV. Composition never culls. The same assessments always give the same verdicts.</li>
-          <li><b>Sets:</b> frames with near-identical framing form a set. Judge ranks the sets that need it at the end of every run: the frames of a set are compared side by side in one call. The best three keep their verdicts, and the rest go to review.</li>
-          <li><b>Sidecars come with it.</b> A sidecar is written beside each DNG as frames finish; <code>--no-xmp</code> turns that off. After Ctrl-C, run the same command again (without <code>--fresh</code>, if you used it): frames already judged are skipped, and the backend and model come from the report.</li>
+          <li><b>The estimate is free and calls nothing.</b> AI services charge by the <em>token</em>, roughly a measure of how much image and text the model reads and writes. A frame uses about 6,000 tokens in and 1,000 out, which comes to about 2 cents at list price. Bursts are compared in one extra call per set, and the estimate prices those too.</li>
+          <li><b>What the model looks at:</b> the whole frame, scaled down for context, and a crop of the subject at full resolution, where sharpness is judged. The subject is the face cull found, or, with no face, what the model picks out as meant to be sharp.</li>
+          <li><b>What it reports:</b> how sharp the subject is, the exposure (with a suggested correction), the composition (with a suggested crop), whether eyes are open, and a few content keywords.</li>
+          <li><b>The model only describes; fixed rules decide.</b> Missed focus or motion blur is culled. Soft focus goes to review. Exposure and composition never cull a frame: they get a suggested fix. The same assessment always gets the same verdict, so you can tune the rules later without paying to judge again.</li>
+          <li><b>Bursts are ranked.</b> Near-identical frames form a set, and the model compares each set side by side. The best three keep their verdicts; the rest go to review.</li>
+          <li><b>Stopping is safe.</b> If you press Ctrl-C, or a cost limit or your plan&rsquo;s allowance stops the run, type the same command again (leaving out <code>--fresh</code>, if you used it): it skips the frames already judged and carries on.</li>
         </ul>
       </div>
       <div class="reveal">
-        <dl class="figures">
-          <div><dt class="eng">Keep</dt><dd class="num" data-count="14">14</dd></div>
-          <div><dt class="eng">Review</dt><dd class="num" data-count="2">2</dd></div>
-          <div><dt class="eng">Cull</dt><dd class="num" data-count="1">1</dd></div>
-        </dl>
-        <p class="fig-note">The run took 1 minute 56 seconds.</p>
-        <ul class="notes">
-          <li>Culled: M1103817, missed focus, sharpness 2.5 out of 10.</li>
-          <li>Review: M1104110, soft with her eyes partly closed. She was mid-twirl.</li>
-          <li>Review: M1103821, with 0.50% of its highlights clipped. That figure is measured from the raw data, not judged by the model.</li>
+        <table class="spec steps">
+          <caption class="eng" style="text-align:left;padding-bottom:10px">What each verdict means</caption>
+          <tbody>
+            <tr><th>Keep</th><td>Sharp where it matters. Any exposure or crop note is a suggestion for the edit.</td></tr>
+            <tr><th>Review</th><td>Worth a look: soft focus, closed eyes, clipped highlights, or not among the best of its burst.</td></tr>
+            <tr><th>Cull</th><td>Missed focus or motion blur, or a blank frame such as a lens-cap shot.</td></tr>
+          </tbody>
+        </table>
+        <ul class="notes" style="margin-top:24px">
+          <li><b>How long it takes:</b> roughly 5&ndash;20 seconds a frame, unattended. A 1,000-frame shoot runs for a few hours on a Claude subscription while you do something else. The model is the slow part, not your Mac.</li>
+          <li><b>Sidecars are written as it goes.</b> Each DNG gets a small <code>.xmp</code> file beside it with the verdict as a colour label and keywords, which Capture One reads on import. <code>--no-xmp</code> turns that off.</li>
         </ul>
       </div>
     </div>
@@ -257,7 +259,7 @@ ranking ≈ 2 call(s) for 2 set(s) already found, $0.06 at list price (at most: 
       <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
       <figure class="shot">
         <div class="replay" data-replay="judge" data-title="cull judge"><img class="replay-fallback" src="img/judge-ranking.png" width="1026" height="566" decoding="async" loading="lazy" alt="cull judge after a full run: 17 frames with verdicts and scores; keep 14, review 2, cull 1."></div>
-        <figcaption><span class="eng">Replay</span><span>The recorded run: 17 frames judged, then two sets ranked. 14 keep, 2 review, 1 cull. Sped up; the text is what it printed.</span></figcaption>
+        <figcaption><span class="eng">Replay</span><span>Example output, sped up: each frame&rsquo;s verdict and scores, then the bursts ranked.</span></figcaption>
       </figure>
     </div>
   </div>
@@ -269,7 +271,7 @@ ranking ≈ 2 call(s) for 2 set(s) already found, $0.06 at list price (at most: 
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>500</b> Review</p>
-      <div><h2 id="h-review">Check the verdicts yourself. <span>Your labels override the model&rsquo;s.</span></h2></div>
+      <div><h2 id="h-review">Look through the verdicts, <span>and change any you disagree with.</span></h2></div>
     </header>
     <div class="cmds reveal">
       <div class="cmd">
@@ -282,10 +284,10 @@ ranking ≈ 2 call(s) for 2 set(s) already found, $0.06 at list price (at most: 
     <div class="split">
       <div class="reveal">
         <ul class="notes">
-          <li><b>A contact sheet opens in your browser,</b> served from your own machine (127.0.0.1). Each frame shows the crop the model judged, its verdict and the model&rsquo;s reasons.</li>
-          <li><b>Every key is saved at once.</b> It goes to <code>cull-labels.jsonl</code>, the shoot&rsquo;s labels log, and to the frame&rsquo;s <code>.xmp</code> sidecar. Closing the tab loses nothing.</li>
-          <li><b>Your verdict wins everywhere downstream:</b> sidecars, folder sorting and Capture One. The report keeps the model&rsquo;s verdict too, so <code>calibrate</code> can compare the two.</li>
-          <li><b>Sets are boxed,</b> with their keeper count in the header. Press <b>−</b> or <b>=</b> to keep fewer or more of the top-ranked frames.</li>
+          <li><b>A contact sheet opens in your browser.</b> It runs on your own Mac; nothing is uploaded. Each frame shows the crop the model judged, its verdict and its reasons, so you can see why it decided what it did.</li>
+          <li><b>It&rsquo;s driven from the keyboard</b> (keys in the table). Each label is saved the moment you press the key, to the shoot&rsquo;s labels file and to the frame&rsquo;s sidecar. Closing the tab loses nothing.</li>
+          <li><b>Your label beats the model&rsquo;s</b> everywhere after this: in the sidecars, when frames are sorted into folders, and in Capture One. cull also keeps the model&rsquo;s verdict, so it can measure how often the two of you agree (the next step).</li>
+          <li><b>Bursts are boxed together,</b> with the number of keepers in the box&rsquo;s header. Press <b>−</b> or <b>=</b> to keep fewer or more of the best-ranked frames.</li>
         </ul>
       </div>
       <div class="reveal">
@@ -313,7 +315,7 @@ ranking ≈ 2 call(s) for 2 set(s) already found, $0.06 at list price (at most: 
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>1000</b> Tune</p>
-      <div><h2 id="h-tune">Measure it against your labels, <span>then tune the rules for free.</span></h2></div>
+      <div><h2 id="h-tune">See how closely it matches your judgement, <span>then adjust its rules.</span></h2></div>
     </header>
     <div class="cmds reveal">
       <div class="cmd">
@@ -324,28 +326,35 @@ ranking ≈ 2 call(s) for 2 set(s) already found, $0.06 at list price (at most: 
       </div>
       <div class="cmd">
         <div class="snippet">
-          <pre id="u-dec"><code><span class="p">$ </span>cull decide --keep-best 3 --outranked cull "$SHOOT"</code></pre>
+          <pre id="u-dec"><code><span class="p">$ </span>cull decide --keep-best 3 --outranked cull --raw-clipped review "$SHOOT"</code></pre>
           <button class="copy" type="button" data-copy="u-dec" aria-label="Copy the decide command">Copy</button>
         </div>
       </div>
     </div>
     <div class="split">
       <div class="reveal">
-        <ul class="notes">
-          <li><b><code>calibrate</code> compares the report&rsquo;s verdicts with your labels.</b> It prints a confusion matrix, plus three rates:
-            <ul class="notes" style="margin-top:8px">
-              <li>the false-cull rate (frames you labelled keep that it culled), the number that matters most;</li>
-              <li>the missed-cull rate;</li>
-              <li>the share of frames it sent to review.</li>
-            </ul></li>
-          <li><b>It also replays the rules.</b> It prints a grid: it re-decides the stored assessments under every combination of <code>--keep-best</code> 1&ndash;5, <code>--outranked</code> review or cull, and <code>--raw-clipped</code> review or ignore. Each row shows the false culls (a count and a percentage), the culls caught, the culls missed and the share sent to review. A <code>*</code> marks rows under 1% false culls, and <code>&larr; current</code> marks the settings in the report. Apply the row you choose with <code>cull decide</code>.</li>
-        </ul>
+        <p class="cmd-lead" style="margin-top:0">Only you know how strict to be. Once you&rsquo;ve labelled some frames in review, <code>calibrate</code> compares your labels with cull&rsquo;s verdicts, and <code>decide</code> applies new settings in seconds, without judging anything again.</p>
+        <ol class="procedure">
+          <li><span><strong>Label a sample</strong> in <code>cull review</code>, pressing K (keep) or C (cull); stars alone don&rsquo;t count. Start with at least 30 frames, including some you would throw away. The more you label, the more the rates mean: with 30 frames a single false cull is several percent, while a few hundred give a rate you can trust. <code>cull status</code> counts how many you&rsquo;ve done.</span></li>
+          <li><span><strong>Run <code>cull calibrate</code></strong> and read the <em>false-cull rate</em> first: how many frames you&rsquo;d keep that cull would have thrown away. That&rsquo;s the number that matters most; under 1% is a good target.</span></li>
+          <li><span><strong>Read the grid below it.</strong> Each row replays the rules under one combination of three settings and shows what would have happened: false culls, culls caught (frames you&rsquo;d cull that it culled), culls missed (frames you&rsquo;d cull that it kept) and how much went to review. A <code>*</code> marks rows under 1% false culls.</span></li>
+          <li><span><strong>Pick a starred row:</strong> the one that catches the most culls, or the one that sends the least to review if you&rsquo;d rather check fewer frames. Rows that send less to review usually let more of your culls through as keeps, so check the missed column too.</span></li>
+          <li><span><strong>Apply it with <code>cull decide</code></strong>, typing that row&rsquo;s three values as flags, as in the command above. Run <code>calibrate</code> again to confirm: your row is now marked <code>&larr; current</code>.</span></li>
+        </ol>
       </div>
       <div class="reveal">
+        <div class="terminal" style="margin-bottom:24px">
+          <div class="term-bar"><span class="leds" aria-hidden="true"><i></i><i></i><i></i></span><span class="eng">Part of a grid (4 of 20 rows)</span></div>
+<pre class="term" tabindex="0" style="white-space:pre;overflow-x:auto"><code>keep-best outranked raw-clipped  false culls  caught  missed  review
+<span class="k">* 2       review    review          3 (0.5%)      33      60   49.5%  ← current</span>
+* 3       cull      review          6 (0.9%)      80      95   39.8%
+  2       cull      review         16 (2.5%)     115      60   39.8%
+* 4       cull      ignore          4 (0.6%)      67     151   22.3%</code></pre>
+        </div>
         <ul class="notes">
-          <li><b><code>decide</code> applies new thresholds instantly, with no model calls.</b> It re-runs the rules on the assessments stored in the report and prints what changed.</li>
-          <li><b>The rules are saved in the report,</b> so later runs inherit your tuning. A flag you type overrides only its own setting.</li>
-          <li><b>Label a sample before trusting culls:</b> about 30 frames, including some you would cull. <code>cull status</code> counts how many you have labelled.</li>
+          <li><b>The three settings:</b> <code>--keep-best</code> is how many frames of each burst keep their verdict; <code>--outranked</code> is what happens to the rest of the burst (sent to review, or culled); <code>--raw-clipped</code> is whether blown highlights send a frame to review or are ignored.</li>
+          <li><b>In this example</b> (a shoot judged with <code>--keep-best 2</code>), the second row catches more than twice as many culls, 80 instead of 33, and sends less to review: 40% instead of 50%. The costs: false culls go from 3 to 6, still under 1%, and more of your culls stay keeps, 95 instead of 60.</li>
+          <li><b>The settings are saved with the shoot,</b> so later commands on it keep them. Once they&rsquo;ve held up on your next labelled shoot as well, make them the default for future shoots in your settings file <code>~/.cull</code>, one per line:<br><code>keep-best = 3</code><br><code>outranked = cull</code></li>
         </ul>
       </div>
     </div>
@@ -358,7 +367,7 @@ ranking ≈ 2 call(s) for 2 set(s) already found, $0.06 at list price (at most: 
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>2000</b> Before import</p>
-      <div><h2 id="h-sort">Tag and sort the frames <span>before Capture One sees them.</span></h2></div>
+      <div><h2 id="h-sort">Add keywords and sort into folders, <span>before you import.</span></h2></div>
     </header>
     <div class="cmds reveal">
       <div class="cmd">
@@ -383,28 +392,23 @@ decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull
     </div>
     <div class="split">
       <div class="reveal">
-        <dl class="figures">
-          <div><dt><code>keep/</code></dt><dd class="num">14</dd></div>
-          <div><dt><code>review/</code></dt><dd class="num">2</dd></div>
-          <div><dt><code>cull/</code></dt><dd class="num">1</dd></div>
-        </dl>
         <ul class="notes">
-          <li><b><code>cull tag</code> sets keywords for the whole shoot:</b> project, event, location and any extras. They are stored in the report, and the next <code>decide</code> writes them into the sidecars. Offload takes the same four flags when you copy the card; the location here came from offload&rsquo;s <code>--location</code>.</li>
-          <li><b>The sidecars are already written</b> by judge (and kept current by <code>decide</code>), so <code>--sort</code> only moves files. Each carries:
+          <li><b><code>cull tag</code> sets keywords for the whole shoot:</b> project, event, location and any extras. You can also give them when you copy the card, as the offload step did with <code>--location</code>. The next <code>decide</code> writes them into every sidecar.</li>
+          <li><b>The sidecars already exist</b>, written while judging. <code>decide --sort</code> refreshes them (adding your tags), then moves the files. Each sidecar carries:
             <ul class="notes" style="margin-top:8px">
               <li>your stars;</li>
-              <li>a colour label: green keep, yellow review, red cull;</li>
+              <li>a colour label: <span class="lbl g">Green</span> keep, <span class="lbl y">Yellow</span> review, <span class="lbl r">Red</span> cull;</li>
               <li>the keyword <code>cull:keep</code> (or <code>cull:review</code>, <code>cull:cull</code>);</li>
               <li>the model&rsquo;s content keywords, such as <code>portrait</code>, <code>smile</code> and <code>woodpile</code>;</li>
-              <li>your tags, as plain words and as paths such as <code>event|Fall session</code>. Capture One and Lightroom show the paths as nested keywords.</li>
+              <li>your tags, as plain words and as paths such as <code>event|Fall session</code>. Capture One shows the paths as nested keywords. (Lightroom Classic ignores sidecars for DNG files, so none of this reaches it.)</li>
             </ul></li>
         </ul>
       </div>
       <div class="reveal">
         <ul class="notes">
-          <li><b><code>--sort</code> moves each DNG and its sidecar</b> into <code>keep/</code>, <code>review/</code> or <code>cull/</code> inside the shoot folder. Import <code>keep/</code> and <code>review/</code>. <code>--sort=culls</code> is the lighter alternative: only the culls move, into <code>cull/</code>, and the rest stay where they are.</li>
-          <li><b>Sort before importing.</b> A catalogue loses track of files that move after import. Every move is recorded in the report, and <code>cull restore</code> puts them all back.</li>
-          <li><b>Before you format the card,</b> <code>cull offload --verify "$SHOOT"</code> re-checks every copy against the checksum taken when it was made. It still finds the frames after sorting: <code>17 verified, 0 missing or different</code>.</li>
+          <li><b><code>--sort</code> moves each DNG with its sidecar</b> into <code>keep/</code>, <code>review/</code> or <code>cull/</code> inside the shoot folder. Then import just <code>keep/</code> and <code>review/</code>. If you&rsquo;d rather keep one folder, <code>--sort=culls</code> moves only the culls aside, into <code>cull/</code>.</li>
+          <li><b>Sort before importing, not after.</b> Capture One and Lightroom lose track of files that move once they&rsquo;re in a catalogue. Every move is recorded, and <code>cull restore</code> puts every frame back where it was.</li>
+          <li><b>Before you format the card,</b> <code>cull offload --verify "$SHOOT"</code> checks every copy against its fingerprint once more. It finds the frames in their new folders too.</li>
         </ul>
       </div>
     </div>
@@ -417,11 +421,11 @@ decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>4000</b> Capture One</p>
-      <div><h2 id="h-c1">After import, <span>push later changes into the catalogue.</span></h2></div>
+      <div><h2 id="h-c1">Send changes made after import <span>into Capture One.</span></h2></div>
     </header>
     <div class="cmds reveal">
       <div class="cmd">
-        <p class="cmd-lead">First a read-only check that cull and Capture One agree on names:</p>
+        <p class="cmd-lead">With Capture One open on the catalogue, run a read-only check that cull and Capture One agree on how images are named. The <code>|</code> passes cull&rsquo;s script straight to <code>osascript</code>, the Mac&rsquo;s built-in AppleScript runner:</p>
         <div class="snippet">
           <pre id="u-probe"><code><span class="p">$ </span>cull apply-c1 --probe "$SHOOT" | osascript -</code></pre>
           <button class="copy" type="button" data-copy="u-probe" aria-label="Copy the probe command">Copy</button>
@@ -446,7 +450,7 @@ decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull
         <ul class="notes">
           <li><b>Capture One reads a sidecar only when it imports the file.</b> Changes made after import need another route. <code>apply-c1</code> writes an AppleScript for the open Capture One document, covering labels you changed, keywords added with <code>cull tag</code>, and exposure.</li>
           <li><b>It sets colour tags, keywords and your stars</b> on the images already in the catalogue. Ratings are set only on frames you rated, so ratings you made in Capture One stay.</li>
-          <li><b>Without <code>--run</code> it only prints the script,</b> so you can read every line before anything changes. This shoot&rsquo;s script was 639 lines.</li>
+          <li><b>Without <code>--run</code> it only prints the script,</b> so you can read every line before anything changes. The <code>&gt; apply.applescript</code> saves that printout to a file you can open in any text editor.</li>
         </ul>
       </div>
       <div class="reveal">
@@ -647,7 +651,7 @@ decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull
 <h4>Eyes, clipping, junk</h4>
 <dl class="flags"><div class="flag"><dt><code>--eyes-closed</code><span class="ty">ignore | review | cull · default review</span></dt><dd><p>What to do when the model says the subject&rsquo;s eyes are closed. Half-closed eyes only add a note. Use <code>cull</code> for a portrait session; use <code>ignore</code> for street or landscape, where a closed-eye passer-by shouldn&rsquo;t matter.</p><div class="ex"><pre id="rx52"><span class="p">$ </span>cull decide --eyes-closed cull ~/Pictures/"2026-10-02 Smith wedding"</pre><button class="copy" type="button" data-copy="rx52" aria-label="Copy this example">Copy</button></div></dd></div><div class="flag"><dt><code>--raw-clipped</code><span class="ty">ignore | review | cull · default review</span></dt><dd><p>What to do when the share of raw highlight samples at the sensor&rsquo;s white level reaches <code>--raw-clip-threshold</code>. This is measured from the raw data, not judged by the model; the JPEG preview overstated clipping 4&times; to 1000&times; in testing. If the raw wasn&rsquo;t measured and the model reports clipping, the frame goes to review with &ldquo;verify against raw&rdquo;.</p></dd></div><div class="flag"><dt><code>--raw-clip-threshold</code><span class="ty">percent · default 0.5</span></dt><dd><p>The share of raw samples at the white level that counts as clipped. 0.5% is roughly a specular highlight or a patch of white sky. A backlit wedding dress might reach 2%. Raise it if review fills with frames you are happy with.</p><div class="ex"><pre id="rx53"><span class="p">$ </span>cull decide --raw-clip-threshold 2 ~/Pictures/"2026-10-02 Smith wedding"</pre><button class="copy" type="button" data-copy="rx53" aria-label="Copy this example">Copy</button></div></dd></div><div class="flag"><dt><code>--junk</code><span class="ty">cull | review | ignore · default cull</span></dt><dd><p>What to do with blank frames, which are detected without a model call:</p><p><b>black</b>: 98% or more of pixels with luma below 16 (lens cap, pocket shot);<br><b>white</b>: 95% or more at 255 (a frame shot into the sun);<br><b>uniform</b>: a 64 px thumbnail with a standard deviation below 3 (a grey card or a wall).</p><p>Junk frames cost nothing and never join a set. <code>ignore</code> judges them anyway. The thresholds come from one photographer&rsquo;s outdoor portraits: on 992 real frames only the genuinely blank one tripped. For a night-sky or white-seamless shoot, check calibrate&rsquo;s junk line.</p><div class="ex"><pre id="rx54"><span class="p">$ </span>cull judge --junk review ~/Pictures/"2026-08-12 Perseids"</pre><button class="copy" type="button" data-copy="rx54" aria-label="Copy this example">Copy</button></div></dd></div></dl>
 <h4>Sets and ranking</h4>
-<dl class="flags"><div class="flag"><dt><code>--keep-best</code><span class="ty">int 0–5 · default 3</span></dt><dd><p>How many of each set&rsquo;s best-ranked frames keep their verdicts. A frame ranked below that, which would otherwise keep, gets <code>--outranked</code>. Ranking only ever demotes a keep: it never rescues a cull.</p><p><code>0</code> ranks without demoting anything, though rank 1 is still tagged <code>cull:best</code>. The ceiling is 5 because a large set is ranked in chunks with a final round of at most 8 frames.</p><div class="ex"><pre id="rx55"><span class="p">$ </span>cull decide --keep-best 1 ~/Pictures/"2026-10-02 Smith wedding"<span class="c">   # one frame per burst</span></pre><button class="copy" type="button" data-copy="rx55" aria-label="Copy this example">Copy</button></div></dd></div><div class="flag"><dt><code>--outranked</code><span class="ty">ignore | review | cull · default review</span></dt><dd><p>What happens to a would-be keep ranked below <code>--keep-best</code>. The default is <code>review</code> on purpose: ranking quality hasn&rsquo;t been measured against labels yet. Switch to <code>cull</code> once the sets section and the grid in <code>calibrate</code> show the ranking agrees with you.</p><div class="ex"><pre id="rx56"><span class="p">$ </span>cull decide --outranked cull ~/Pictures/"2026-10-02 Smith wedding"</pre><button class="copy" type="button" data-copy="rx56" aria-label="Copy this example">Copy</button></div></dd></div><div class="flag"><dt><code>--seq-gap</code><span class="ty">duration · default 1m0s</span></dt><dd><p>Frames this close in capture time may join the same set; the look test must pass too. <code>0</code> turns grouping off. A frame with no capture time is grouped by look alone. Sets are capped at 40 frames.</p><p>Durations are Go syntax: <code>90s</code>, <code>2m</code>, <code>1m30s</code>. The <span class="nb">M11-P</span>&rsquo;s EXIF time has 1-second resolution and is only as good as the camera clock, so on a wrong clock the look does the work.</p><div class="ex"><pre id="rx57"><span class="p">$ </span>cull decide --seq-gap 10s ~/Pictures/"2026-10-02 Smith wedding"<span class="c">   # bursts only, not a whole set-up</span></pre><button class="copy" type="button" data-copy="rx57" aria-label="Copy this example">Copy</button></div></dd></div><div class="flag"><dt><code>--seq-look</code><span class="ty">float 0–1 · default 0.08</span></dt><dd><p>The largest &ldquo;look distance&rdquo; to the <em>previous</em> frame for a frame to join its set. The look is an 8&times;8 grid of mean colour, so two takes of the same framing measure about 0.02–0.04, and a new pose at the same spot about 0.12–0.17.</p><p>Raising it towards 0.12 starts linking reframed takes, at the risk of merging different poses. A portrait&ndash;landscape switch never links, because the grid follows the displayed orientation.</p><div class="ex"><pre id="rx58"><span class="p">$ </span>cull decide --seq-look 0.11 ~/Pictures/"2026-10-02 Smith wedding"</pre><button class="copy" type="button" data-copy="rx58" aria-label="Copy this example">Copy</button></div></dd></div></dl>
+<dl class="flags"><div class="flag"><dt><code>--keep-best</code><span class="ty">int 0–5 · default 3</span></dt><dd><p>How many of each set&rsquo;s best-ranked frames keep their verdicts. A frame ranked below that, which would otherwise keep, gets <code>--outranked</code>. Ranking only ever demotes a keep: it never rescues a cull.</p><p><code>0</code> ranks without demoting anything, though rank 1 is still tagged <code>cull:best</code>. The ceiling is 5 because a large set is ranked in chunks with a final round of at most 8 frames.</p><div class="ex"><pre id="rx55"><span class="p">$ </span>cull decide --keep-best 1 ~/Pictures/"2026-10-02 Smith wedding"<span class="c">   # one frame per burst</span></pre><button class="copy" type="button" data-copy="rx55" aria-label="Copy this example">Copy</button></div></dd></div><div class="flag"><dt><code>--outranked</code><span class="ty">ignore | review | cull · default review</span></dt><dd><p>What happens to a would-be keep ranked below <code>--keep-best</code>. The default is <code>review</code> on purpose: ranking has been measured against labels on only one shoot so far, so confirm <code>cull</code> on your own labelled shoot first. Switch to <code>cull</code> once the sets section and the grid in <code>calibrate</code> show the ranking agrees with you.</p><div class="ex"><pre id="rx56"><span class="p">$ </span>cull decide --outranked cull ~/Pictures/"2026-10-02 Smith wedding"</pre><button class="copy" type="button" data-copy="rx56" aria-label="Copy this example">Copy</button></div></dd></div><div class="flag"><dt><code>--seq-gap</code><span class="ty">duration · default 1m0s</span></dt><dd><p>Frames this close in capture time may join the same set; the look test must pass too. <code>0</code> turns grouping off. A frame with no capture time is grouped by look alone. Sets are capped at 40 frames.</p><p>Durations are Go syntax: <code>90s</code>, <code>2m</code>, <code>1m30s</code>. The <span class="nb">M11-P</span>&rsquo;s EXIF time has 1-second resolution and is only as good as the camera clock, so on a wrong clock the look does the work.</p><div class="ex"><pre id="rx57"><span class="p">$ </span>cull decide --seq-gap 10s ~/Pictures/"2026-10-02 Smith wedding"<span class="c">   # bursts only, not a whole set-up</span></pre><button class="copy" type="button" data-copy="rx57" aria-label="Copy this example">Copy</button></div></dd></div><div class="flag"><dt><code>--seq-look</code><span class="ty">float 0–1 · default 0.08</span></dt><dd><p>The largest &ldquo;look distance&rdquo; to the <em>previous</em> frame for a frame to join its set. The look is an 8&times;8 grid of mean colour, so two takes of the same framing measure about 0.02–0.04, and a new pose at the same spot about 0.12–0.17.</p><p>Raising it towards 0.12 starts linking reframed takes, at the risk of merging different poses. A portrait&ndash;landscape switch never links, because the grid follows the displayed orientation.</p><div class="ex"><pre id="rx58"><span class="p">$ </span>cull decide --seq-look 0.11 ~/Pictures/"2026-10-02 Smith wedding"</pre><button class="copy" type="button" data-copy="rx58" aria-label="Copy this example">Copy</button></div></dd></div></dl>
 <h4>Crops</h4>
 <dl class="flags"><div class="flag"><dt><code>--min-crop-area</code><span class="ty">fraction 0–1 · default 0.6</span></dt><dd><p>Drops a suggested crop that keeps less than this fraction of the frame. A crop down to 40% of an <span class="nb">M11-P</span> frame still leaves 24 MP, but it is rarely what a photographer meant. <strong>This is one way:</strong> a dropped crop is removed from the stored assessment, so lowering the value later doesn&rsquo;t bring it back without a re-judge.</p><div class="ex"><pre id="rx59"><span class="p">$ </span>cull judge --min-crop-area 0.75 ~/Pictures/"2026-10-02 Smith wedding"</pre><button class="copy" type="button" data-copy="rx59" aria-label="Copy this example">Copy</button></div></dd></div></dl>
 </article>

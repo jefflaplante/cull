@@ -196,8 +196,32 @@ Every step, with its full output and screenshots of the live progress view, is i
   folder's largest number, so a second card carries on from the first. Frames are
   numbered in camera file order, not by capture time.
 - **Speed (measured on an M11-P card over USB):** the card reads at about 280 MB/s. A
-  verified offload runs at about 216 MB/s, against 264 MB/s for plain `cp` with no
-  checks: about 5 minutes for a 63 GB card.
+  992-frame, 67.7 GB card went to a USB SSD in 8 minutes, every file verified; to the
+  Mac's SSD, the measured 210 MB/s below would take about 5 minutes.
+
+  `go test -tags cardbench -run CardBench ./internal/offload` compares the copy engine with
+  the usual tools on the mounted card. Every read must come from the card, not RAM: each
+  tool gets its own frames when the card has enough, and either way the frames' pages are
+  evicted from the page cache before every run and checked gone (mincore). Set
+  `CULL_BENCH_DST` for the destination; `CULL_BENCH_N` and `CULL_BENCH_ROUNDS` set frames
+  per run and rounds (every second round runs the tools in reverse order).
+
+  Results for 10 M11-P frames (602 MB), 2026-10-06. The card held only 10 frames, so every
+  run copied the same ones, evicted first (a few runs still started with one frame cached).
+  Each tool is timed until its data is durable: the engine ends with F_FULLFSYNC, and the
+  others with `sync` plus an F_FULLFSYNC on the folder. The figure in brackets is the speed
+  before that, which is when the tool returns. Finder itself wasn't timed.
+
+  | MB/s | Mac SSD | USB SSD (exFAT) | NAS, SMB over Wi-Fi |
+  |---|---|---|---|
+  | cull engine, every byte re-read and compared | 210 | 153 | 17 |
+  | `ditto` (macOS's built-in copy command), no check | 147 (249) | 143 (200) | 40 |
+  | `cp`, no check | 138 (226) | 145 (194) | 32 |
+  | `rsync -a` (openrsync), no check | 123 (157) | 100 (118) | 21 |
+
+  On local disks the verified copy is as fast as an unverified one. On a NAS, the verify
+  re-read crosses the network: it took 46% of the engine's time over Wi-Fi. Copy to the
+  Mac first, then to the NAS.
 
 ## Your defaults: `~/.cull`
 

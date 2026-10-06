@@ -46,8 +46,13 @@ func NewRootCmd() *cobra.Command {
 vision model to assess sharpness, exposure, and composition. A deterministic policy
 turns those assessments into keep / review / cull decisions.
 
-Start with 'cull scan <dir>' to confirm preview resolution before spending tokens,
-then 'cull judge <dir>' (the model), 'cull review <dir>' (you), 'cull decide'.
+A shoot, start to finish:
+  cull offload <card> <dest> --name "…"   copy and verify the card (then a free scan)
+  cull judge <dir>                         the model; re-run it to continue
+  cull review <dir>                        you label and rate
+  cull decide --sort <dir>                 before import
+  cull apply-c1 --run <dir>                after import
+cull status <dir> says where a shoot stands and what to run next.
 
 Your own defaults for any flag go in ~/.cull ($CULL_CONFIG to use another file), one
 "name = value" per line, with optional [command] sections:
@@ -55,12 +60,12 @@ Your own defaults for any flag go in ~/.cull ($CULL_CONFIG to use another file),
   keep-best = 3
   outranked = cull
   [review]
-  sort = true
+  sort = all
 
-A flag you type wins, then a shoot's stored policy (decide, rank, judge --resume),
-then ~/.cull, then the built-in default. Each run prints the values it took from the
-file; CULL_CONFIG=/dev/null turns it off for one run. One-off and risky flags (yes,
-fresh, force, run, overwrite-xmp, -q/-v) can't be set there.`,
+A flag you type wins, then a shoot's stored policy and backend (decide, judge), then
+~/.cull, then the built-in default. Each run prints the values it took from the file;
+CULL_CONFIG=/dev/null turns it off for one run. One-off and risky flags (yes, fresh,
+force, rerank, run, overwrite-xmp, -q/-v) can't be set there.`,
 		SilenceUsage:  true, // runtime errors shouldn't dump usage
 		SilenceErrors: true, // main prints the error once
 		Version:       version,

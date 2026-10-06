@@ -63,3 +63,26 @@ func TestEveryFlagHasAKnownSection(t *testing.T) {
 	}
 	walk(NewRootCmd())
 }
+
+// No help text of a current command teaches a retired form.
+func TestHelpTeachesNoRetiredForms(t *testing.T) {
+	retired := []string{"--move-culled", "--write-xmp", "--resume", "--xmp-develop", "cull rank", "import-labels", "--static", "culled/"}
+	var walk func(c *cobra.Command)
+	walk = func(c *cobra.Command) {
+		if c.Deprecated == "" && !c.Hidden {
+			out, err := run(t, append(strings.Fields(strings.TrimPrefix(c.CommandPath(), "cull")), "--help-all")...)
+			if err != nil {
+				t.Fatalf("%s: %v", c.CommandPath(), err)
+			}
+			for _, r := range retired {
+				if strings.Contains(out, r) {
+					t.Errorf("%s --help-all mentions %s", c.CommandPath(), r)
+				}
+			}
+		}
+		for _, s := range c.Commands() {
+			walk(s)
+		}
+	}
+	walk(NewRootCmd())
+}

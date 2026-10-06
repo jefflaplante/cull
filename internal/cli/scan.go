@@ -19,7 +19,8 @@ exposure statistics, face detection, and the "where focus landed" measure. No mo
 is called and nothing is written next to your images; only the report is produced.
 
 Use it to confirm the previews are large enough for focus judgement, and with
---save-inputs to see exactly what the model would be shown.`,
+--save-inputs to see exactly what the model would be shown. offload runs it for you
+after copying; set the shoot's tags with offload or 'cull tag'.`,
 		Example: "  cull scan ~/Pictures/2026-09-26",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

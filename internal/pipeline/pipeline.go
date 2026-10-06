@@ -227,7 +227,7 @@ func Run(ctx context.Context, cfg Config, b llm.Backend) (*report.Report, llm.Us
 	}
 	cfg.stage(ui.Stage{Name: name, Done: true})
 	// A stopped run (quota, abort, budget, Ctrl-C) makes no more calls: its sets stay
-	// by scores until cull rank.
+	// by scores until judge runs again.
 	if cfg.Rank && !cfg.DryRun && stopErr == nil && ctx.Err() == nil {
 		cfg.rankWith = syncExec{b: b, concurrency: cfg.Concurrency, maxTokens: cfg.RankTokens}
 	}

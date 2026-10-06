@@ -62,7 +62,8 @@ tiles) to the model and applies the policy:
 Frames judged similar (a sequence: --seq-gap, --seq-look) are grouped into a set and,
 once every frame in it is judged, ranked with one model call (more for large sets,
 chunked and merged): the --keep-best best of each set keep their decision, the rest
-get --outranked. --no-rank skips ranking (judge ranks them on its next run); --rerank ranks every set again.
+get --outranked. --no-rank skips ranking until judge runs again; --rerank ranks every
+set again.
 
 Backends (--backend):
   anthropic    Messages API; key from --api-key-file, $ANTHROPIC_API_KEY, then
@@ -77,9 +78,10 @@ Backends (--backend):
 An existing report is continued: frames already judged are skipped, and the backend,
 model and effort default to the report's. --fresh replaces it.`,
 		Example: `  cull judge ~/Pictures/2026-09-26
-  cull judge --backend claude-code -o cc.json ~/Pictures/2026-09-26
+  cull judge --backend claude-code ~/Pictures/2026-09-26
   cull judge --backend openai --model <model> ~/Pictures/2026-09-26
-  cull judge --sort=culls ~/Pictures/2026-09-26`,
+  cull judge --estimate ~/Pictures/2026-09-26
+  cull judge --sort ~/Pictures/2026-09-26`,
 		Args: sortArgs(1),
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			// Only a typed --resume contradicts --fresh: a ~/.cull "resume = true" is
@@ -311,16 +313,16 @@ model and effort default to the report's. --fresh replaces it.`,
 	f.StringVar(&o.escalateModel, "escalate-model", "", "model for --escalate-backend (required with it)")
 	f.StringVar(&o.escalateOnList, "escalate-on", "soft,missed_focus,motion_blur,eyes_closed", "first-pass outcomes that escalate")
 	f.BoolVar(&o.rawClip, "raw-clip", true, "measure highlight clipping in the raw data (~0.8 s/frame); the preview overstates it")
-	f.BoolVar(&o.batch, "batch", false, "use the Message Batches API (anthropic): half price, results within minutes to hours; Ctrl-C is safe, resume re-attaches")
+	f.BoolVar(&o.batch, "batch", false, "use the Message Batches API (anthropic): half price, results within minutes to hours; Ctrl-C is safe, run judge again to re-attach")
 	f.DurationVar(&o.batchPoll, "batch-poll", 30*time.Second, "how often --batch checks progress")
 	f.BoolVar(&o.yes, "yes", false, "don't ask before spending (judge asks on a terminal when the estimate is over $1)")
 	f.BoolVar(&o.estimate, "estimate", false, "print the cost estimate and exit (no model calls, no key needed)")
-	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price, or batch price with --batch (0 = no limit); resume later")
+	f.Float64Var(&o.maxCost, "max-cost", 0, "stop once this run has cost this many USD at list price, or batch price with --batch (0 = no limit); run judge again to continue")
 	f.StringVar(&o.locate, "locate", "model", "when no face is found, ask the model for the focus target: model or off")
 	f.IntVarP(&o.concurrency, "concurrency", "j", 0, "parallel evaluations (0 = backend default: anthropic 4, claude-code 2, openai 4)")
 	f.BoolVar(&o.resume, "resume", false, "continue the existing report (the default now)")
 	f.MarkDeprecated("resume", "judge continues an existing report by default; --fresh replaces it")
-	f.BoolVar(&o.fresh, "fresh", false, "replace an existing report that holds assessments (default: continue it)")
+	f.BoolVar(&o.fresh, "fresh", false, "replace an existing report that holds assessments, judging with --backend (or ~/.cull's / the default), not the report's (default: continue it)")
 	f.BoolVar(&o.noXMP, "no-xmp", false, "don't write sidecars (by default cull keeps its own sidecars current: rating, label, keywords; never over ones it didn't write)")
 	f.BoolVar(&o.writeXMP, "write-xmp", true, "write sidecars (the default; --no-xmp turns them off)")
 	f.BoolVar(&o.xmpDevelop, "xmp-develop", false, "also write Adobe crs exposure/crop (not applied by Capture One)")

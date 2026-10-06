@@ -182,11 +182,11 @@ type Report struct {
 	Dir           string    `json:"dir"`
 	KeepBest      int       `json:"keep_best"` // Policy.KeepBest used at the last judge or decide
 	// Policy is the whole policy the decisions came from (the last judge, decide or
-	// rank). decide, rank, calibrate and judge --resume start from it, so tuning
+	// rank). decide, calibrate and judge start from it, so tuning
 	// survives a later run that doesn't repeat the flags; nil in older reports.
 	Policy *eval.Policy `json:"policy,omitempty"`
-	// Seq is the grouping the sets came from (--seq-gap, --seq-look); decide, rank
-	// and judge --resume regroup with it unless those flags are typed. Nil in older
+	// Seq is the grouping the sets came from (--seq-gap, --seq-look); decide
+	// and judge regroup with it unless those flags are typed. Nil in older
 	// reports.
 	Seq *Sequences `json:"seq,omitempty"`
 	// Tags are the shoot's keywords; they carry over to every later run of the folder.
@@ -195,7 +195,7 @@ type Report struct {
 	// grows: a regrouping or re-rank can drop a Set, but not what was paid for it.
 	RankCostUSD float64 `json:"rank_cost_usd,omitempty"`
 	// DiscardedCostUSD is what calls for results later discarded cost: an errored
-	// frame is re-run on --resume and its old result dropped, but its calls were paid.
+	// frame is re-run when judge continues and its old result dropped, but its calls were paid.
 	DiscardedCostUSD float64  `json:"discarded_cost_usd,omitempty"`
 	Results          []Result `json:"results"`
 	Sets             []Set    `json:"sets,omitempty"`

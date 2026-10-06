@@ -25,17 +25,18 @@ func newDecideCmd(so *sharedOpts) *cobra.Command {
 		Short: "Re-apply the keep/review/cull policy to a report without calling a model",
 		Long: `decide re-runs the policy on every assessment stored in the report, so tuning
 thresholds after calibration is free and instant. It prints what changed and saves
-the report, with the policy it used: later runs (decide, rank, calibrate, judge
---resume) start from that stored policy, and only the flags you give override it. Sidecars cull wrote are rewritten
-(and missing ones created) unless --no-xmp; other sidecars are never touched unless
---overwrite-xmp.
+the report, with the policy it used: later runs (decide, calibrate, judge)
+start from that stored policy, and only the flags you give override it. Sidecars cull
+wrote are rewritten (and missing ones created) unless --no-xmp; other sidecars are
+never touched unless --overwrite-xmp.
+
 --sort syncs keep/, review/ and cull/ with the verdicts; --sort=culls only cull/: new
 culls move there, frames no longer culled come back.
 Your labels from the review sheet (cull-labels.jsonl beside the report, or
 --labels) are used where you gave one: your verdicts drive sidecars and moves (the
 report keeps the model's), your stars become sidecar ratings. --no-labels ignores them.`,
-		Example: `  cull decide --review-below-sharpness 6 --eyes-closed cull ~/Pictures/2026-09-26
-  cull decide --sort=culls ~/Pictures/2026-09-26`,
+		Example: `  cull decide --keep-best 3 --outranked cull ~/Pictures/2026-09-26
+  cull decide --sort ~/Pictures/2026-09-26`,
 		Args: sortArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if sortF == sortAll && moveC && cmd.Flags().Changed("sort") && cmd.Flags().Changed("move-culled") {

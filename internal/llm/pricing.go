@@ -80,5 +80,5 @@ func EstimateRank(calls int, p Price, batch bool) (usd float64, in, out int) {
 }
 
 // ErrBudget stops dispatch once a run's cost reaches --max-cost; finished
-// results are kept and --resume continues later.
+// results are kept and running judge again continues.
 var ErrBudget = errors.New("cost budget reached")

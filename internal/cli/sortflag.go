@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -29,7 +30,16 @@ func (m *sortMode) Set(s string) error {
 	case "", "false":
 		*m = sortNone
 	default:
-		return fmt.Errorf("want all or culls")
+		// the spellings the old bool flag took (1, t, T, TRUE, True, 0, f, ...)
+		b, err := strconv.ParseBool(s)
+		if err != nil {
+			return fmt.Errorf("want all or culls")
+		}
+		if b {
+			*m = sortAll
+		} else {
+			*m = sortNone
+		}
 	}
 	return nil
 }
@@ -46,8 +56,12 @@ func registerSort(f *pflag.FlagSet, m *sortMode, usage string) {
 // the value is taken as an argument.
 func sortArgs(n int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
-		if len(args) == n+1 && cmd.Flags().Changed("sort") && (args[0] == "culls" || args[0] == "all") {
-			return fmt.Errorf("write --sort=%s (with \"=\"): a bare --sort means all, so %q was read as the folder", args[0], args[0])
+		if cmd.Flags().Changed("sort") && (len(args) == n || len(args) == n+1) {
+			for _, a := range args {
+				if a == "culls" || a == "all" {
+					return fmt.Errorf("write --sort=%s (with \"=\"): a bare --sort means all, so %q was read as an argument", a, a)
+				}
+			}
 		}
 		return cobra.ExactArgs(n)(cmd, args)
 	}

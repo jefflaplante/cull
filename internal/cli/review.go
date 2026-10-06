@@ -59,8 +59,8 @@ renders everything again.
 
 Files never move while the page is open: a label change rewrites only the labels log
 and the frame's sidecar, where the frame is now. --sort re-sorts once, when you stop the
-server with Ctrl-C, into keep/, review/ and cull/ by your labels (as decide --sort does,
-with the report's stored policy). If the server ends any other way, nothing moves: run
+server with Ctrl-C, into keep/, review/ and cull/ by your labels (--sort=culls: only culls into
+cull/; as decide --sort does, with the report's stored policy). If the server ends any other way, nothing moves: run
 cull decide --sort yourself. Don't re-sort after keep/ and review/ are imported into
 Capture One or Lightroom: they lose track of files that move; use apply-c1 instead.`,
 		Example: `  cull review ~/Pictures/2026-09-26
@@ -131,7 +131,7 @@ Capture One or Lightroom: they lose track of files that move; use apply-c1 inste
 			if err := serveSheet(cmd, sheet, rep, review.ServeOptions{
 				ReportPath: cfg.ReportPath, LabelsPath: labelsOr(labelsPath, cfg.ReportPath),
 				WriteXMP: !noXMP, OverwriteXMP: overwrite,
-			}, port, fl.Changed("port"), !noOpen, sortAfter != sortNone); err != nil || sortAfter == sortNone {
+			}, port, fl.Changed("port"), !noOpen, sortAfter); err != nil || sortAfter == sortNone {
 				return err
 			}
 			return sortAfterReview(cmd, so, cfg, labelsPath, sortAfter)
@@ -157,7 +157,7 @@ Capture One or Lightroom: they lose track of files that move; use apply-c1 inste
 
 // serveSheet runs the review server on 127.0.0.1 until the command's context ends
 // (Ctrl-C).
-func serveSheet(cmd *cobra.Command, sheet *review.Sheet, rep *report.Report, o review.ServeOptions, port int, explicit, openIt, sortAfter bool) error {
+func serveSheet(cmd *cobra.Command, sheet *review.Sheet, rep *report.Report, o review.ServeOptions, port int, explicit, openIt bool, sortAfter sortMode) error {
 	tok := make([]byte, 16)
 	if _, err := rand.Read(tok); err != nil {
 		return err
@@ -181,8 +181,11 @@ func serveSheet(cmd *cobra.Command, sheet *review.Sheet, rep *report.Report, o r
 	}
 	addr := ln.Addr().String()
 	url := "http://" + addr + "/#token=" + o.Token
-	if sortAfter {
+	switch sortAfter {
+	case sortAll:
 		fmt.Fprintln(w, "--sort: files stay where they are while you work; when you stop, frames are re-sorted into keep/, review/ and cull/ by your labels")
+	case sortCulls:
+		fmt.Fprintln(w, "--sort=culls: files stay where they are while you work; when you stop, culls are moved into cull/ by your labels")
 	}
 	fmt.Fprintf(w, "review server: %s\nlabels: %s\n", url, o.LabelsPath)
 	switch {

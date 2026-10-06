@@ -8,7 +8,7 @@ import (
 )
 
 func TestSortModeValues(t *testing.T) {
-	for in, want := range map[string]sortMode{"all": sortAll, "true": sortAll, "culls": sortCulls, "false": sortNone, "": sortNone} {
+	for in, want := range map[string]sortMode{"all": sortAll, "true": sortAll, "culls": sortCulls, "false": sortNone, "": sortNone, "True": sortAll, "TRUE": sortAll, "t": sortAll, "T": sortAll, "1": sortAll, "False": sortNone, "FALSE": sortNone, "f": sortNone, "F": sortNone, "0": sortNone} {
 		var m sortMode
 		if err := m.Set(in); err != nil || m != want {
 			t.Errorf("Set(%q) = %q, %v; want %q", in, m, err, want)
@@ -24,9 +24,14 @@ func TestSortModeValues(t *testing.T) {
 func TestSortWithSpaceNamesTheEqualsForm(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
-	for _, args := range [][]string{{"decide", "--sort", "culls", dir}, {"judge", "--estimate", "--sort", "culls", dir}} {
+	for _, args := range [][]string{{"decide", "--sort", "culls", dir}, {"judge", "--estimate", "--sort", "culls", dir},
+		{"decide", dir, "--sort", "culls"}, {"judge", dir, "--estimate", "--sort", "all"}, {"decide", "--sort", "culls"}} {
 		_, err := run(t, args...)
-		if err == nil || !strings.Contains(err.Error(), "--sort=culls") {
+		want := "--sort=culls"
+		if strings.Contains(strings.Join(args, " "), "sort all") {
+			want = "--sort=all"
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%v: got %v", args, err)
 		}
 	}

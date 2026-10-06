@@ -232,25 +232,29 @@ func TestFreshRefusedWhileFramesAreMoved(t *testing.T) {
 // A move whose report save never happened: the frame is in culled/, the report
 // says it isn't. restore must still bring it back.
 func TestRestoreAdoptsUnrecordedMove(t *testing.T) {
-	dir, b := shoot(t)
-	c := moveCfg(dir)
-	c.MoveCulled = false
-	if _, _, err := Run(context.Background(), c, b); err != nil {
-		t.Fatal(err)
-	}
-	culled := filepath.Join(dir, "cull")
-	os.MkdirAll(culled, 0o755)
-	for _, n := range []string{"L1000001.DNG", "L1000001.xmp"} { // the move, without the save
-		if err := os.Rename(filepath.Join(dir, n), filepath.Join(culled, n)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	n, err := Restore(filepath.Join(dir, "r.json"), "", io.Discard, nil)
-	if err != nil || n != 1 {
-		t.Fatalf("restored %d, err %v", n, err)
-	}
-	if !exists(filepath.Join(dir, "L1000001.DNG")) || !exists(filepath.Join(dir, "L1000001.xmp")) {
-		t.Fatal("frame or sidecar not restored")
+	for _, folder := range []string{CullDir, CulledDir} { // CulledDir: a crash under v0.1
+		t.Run(folder, func(t *testing.T) {
+			dir, b := shoot(t)
+			c := moveCfg(dir)
+			c.MoveCulled = false
+			if _, _, err := Run(context.Background(), c, b); err != nil {
+				t.Fatal(err)
+			}
+			culled := filepath.Join(dir, folder)
+			os.MkdirAll(culled, 0o755)
+			for _, n := range []string{"L1000001.DNG", "L1000001.xmp"} { // the move, without the save
+				if err := os.Rename(filepath.Join(dir, n), filepath.Join(culled, n)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			n, err := Restore(filepath.Join(dir, "r.json"), "", io.Discard, nil)
+			if err != nil || n != 1 {
+				t.Fatalf("restored %d, err %v", n, err)
+			}
+			if !exists(filepath.Join(dir, "L1000001.DNG")) || !exists(filepath.Join(dir, "L1000001.xmp")) {
+				t.Fatal("frame or sidecar not restored")
+			}
+		})
 	}
 }
 

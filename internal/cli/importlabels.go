@@ -15,8 +15,9 @@ import (
 func newImportLabelsCmd(so *sharedOpts) *cobra.Command {
 	var labelsPath string
 	cmd := &cobra.Command{
-		Use:   "import-labels <export.jsonl> <dir>",
-		Short: "Add labels exported from a 'review --static' page to the shoot's labels log",
+		Use:        "import-labels <export.jsonl> <dir>",
+		Deprecated: "the offline review page goes in the next release, and with it this command: label with cull review (served)",
+		Short:      "(deprecated) Add labels exported from a 'review --static' page to the shoot's labels log",
 		Long: `A static review page (review --static) keeps labels in the browser; its "Export
 labels" button saves them as JSONL in the labels log's own format. import-labels
 appends them to the shoot's log (cull-labels.jsonl beside the report, or --labels),

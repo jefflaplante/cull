@@ -87,6 +87,9 @@ fresh, force, run, overwrite-xmp, -q/-v) can't be set there.`,
 	for _, c := range []*cobra.Command{scan, judge} {
 		so.registerPrep(c.Flags())
 		so.tags.register(c.Flags())
+		for _, n := range []string{"project", "event", "location", "keyword"} {
+			c.Flags().MarkDeprecated(n, "set the shoot's tags with cull offload or cull tag <dir>")
+		}
 	}
 	setSection(scan.Flags(), secCommon, "save-inputs")
 	for _, c := range []*cobra.Command{scan, judge, rank, decide} {

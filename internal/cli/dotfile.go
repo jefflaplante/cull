@@ -67,6 +67,9 @@ func applyDotfile(cmd *cobra.Command, w io.Writer, quiet bool) error {
 			if f == nil || f.Changed {
 				continue // another command's flag, or typed on the command line
 			}
+			if f.Deprecated != "" {
+				fmt.Fprintf(w, "warning: %s: deprecated, %s\n", at, f.Deprecated)
+			}
 			if err := f.Value.Set(st.Value); err != nil {
 				return fmt.Errorf("%s: %v", at, err)
 			}

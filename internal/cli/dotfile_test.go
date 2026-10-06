@@ -105,3 +105,27 @@ func TestDotfileWarningsAndErrors(t *testing.T) {
 		t.Fatalf("bad value: %v", err)
 	}
 }
+
+// Deprecated keys warn and still apply: write-xmp = false means no sidecars,
+// sort = true means --sort=all, and resume = true changes nothing.
+func TestDotfileDeprecatedKeys(t *testing.T) {
+	dir := judgedShoot(t)
+	dotfile(t, "write-xmp = false\nresume = true\nsort = true\n")
+	out, err := run(t, "decide", dir)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "write-xmp: deprecated") {
+		t.Errorf("no deprecation warning for write-xmp:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep", "L1.DNG")); err != nil {
+		t.Fatalf("sort = true did not sort into keep/ review/ cull/:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep", "L1.xmp")); err == nil {
+		t.Fatal("write-xmp = false still wrote a sidecar")
+	}
+	out, err = run(t, "judge", "--estimate", dir)
+	if err != nil || !strings.Contains(out, "resume: deprecated") {
+		t.Fatalf("resume key: %v\n%s", err, out)
+	}
+}

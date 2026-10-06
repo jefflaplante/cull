@@ -45,9 +45,8 @@ beside the report, and the frame's .xmp sidecar is rewritten (your stars, verdic
 colour and keyword), which Capture One reads on import; sidecars cull didn't write
 are never touched. Ctrl-C stops the server.
 
---no-xmp saves only the labels log; --no-open doesn't launch the browser; --static
-writes an offline index.html instead of serving (labels then stay in the browser;
-export them from the page, then cull import-labels). 'calibrate', 'decide' and 'apply-c1' read the log.
+--no-xmp saves only the labels log; --no-open doesn't launch the browser.
+'calibrate', 'decide' and 'apply-c1' read the log.
 Works on scan reports too (labeling only).
 
 The sheet's images (thumbnails, subject crops, 100% loupe views) are a cache in
@@ -65,7 +64,6 @@ cull decide --sort yourself. Don't re-sort after keep/ and review/ are imported 
 Capture One or Lightroom: they lose track of files that move; use apply-c1 instead.`,
 		Example: `  cull review ~/Pictures/2026-09-26
   cull review --no-xmp ~/Pictures/2026-09-26     # labels only, no sidecars
-  cull review --static ~/Pictures/2026-09-26     # offline page
   cull review --prepare ~/Pictures/2026-09-26    # fill the image cache now, open later
   cull review --clear-cache ~/Pictures/2026-09-26
   cull review --sort ~/Pictures/2026-09-26       # re-sort by your labels when you stop`,
@@ -145,6 +143,7 @@ Capture One or Lightroom: they lose track of files that move; use apply-c1 inste
 	registerSort(f, &sortAfter, "when the server stops (Ctrl-C), re-sort the frames by your labels, as decide --sort does (--sort=culls: only culls into cull/); don't use it once the folders are imported")
 	f.BoolVar(&clearCache, "clear-cache", false, "delete the sheet's cached images and exit (with --prepare: then render them again)")
 	f.BoolVar(&static, "static", false, "write an offline index.html instead of serving (labels stay in the browser)")
+	f.MarkDeprecated("static", "the offline page goes in the next release: use cull review (served), which saves every change itself")
 	f.BoolVar(&noOpen, "no-open", false, "don't open the browser; open the printed URL yourself")
 	f.BoolVar(&noXMP, "no-xmp", false, "don't write sidecars; save only the labels log")
 	f.BoolVar(&overwrite, "overwrite-xmp", false, "also overwrite sidecars not written by cull")

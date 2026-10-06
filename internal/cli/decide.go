@@ -52,6 +52,7 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 			if err != nil {
 				return err
 			}
+			write = sideReportSidecars(cmd, cfg, write)
 			var saved *eval.Policy
 			var savedSeq *report.Sequences
 			if rep, err := report.Load(cfg.ReportPath); err == nil { // a missing report is Decide's error to report

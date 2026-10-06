@@ -174,3 +174,39 @@ func TestDotfileSortAndMoveCulled(t *testing.T) {
 		t.Fatalf("typed both should fail:\n%s", out)
 	}
 }
+
+// A dotfile backend = openai (no model) mustn't fail continuing a claude-code report:
+// the report's backend replaces it before validation.
+func TestDotfileBackendWithoutModelContinuesReport(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	bin, _ := countingClaude(t)
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	dotfile(t, "backend = openai\n")
+	out, err := run(t, "judge", "--claude-bin", bin, "--locate", "off", dir)
+	if err != nil || !strings.Contains(out, "backend: claude-code") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	// Not continuing, the dotfile's openai still needs a model.
+	if _, err := run(t, "judge", "--estimate", t.TempDir()); err == nil || !strings.Contains(err.Error(), "requires --model") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// A typed --rerank wins over a dotfile no-rank = true; only both typed contradict.
+func TestTypedRerankBeatsDotfileNoRank(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dotfile(t, "no-rank = true\n")
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	out, err := run(t, "judge", "--estimate", "--rerank", "--backend", "claude-code", dir)
+	if err != nil {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	if _, err := run(t, "judge", "--estimate", "--rerank", "--no-rank", "--backend", "claude-code", dir); err == nil || !strings.Contains(err.Error(), "contradict") {
+		t.Fatalf("both typed: %v", err)
+	}
+}

@@ -55,3 +55,16 @@ func TestMoveCulledIsSortCulls(t *testing.T) {
 		t.Fatalf("not in cull/:\n%s", out)
 	}
 }
+
+// `--sort keep <dir>`: a value --sort doesn't take, written with a space, says what
+// --sort takes rather than a bare "accepts 1 arg(s)".
+func TestSortWithSpaceAndOtherValue(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	for _, args := range [][]string{{"decide", "--sort", "keep", dir}, {"judge", "--estimate", "--sort", "keep", dir}, {"decide", dir, "--sort", "keep"}} {
+		_, err := run(t, args...)
+		if err == nil || !strings.Contains(err.Error(), `--sort takes all or culls, written with "="`) {
+			t.Errorf("%v: got %v", args, err)
+		}
+	}
+}

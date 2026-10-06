@@ -403,6 +403,15 @@ func collect(ctx context.Context, cfg Config, client BatchClient, st *batchState
 	return nil
 }
 
+// batchWaitText describes the batch wait, and how to re-attach after Ctrl-C. A
+// --fresh run can't be repeated to re-attach: --fresh refuses an unfinished batch.
+func batchWaitText(cfg Config) string {
+	if cfg.Fresh {
+		return "waiting for the batch (Ctrl-C is safe; cull judge --batch without --fresh re-attaches)"
+	}
+	return "waiting for the batch (Ctrl-C is safe; running the same command again re-attaches)"
+}
+
 // await polls batch id every cfg.BatchPoll until it ends. Once ctx is cancelled it
 // returns ctx's error. The wait shows as a stage: requests finished out of the
 // batch's total, with the live view's spinner turning between polls.
@@ -423,7 +432,7 @@ func await(ctx context.Context, cfg Config, client BatchClient, id string) (llm.
 			}
 		}
 		if t == nil {
-			t = ui.Track(cfg.UI, "batch", "waiting for the batch (Ctrl-C is safe; running the same command again re-attaches)", "requests", total)
+			t = ui.Track(cfg.UI, "batch", batchWaitText(cfg), "requests", total)
 		}
 		t.Add(finished - shown)
 		shown = max(shown, finished)

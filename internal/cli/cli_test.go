@@ -22,6 +22,7 @@ import (
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/labels"
+	"github.com/jefflaplante/cull/internal/llm"
 	"github.com/jefflaplante/cull/internal/pipeline"
 	"github.com/jefflaplante/cull/internal/report"
 )
@@ -1771,5 +1772,170 @@ func TestScanThenJudgeJudgesEveryFrame(t *testing.T) {
 		if r.Evaluation == nil {
 			t.Fatalf("%s not judged", r.File)
 		}
+	}
+}
+
+// fakeClaudeQuota is fakeClaudeCull that reports the 5-hour window 95% used, so the
+// first answer comes with a quota stop (the default --quota-stop is 0.9).
+var fakeClaudeQuota = strings.Replace(fakeClaudeCull, `echo '{"type":"result"`,
+	`echo '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.95},"seven_day":{"utilization":0.1}}}}'`+"\n"+`echo '{"type":"result"`, 1)
+
+// A stopped --fresh run must not tell you to repeat it: --fresh again would replace
+// the partial report and pay for every frame again. It names judge without --fresh,
+// keeping -o.
+func TestStoppedFreshRunSaysContinueWithoutFresh(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	for _, n := range []string{"L1000001.DNG", "L1000002.DNG", "L1000003.DNG"} {
+		tinyDNG(t, filepath.Join(dir, n))
+	}
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeQuota), 0o755)
+	side := filepath.Join(t.TempDir(), "side.json")
+	out, err := run(t, "judge", "--fresh", "-o", side, "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "-j", "1", dir)
+	if err == nil {
+		t.Fatalf("want a quota stop:\n%s", out)
+	}
+	if strings.Contains(out, "run the same command") || !strings.Contains(out, "without --fresh") ||
+		!strings.Contains(out, "cull judge -o "+shellQuote(side)+" "+shellQuote(dir)) {
+		t.Fatalf("the hint must name judge without --fresh, with -o:\n%s", out)
+	}
+	// Without --fresh, repeating the command is right.
+	dir2 := t.TempDir()
+	tinyDNG(t, filepath.Join(dir2, "L1000001.DNG"))
+	out, _ = run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir2)
+	if !strings.Contains(out, "run the same command later") {
+		t.Fatalf("a plain stopped run says to repeat it:\n%s", out)
+	}
+}
+
+// The --max-cost stop hint follows the same rule.
+func TestBudgetStopHintWithFresh(t *testing.T) {
+	cfg := pipeline.Config{Dir: "/shoot", ReportPath: "/shoot/cull-report.json"}
+	err := fmt.Errorf("%w: $1 of $1", llm.ErrBudget)
+	if h := stopHint(err, true, cfg); !strings.Contains(h, "without --fresh") || !strings.Contains(h, "cull judge /shoot") || !strings.Contains(h, "--max-cost") {
+		t.Fatalf("fresh: %q", h)
+	}
+	if h := stopHint(err, false, cfg); !strings.Contains(h, "run the same command again") {
+		t.Fatalf("plain: %q", h)
+	}
+	if h := stopHint(nil, true, cfg); h != "" {
+		t.Fatalf("no stop: %q", h)
+	}
+}
+
+// labelledSidecar is two identical frames judged cull (a set, so judge rewrites
+// their sidecars once grouped), with your keep and 5 stars for L1000001 in the
+// shoot's labels log, applied to its sidecar by decide; it returns that sidecar's
+// path and bytes.
+func labelledSidecar(t *testing.T) (dir, bin, xmpPath string, before []byte) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	dir = t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	tinyDNG(t, filepath.Join(dir, "L1000002.DNG"))
+	bin = filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte(fakeClaudeCull), 0o755)
+	if out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--no-rank", dir); err != nil {
+		t.Fatalf("judge: %v\n%s", err, out)
+	}
+	os.WriteFile(filepath.Join(dir, labels.FileName), []byte(`{"file":"L1000001.DNG","label":"keep","stars":5,"at":"2026-09-27T20:00:00Z"}`+"\n"), 0o644)
+	if out, err := run(t, "decide", dir); err != nil {
+		t.Fatalf("decide: %v\n%s", err, out)
+	}
+	xmpPath = filepath.Join(dir, "L1000001.xmp")
+	before, _ = os.ReadFile(xmpPath)
+	if !strings.Contains(string(before), `xmp:Rating="5"`) {
+		t.Fatalf("setup: your stars aren't in the sidecar:\n%s", before)
+	}
+	return dir, bin, xmpPath, before
+}
+
+const sideNote = "sidecars: off for a separate report (-o)"
+
+// A side report (-o other than <dir>/cull-report.json) leaves the shoot's sidecars
+// alone by default: its verdicts, without your labels, would replace them. A typed
+// --no-xmp=false writes them.
+func TestSideReportLeavesShootSidecars(t *testing.T) {
+	dir, bin, xmpPath, before := labelledSidecar(t)
+	side := filepath.Join(t.TempDir(), "side.json")
+	out, err := run(t, "judge", "-o", side, "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--no-rank", dir)
+	if err != nil {
+		t.Fatalf("judge -o: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(xmpPath); string(b) != string(before) || !strings.Contains(out, sideNote) {
+		t.Fatalf("judge -o changed the shoot's sidecar or said nothing:\n%s\n%s", b, out)
+	}
+	out, err = run(t, "decide", "-o", side, dir)
+	if err != nil {
+		t.Fatalf("decide -o: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(xmpPath); string(b) != string(before) || !strings.Contains(out, sideNote) {
+		t.Fatalf("decide -o changed the shoot's sidecar or said nothing:\n%s\n%s", b, out)
+	}
+	// -o naming the shoot's own report is not a side report.
+	if out, err = run(t, "decide", "-o", filepath.Join(dir, "cull-report.json"), dir); err != nil || strings.Contains(out, sideNote) {
+		t.Fatalf("decide -o <dir>/cull-report.json: %v\n%s", err, out)
+	}
+	// Typed, they're written.
+	if out, err = run(t, "decide", "-o", side, "--no-xmp=false", dir); err != nil || strings.Contains(out, sideNote) {
+		t.Fatalf("decide -o --no-xmp=false: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(xmpPath); string(b) == string(before) {
+		t.Fatal("decide -o --no-xmp=false wrote no sidecar")
+	}
+	if out, err = run(t, "decide", dir); err != nil { // your labels back in the sidecar
+		t.Fatalf("%v\n%s", err, out)
+	}
+	side2 := filepath.Join(t.TempDir(), "side2.json")
+	if out, err = run(t, "judge", "-o", side2, "--write-xmp", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", "--no-rank", dir); err != nil {
+		t.Fatalf("judge -o --write-xmp: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(xmpPath); string(b) == string(before) {
+		t.Fatal("judge -o --write-xmp wrote no sidecar")
+	}
+}
+
+// judge --sort=culls on a shoot sorted into keep/ review/ cull/ brings the keeps and
+// reviews home, as decide --sort=culls does.
+func TestJudgeSortCullsBringsSortedFramesHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := judgedShoot(t)
+	if out, err := run(t, "decide", "--sort", dir); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep", "L1.DNG")); err != nil {
+		t.Fatalf("setup: L1 not in keep/: %v", err)
+	}
+	bin, calls := countingClaude(t)
+	out, err := run(t, "judge", "--claude-bin", bin, "--locate", "off", "--no-rank", "--sort=culls", dir)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if n := lineCount(calls); n != 0 {
+		t.Fatalf("judge re-judged %d frame(s):\n%s", n, out)
+	}
+	for _, p := range []string{"L1.DNG", "L2.DNG", filepath.Join("cull", "L3.DNG")} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("%s: %v\n%s", p, err, out)
+		}
+	}
+}
+
+// Continuing a report prints "continuing:", not the retired --resume's name.
+func TestJudgeEstimateSaysContinuing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := judgedShoot(t)
+	out, err := run(t, "judge", "--estimate", dir)
+	if err != nil || !strings.Contains(out, "continuing: 3 already judged, 0 to go") || strings.Contains(out, "resume:") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+}
+
+// root's help names the flags ~/.cull refuses as examples, not as the full list.
+func TestRootHelpDotfileRefusalsAreExamples(t *testing.T) {
+	long := NewRootCmd().Long
+	if !strings.Contains(long, "(e.g. ") {
+		t.Fatalf("the refused-flag list reads as complete:\n%s", long)
 	}
 }

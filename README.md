@@ -556,7 +556,8 @@ labelled shoot before relying on it.
     overestimates.
 - On a terminal, `judge` asks before spending when the estimate is over $1.
   `--yes` skips the question; scripts (no terminal) aren't asked.
-- `--max-cost USD` stops the run once it has spent that much. Run the same command again to continue.
+- `--max-cost USD` stops the run once it has spent that much. Run the same command again to continue
+  (without `--fresh`, which would start over).
 - Re-running `judge` continues the report: frames already judged cost nothing. To replace
   a report that holds assessments, use `--fresh` (on `judge` and `scan`); `-o` writes a
   separate report. Even `--fresh` is refused while the report records frames moved out
@@ -642,7 +643,8 @@ and Experimental ones. This reference follows the same sections. Defaults are in
 parentheses.
 
 **Global** (every command): `-o/--report` sets the report path; `-r/--recursive`
-includes subfolders.
+includes subfolders. With `judge` and `decide`, an `-o` other than `<dir>/cull-report.json`
+leaves the shoot's sidecars alone unless you type `--no-xmp=false`.
 
 **Verbosity** (every command): `-q/--quiet` prints only warnings, errors and the final
 summary; the default adds progress and a line per frame; `-v/--verbose` adds per-stage

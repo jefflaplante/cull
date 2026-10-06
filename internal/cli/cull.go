@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -83,14 +84,23 @@ model and effort default to the report's. --fresh replaces it.`,
   cull judge --estimate ~/Pictures/2026-09-26
   cull judge --sort ~/Pictures/2026-09-26`,
 		Args: sortArgs(1),
-		PreRunE: func(cmd *cobra.Command, _ []string) error {
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			fl := cmd.Flags()
 			// Only a typed --resume contradicts --fresh: a ~/.cull "resume = true" is
 			// the default now and changes nothing.
-			if o.fresh && cmd.Flags().Changed("resume") {
+			if o.fresh && fl.Changed("resume") {
 				return fmt.Errorf("--fresh and --resume contradict each other")
 			}
+			// Only both typed contradict: one typed wins over the other from ~/.cull.
 			if o.rerank && o.noRank {
-				return fmt.Errorf("--rerank and --no-rank contradict each other")
+				switch {
+				case fl.Changed("rerank") && fl.Changed("no-rank"):
+					return fmt.Errorf("--rerank and --no-rank contradict each other")
+				case fl.Changed("rerank"):
+					o.noRank = false
+				default:
+					o.rerank = false
+				}
 			}
 			o.sort = resolveMoveCulled(cmd, o.moveCulled, o.sort)
 			if o.sort == sortAll && o.moveCulled && cmd.Flags().Changed("sort") && cmd.Flags().Changed("move-culled") {
@@ -105,7 +115,9 @@ model and effort default to the report's. --fresh replaces it.`,
 			if o.concurrency < 0 {
 				return fmt.Errorf("--concurrency must be >= 0 (0 = backend default)")
 			}
-			if err := o.backendFlags.validate(); err != nil {
+			// A judged report this run continues replaces untyped backend values
+			// (~/.cull's) in RunE, which validates them then.
+			if err := o.backendFlags.validate(); err != nil && !continuesJudged(so, o.fresh, args) {
 				return err
 			}
 			if o.batch && o.second {
@@ -166,9 +178,9 @@ model and effort default to the report's. --fresh replaces it.`,
 						o.locateEffort = prev.LocateEffort
 					}
 				}
-				if err := o.backendFlags.validate(); err != nil {
-					return err
-				}
+			}
+			if err := o.backendFlags.validate(); err != nil {
+				return err
 			}
 			if o.batch && o.backend != "anthropic" {
 				if judged && !fl.Changed("backend") {
@@ -215,7 +227,7 @@ model and effort default to the report's. --fresh replaces it.`,
 				if prev != nil { // only what's left costs anything
 					pending = pipeline.Pending(files, prev, cfg.Policy)
 					if judged {
-						fmt.Fprintf(cmd.ErrOrStderr(), "resume: %d already judged, %d to go\n", len(files)-len(pending), len(pending))
+						fmt.Fprintf(cmd.ErrOrStderr(), "continuing: %d already judged, %d to go\n", len(files)-len(pending), len(pending))
 					}
 				}
 				var rankEst *pipeline.RankEstimate
@@ -264,7 +276,7 @@ model and effort default to the report's. --fresh replaces it.`,
 			cfg.Concurrency = o.backendFlags.concurrencyOrDefault(o.concurrency)
 			cfg.Resume = !o.fresh
 			cfg.Fresh = o.fresh
-			cfg.WriteXMP = o.writeXMP && !o.noXMP
+			cfg.WriteXMP = sideReportSidecars(cmd, cfg, o.writeXMP && !o.noXMP)
 			cfg.XMPDevelop = false
 			cfg.OverwriteXMP = o.overwriteXMP
 			cfg.MoveCulled, cfg.Sort = o.sort.flags()
@@ -298,11 +310,8 @@ model and effort default to the report's. --fresh replaces it.`,
 			}
 			out.Close()
 			printSummary(cmd, cfg.ReportPath, rep, usage, b.Name(), o.batch)
-			if errors.Is(err, llm.ErrBudget) {
-				fmt.Fprintln(cmd.ErrOrStderr(), "stopped at --max-cost; run the same command again (with a higher --max-cost) to continue")
-			}
-			if errors.Is(err, llm.ErrQuotaStop) {
-				fmt.Fprintln(cmd.ErrOrStderr(), "stopped early to protect your subscription quota; run the same command later to continue")
+			if h := stopHint(err, o.fresh, cfg); h != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), h)
 			}
 			return err
 		},
@@ -345,6 +354,80 @@ model and effort default to the report's. --fresh replaces it.`,
 	f.MarkDeprecated("move-culled", "use --sort=culls (culls now go into cull/)")
 	cmd.MarkFlagFilename("api-key-file")
 	return cmd
+}
+
+// continuesJudged is whether judge <args[0]> continues a report holding judged
+// frames (not with --fresh).
+func continuesJudged(so *sharedOpts, fresh bool, args []string) bool {
+	if fresh || len(args) != 1 {
+		return false
+	}
+	path := so.report
+	if path == "" {
+		dir, err := filepath.Abs(args[0])
+		if err != nil {
+			return false
+		}
+		path = filepath.Join(dir, "cull-report.json")
+	}
+	r, err := report.Load(path)
+	return err == nil && r.Backend != ""
+}
+
+// stopHint says how to continue a run stopped at --max-cost or the quota ("" for
+// any other end). After --fresh, repeating the command would replace the partial
+// report and pay for every frame again, so it names judge without --fresh (keeping
+// -o, as status does).
+func stopHint(err error, fresh bool, cfg pipeline.Config) string {
+	again, later := "run the same command again", "run the same command later"
+	if fresh {
+		cmd := "cull judge " + shellQuote(cfg.Dir)
+		if cfg.ReportPath != filepath.Join(cfg.Dir, "cull-report.json") {
+			cmd = "cull judge -o " + shellQuote(cfg.ReportPath) + " " + shellQuote(cfg.Dir)
+		}
+		again = "run " + cmd + " (without --fresh, which would start over)"
+		later = "later, run " + cmd + " (without --fresh, which would start over)"
+	}
+	switch {
+	case errors.Is(err, llm.ErrBudget):
+		return "stopped at --max-cost; " + again + " with a higher --max-cost to continue"
+	case errors.Is(err, llm.ErrQuotaStop):
+		return "stopped early to protect your subscription quota; " + later + " to continue"
+	}
+	return ""
+}
+
+// sideReportSidecars is whether a run writes sidecars, given write from the sidecar
+// flags. With -o naming a report other than the shoot's own (<dir>/cull-report.json)
+// the default is off: the shoot's sidecars carry its own report's verdicts and your
+// labels beside it, and a side report's verdicts, without those labels, would
+// replace them. Typed --no-xmp=false, --write-xmp or --overwrite-xmp still write
+// them (a ~/.cull value isn't typed). It says so when it turns them off.
+func sideReportSidecars(cmd *cobra.Command, cfg pipeline.Config, write bool) bool {
+	f := cmd.Flags()
+	if !write || !f.Changed("report") || f.Changed("no-xmp") || f.Changed("write-xmp") || f.Changed("overwrite-xmp") || !isSideReport(cfg) {
+		return write
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), "sidecars: off for a separate report (-o); --no-xmp=false writes them")
+	return false
+}
+
+// isSideReport is whether cfg's report is another file than the shoot's own
+// <dir>/cull-report.json (the same file through a symlinked path is the shoot's own).
+func isSideReport(cfg pipeline.Config) bool {
+	own := filepath.Join(cfg.Dir, "cull-report.json")
+	p, err := filepath.Abs(cfg.ReportPath)
+	if err != nil || p == own {
+		return false
+	}
+	if filepath.Base(p) == "cull-report.json" {
+		a, err1 := filepath.EvalSymlinks(filepath.Dir(p))
+		b, err2 := filepath.EvalSymlinks(cfg.Dir)
+		if err1 == nil && err2 == nil && a == b {
+			return false
+		}
+	}
+	return true
 }
 
 // escalateOn are the first-pass outcomes --escalate-on accepts.

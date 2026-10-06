@@ -413,3 +413,14 @@ func TestBatchAcceptsAnswersWithoutKeywords(t *testing.T) {
 		}
 	}
 }
+
+// The batch wait says how to re-attach after Ctrl-C: the same command, unless that
+// command has --fresh (which refuses an unfinished batch and would re-judge).
+func TestBatchWaitTextWithFresh(t *testing.T) {
+	if s := batchWaitText(Config{Resume: true}); !strings.Contains(s, "running the same command again re-attaches") {
+		t.Errorf("plain: %q", s)
+	}
+	if s := batchWaitText(Config{Fresh: true}); strings.Contains(s, "same command") || !strings.Contains(s, "without --fresh") {
+		t.Errorf("fresh: %q", s)
+	}
+}

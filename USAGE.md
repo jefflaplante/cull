@@ -177,7 +177,7 @@ The whole run took 1 minute 56 seconds.
 - `-q` (summary only);
 - `--plain` (no live view).
 
-**Interrupted?** Ctrl-C, then run the same command again: it continues where it stopped, and ranks the sets that need it. `--fresh` replaces the report instead.
+**Interrupted?** Ctrl-C, then run the same command again (without `--fresh`, if you used it): it continues where it stopped, and ranks the sets that need it. `--fresh` replaces the report instead.
 
 **Status at any point:**
 

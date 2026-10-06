@@ -64,8 +64,9 @@ Your own defaults for any flag go in ~/.cull ($CULL_CONFIG to use another file),
 
 A flag you type wins, then a shoot's stored policy and backend (decide, judge), then
 ~/.cull, then the built-in default. Each run prints the values it took from the file;
-CULL_CONFIG=/dev/null turns it off for one run. One-off and risky flags (yes, fresh,
-force, rerank, run, overwrite-xmp, -q/-v) can't be set there.`,
+CULL_CONFIG=/dev/null turns it off for one run. One-off and risky flags can't be set
+there (e.g. yes, fresh, force, rerank, estimate, run, overwrite-xmp, -o, -q/-v): a line
+naming one is skipped with a warning.`,
 		SilenceUsage:  true, // runtime errors shouldn't dump usage
 		SilenceErrors: true, // main prints the error once
 		Version:       version,

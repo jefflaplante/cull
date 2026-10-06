@@ -571,7 +571,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 				// upgrade: cull decide rewrites it in place with no model call. --fresh
 				// instead would re-judge, and pay for, the whole shoot again.
 				if prev.SchemaVersion < report.SchemaVersion {
-					return nil, nil, fmt.Errorf("resume: %s was produced by schema v%d; this run is schema v%d: "+
+					return nil, nil, fmt.Errorf("%s was produced by schema v%d; this run is schema v%d: "+
 						"run `cull decide %s` (free; it upgrades the report in place), then judge again",
 						cfg.ReportPath, prev.SchemaVersion, report.SchemaVersion, cfg.Dir)
 				}
@@ -585,7 +585,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 			// Effort changes what the model answers, so like the model it can't change
 			// within one report: calibration compares reports, not mixtures.
 			if prev.Effort != cfg.Effort || prev.LocateEffort != cfg.LocateEffort {
-				return nil, nil, fmt.Errorf("resume: %s was judged with --effort %q --locate-effort %q (\"\" = the model's default); "+
+				return nil, nil, fmt.Errorf("%s was judged with --effort %q --locate-effort %q (\"\" = the model's default); "+
 					"drop --effort/--locate-effort to continue it with those, use --fresh to replace it, or -o for a separate report", cfg.ReportPath, prev.Effort, prev.LocateEffort)
 			}
 			// Paid rankings carry over: decideAll reuses a stored order while it still
@@ -602,7 +602,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 				rep.DiscardedCostUSD += r.CostUSD // re-run below, but what it cost stays paid
 			}
 		case !errors.Is(err, fs.ErrNotExist):
-			return nil, nil, fmt.Errorf("resume: %w", err)
+			return nil, nil, fmt.Errorf("continuing the report: %w", err)
 		}
 	}
 	var todo []string
@@ -732,8 +732,17 @@ func finishRun(ctx context.Context, rep *report.Report, cfg Config, budget *spen
 			if n += placeShown(rep, lab, placeSorted, cfg.warnWriter(), false, cfg.UI); n > 0 {
 				cfg.note(ui.Quiet, "sorted %d frame(s) into %s/, %s/ and %s/ (undo: cull restore %s)", n, KeepDir, ReviewDir, CullDir, cfg.Dir)
 			}
-		} else if n := moveCulled(rep, lab, cfg.warnWriter(), cfg.UI); n > 0 {
-			cfg.note(ui.Quiet, "moved %d culled frame(s) into %s/ (undo: cull restore %s)", n, CullDir, cfg.Dir)
+		} else {
+			// Home first, as decide --sort=culls does: frames an earlier --sort put in
+			// keep/ or review/, or no longer culled, come back to the shoot folder.
+			back := placeShown(rep, lab, placeCulls, cfg.warnWriter(), true, cfg.UI)
+			n := moveCulled(rep, lab, cfg.warnWriter(), cfg.UI)
+			switch {
+			case back > 0:
+				cfg.note(ui.Quiet, "moved %d culled frame(s) into %s/, %d back into the shoot folder (undo: cull restore %s)", n, CullDir, back, cfg.Dir)
+			case n > 0:
+				cfg.note(ui.Quiet, "moved %d culled frame(s) into %s/ (undo: cull restore %s)", n, CullDir, cfg.Dir)
+			}
 		}
 	}
 	if err := rep.Save(cfg.ReportPath); err != nil {

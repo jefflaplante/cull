@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -60,6 +61,14 @@ func sortArgs(n int) cobra.PositionalArgs {
 			for _, a := range args {
 				if a == "culls" || a == "all" {
 					return fmt.Errorf("write --sort=%s (with \"=\"): a bare --sort means all, so %q was read as an argument", a, a)
+				}
+			}
+		}
+		// `--sort keep <dir>`: one argument too many, and one isn't a folder.
+		if cmd.Flags().Changed("sort") && len(args) == n+1 {
+			for _, a := range args {
+				if st, err := os.Stat(a); err != nil || !st.IsDir() {
+					return fmt.Errorf("--sort takes all or culls, written with \"=\" (e.g. --sort=culls): %q was read as an argument", a)
 				}
 			}
 		}

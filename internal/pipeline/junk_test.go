@@ -175,7 +175,7 @@ func TestResultDoesNotRetainFrame(t *testing.T) {
 }
 
 // decide --junk ignore: a junk cull from an earlier judge doesn't stand; the frame
-// waits for judge --resume to be judged.
+// waits for the next judge run (which keeps the stored --junk ignore) to be judged.
 func TestDecideJunkIgnoreClearsJunkCull(t *testing.T) {
 	_, c := junkShoot(t)
 	if _, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"}); err != nil {
@@ -189,7 +189,7 @@ func TestDecideJunkIgnoreClearsJunkCull(t *testing.T) {
 	}
 	rep, _ := report.Load(c.ReportPath)
 	r := result(t, rep, "L0000000.DNG")
-	if r.Decision != "" || len(r.Reasons) != 1 || !strings.Contains(r.Reasons[0], "judge --resume") || sum.Changed["cull→"] != 1 {
+	if r.Decision != "" || len(r.Reasons) != 1 || !strings.Contains(r.Reasons[0], "run judge again") || sum.Changed["cull→"] != 1 {
 		t.Fatalf("decision %q reasons %v changed %v", r.Decision, r.Reasons, sum.Changed)
 	}
 }

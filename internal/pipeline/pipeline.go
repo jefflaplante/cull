@@ -651,6 +651,10 @@ func guardOverwrite(cfg *Config) error {
 			cfg.ReportPath, moved, cfg.Dir)
 	}
 	if evaluated > 0 && !cfg.Fresh {
+		if cfg.DryRun { // scan: replacing the report would lose what was paid for
+			return fmt.Errorf("%s holds %d assessed frame(s) ($%.2f): scan --fresh would replace them with a scan (losing them), or use -o for a separate report",
+				cfg.ReportPath, evaluated, prev.Cost())
+		}
 		return fmt.Errorf("%s holds %d assessed frame(s) ($%.2f): judge continues it unless --fresh; use -o for a separate report",
 			cfg.ReportPath, evaluated, prev.Cost())
 	}

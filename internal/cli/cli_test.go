@@ -1708,3 +1708,47 @@ func TestReportEffortStaysWithItsBackend(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A ~/.cull "resume = true" is the default now: it must not make --fresh fail as a
+// contradiction. Only a typed --resume contradicts --fresh (TestFlagValidation).
+func TestDotfileResumeDoesNotContradictFresh(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	tinyDNG(t, filepath.Join(dir, "L1000001.DNG"))
+	dotfile(t, "resume = true\n")
+	out, err := run(t, "judge", "--estimate", "--fresh", "--backend", "claude-code", dir)
+	if err != nil || !strings.Contains(out, "estimate: 1 frames") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+}
+
+// scan, then a plain judge (no --fresh): the scan report holds nothing judged, so
+// judge judges every frame and keeps the tags given to scan.
+func TestScanThenJudgeJudgesEveryFrame(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CULL_CONFIG", "/dev/null")
+	dir := t.TempDir()
+	for _, n := range []string{"L1000001.DNG", "L1000002.DNG"} {
+		tinyDNG(t, filepath.Join(dir, n))
+	}
+	if out, err := run(t, "scan", "--project", "p", dir); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out)
+	}
+	bin, calls := countingClaude(t)
+	out, err := run(t, "judge", "--backend", "claude-code", "--claude-bin", bin, "--locate", "off", dir)
+	if err != nil {
+		t.Fatalf("judge: %v\n%s", err, out)
+	}
+	if n := lineCount(calls); n != 2 {
+		t.Fatalf("judge made %d calls for 2 frames:\n%s", n, out)
+	}
+	rep, err := report.Load(filepath.Join(dir, "cull-report.json"))
+	if err != nil || rep.Backend != "claude-code" || rep.Tags == nil || rep.Tags.Project != "p" {
+		t.Fatalf("err=%v backend %q tags %+v", err, rep.Backend, rep.Tags)
+	}
+	for _, r := range rep.Results {
+		if r.Evaluation == nil {
+			t.Fatalf("%s not judged", r.File)
+		}
+	}
+}

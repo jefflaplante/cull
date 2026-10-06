@@ -81,7 +81,9 @@ model and effort default to the report's. --fresh replaces it.`,
   cull judge --sort=culls ~/Pictures/2026-09-26`,
 		Args: sortArgs(1),
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
-			if o.fresh && o.resume {
+			// Only a typed --resume contradicts --fresh: a ~/.cull "resume = true" is
+			// the default now and changes nothing.
+			if o.fresh && cmd.Flags().Changed("resume") {
 				return fmt.Errorf("--fresh and --resume contradict each other")
 			}
 			if o.moveCulled {

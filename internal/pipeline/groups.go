@@ -178,8 +178,8 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 		if !ok && r.Evaluation != nil {
 			continue // judged by the model (--junk ignore): decided with the rest below
 		}
-		if !ok { // --junk ignore, never judged: no verdict until judge --resume sends it
-			d, rs = "", []string{"junk: " + JunkDetail(r.Junk) + "; --junk ignore: run judge --resume to have it judged"}
+		if !ok { // --junk ignore, never judged: no verdict until a judge run sends it
+			d, rs = "", []string{"junk: " + JunkDetail(r.Junk) + "; --junk ignore: run judge again to have it judged"}
 		}
 		if r.Decision != d {
 			changed = append(changed, i)

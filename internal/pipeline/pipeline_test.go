@@ -534,8 +534,12 @@ func TestRerunWithoutResumeRefusesPaidReport(t *testing.T) {
 		c := cfg(dir)
 		c.DryRun = dry
 		_, _, err := Run(context.Background(), c, &fakeBackend{status: "sharp"})
-		if err == nil || !strings.Contains(err.Error(), "judge continues it") || !strings.Contains(err.Error(), "--fresh") {
-			t.Fatalf("dry=%v: want a refusal saying judge continues it unless --fresh, got %v", dry, err)
+		want := "judge continues it unless --fresh"
+		if dry { // scan names its own --fresh and what it would lose
+			want = "scan --fresh would replace them with a scan (losing them)"
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("dry=%v: want a refusal containing %q, got %v", dry, want, err)
 		}
 	}
 	if after, _ := os.ReadFile(filepath.Join(dir, "r.json")); !bytes.Equal(before, after) {

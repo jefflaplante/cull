@@ -192,7 +192,7 @@ func TestBatchReattachesInsteadOfResubmitting(t *testing.T) {
 		t.Fatalf("submitted %d", len(fb.submitted))
 	}
 	fb.statusErr = nil
-	if _, _, err := RunBatch(context.Background(), c, fb); err == nil || !strings.Contains(err.Error(), "rerun cull judge with --batch to re-attach") {
+	if _, _, err := RunBatch(context.Background(), c, fb); err == nil || !strings.Contains(err.Error(), "rerun cull judge with --batch (without --fresh) to re-attach") {
 		t.Fatalf("a rerun with --fresh (Resume off) must refuse, got %v", err)
 	}
 	c.Resume = true

@@ -83,7 +83,7 @@ func RunBatch(ctx context.Context, cfg Config, client BatchClient) (*report.Repo
 	st, err := loadBatchState(statePath)
 	switch {
 	case err == nil && !cfg.Resume:
-		return nil, total, fmt.Errorf("an unfinished batch run is recorded in %s: rerun cull judge with --batch to re-attach (or delete it to start over)", statePath)
+		return nil, total, fmt.Errorf("an unfinished batch run is recorded in %s: rerun cull judge with --batch (without --fresh) to re-attach (or delete it to start over)", statePath)
 	case err == nil && (st.Backend != cfg.Backend || st.Model != cfg.Model):
 		return nil, total, fmt.Errorf("%s belongs to %s/%s, not %s/%s", statePath, st.Backend, st.Model, cfg.Backend, cfg.Model)
 	case errors.Is(err, fs.ErrNotExist):

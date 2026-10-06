@@ -43,11 +43,7 @@ func RankCalls(ctx context.Context, rep *report.Report, cfg Config, force bool, 
 func callsFor(rep *report.Report, todo []int, twice bool) int {
 	calls := 0
 	for _, i := range todo {
-		parts := chunks(rep.Sets[i].Of)
-		calls += len(parts)
-		if len(parts) > 1 || twice {
-			calls++
-		}
+		calls += setCalls(rep.Sets[i].Of, twice)
 	}
 	return calls
 }
@@ -95,4 +91,78 @@ func DecideCopy(rep *report.Report, p eval.Policy, seq group.Options) *report.Re
 	cp := cloneForRankCalls(rep)
 	decideAll(cp, p, seq)
 	return cp
+}
+
+// RankEstimate is the ranking a judge run is expected to do.
+type RankEstimate struct {
+	Sets, Calls int
+	Grouped     bool // from the report's own sets (a scan or an earlier judge); false: the every-frame-in-an-8-frame-set guess
+}
+
+// EstimateRanking projects, without spending anything, the rank calls a judge run
+// makes once pending is judged. With a report holding measured frames it groups them
+// as the run will (cfg.Seq, cfg.Policy) and counts, for each set that will need a
+// model order, every member that is rankable now or not judged yet: an upper bound,
+// since frames judged cull leave their sets. Pending frames the report doesn't hold
+// are priced with the old guess, ⌈n/8⌉ calls. cfg.Rerank counts sets that already
+// have a model order; cfg.RankTwice adds the reversed call.
+func EstimateRanking(rep *report.Report, pending []string, cfg Config) RankEstimate {
+	var e RankEstimate
+	unknown := len(pending)
+	if rep != nil && measured(rep) {
+		e.Grouped = true
+		cp := cloneForRankCalls(rep)
+		decideAll(cp, cfg.Policy, cfg.Seq)
+		held := make(map[string]*report.Result, len(cp.Results))
+		for i := range cp.Results {
+			held[cp.Results[i].File] = &cp.Results[i]
+		}
+		for _, s := range cp.Sets {
+			unjudged := 0
+			for _, f := range s.Members {
+				if r := held[f]; r != nil && r.Evaluation == nil {
+					unjudged++
+				}
+			}
+			n := s.Of + unjudged
+			if n < 2 || (unjudged == 0 && s.By == "model" && !cfg.Rerank) {
+				continue
+			}
+			e.Sets++
+			e.Calls += setCalls(n, cfg.RankTwice)
+		}
+		unknown = 0
+		for _, f := range pending {
+			if held[f] == nil {
+				unknown++
+			}
+		}
+	}
+	if unknown > 0 {
+		calls := (unknown + maxRankFrames - 1) / maxRankFrames
+		if cfg.RankTwice {
+			calls *= 2
+		}
+		e.Calls += calls
+	}
+	return e
+}
+
+func measured(rep *report.Report) bool {
+	for _, r := range rep.Results {
+		if r.Preview != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// setCalls is the calls ranking one set of n rankable frames takes: its chunks, plus
+// a final merging call when there is more than one, or a reversed call with twice.
+func setCalls(n int, twice bool) int {
+	parts := len(chunks(n))
+	if parts > 1 || twice {
+		return parts + 1
+	}
+	return parts
 }

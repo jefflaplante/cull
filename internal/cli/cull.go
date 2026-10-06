@@ -218,7 +218,14 @@ model and effort default to the report's. --fresh replaces it.`,
 						fmt.Fprintf(cmd.ErrOrStderr(), "resume: %d already judged, %d to go\n", len(files)-len(pending), len(pending))
 					}
 				}
-				usd := printEstimate(cmd, len(pending), o.backend, o.model, price, priced, o.batch, !o.noRank, o.rankTwice)
+				var rankEst *pipeline.RankEstimate
+				if !o.noRank {
+					ecfg := cfg
+					ecfg.Rerank, ecfg.RankTwice = o.rerank, o.rankTwice
+					e := pipeline.EstimateRanking(prev, pending, ecfg)
+					rankEst = &e
+				}
+				usd := printEstimate(cmd, len(pending), o.backend, o.model, price, priced, o.batch, rankEst)
 				if escPriced {
 					// Only frames the first pass doubts escalate, and which those are isn't
 					// known before judging: price the bound, so the question and --max-cost
@@ -362,14 +369,13 @@ func (o *cullOpts) escalation(cmd *cobra.Command) (*pipeline.Escalation, error) 
 	return e, nil
 }
 
-// printEstimate prints and returns (the frames plus ranking) the list- or batch-price cost from measured per-frame token
-// use, and, when rank is set (judge without --no-rank) and the backend is priced,
-// a rough ranking cost: ⌈n/8⌉ calls, at 10k in / 1k out each. That's the call
-// count if every frame lands in a full 8-frame set — neither a bound nor exact,
-// since actual set sizes aren't known before judging: a pair still costs one
-// call (more per frame than a full set), and a frame that joins no set costs
-// nothing. It's a ballpark, not a gate.
-func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch, rank, twice bool) float64 {
+// printEstimate prints and returns (the frames plus ranking) the list- or batch-price
+// cost from measured per-frame token use, and, when rank is set (judge without
+// --no-rank) and the backend is priced, the ranking cost at 10k in / 1k out per
+// call. With a report's sets (rank.Grouped) the calls are counted from them, an upper
+// bound since frames judged cull leave their sets; without, it is ⌈n/8⌉ calls, as if
+// every frame landed in a full 8-frame set. It's a ballpark, not a gate.
+func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price, priced, batch bool, rank *pipeline.RankEstimate) float64 {
 	w := cmd.ErrOrStderr()
 	if !priced {
 		fmt.Fprintf(w, "estimate: %d frames on %s (%s): no per-token cost (%s)\n", n, backend, model, backendDefaults[backend].basis)
@@ -377,13 +383,13 @@ func printEstimate(cmd *cobra.Command, n int, backend, model string, p llm.Price
 	}
 	usd, in, out := llm.Estimate(n, p, batch)
 	fmt.Fprintf(w, "estimate: %d frames × ~6k in / ~1k out tokens ≈ %d in / %d out ≈ $%.2f at %s (%s)\n", n, in, out, usd, rate(batch), model)
-	if rank && n > 0 {
-		calls := (n + 7) / 8
-		if twice { // each 8-frame set is also ranked reversed
-			calls *= 2
+	if rank != nil && rank.Calls > 0 {
+		rusd, _, _ := llm.EstimateRank(rank.Calls, p, batch)
+		if rank.Grouped {
+			fmt.Fprintf(w, "ranking ≈ %d call(s) for %d set(s) already found, $%.2f at %s (at most: frames judged cull leave their sets)\n", rank.Calls, rank.Sets, rusd, rate(batch))
+		} else {
+			fmt.Fprintf(w, "ranking ≈ %d call(s), $%.2f at %s, if every frame lands in an 8-frame set (pairs cost more per frame; frames in no set cost nothing)\n", rank.Calls, rusd, rate(batch))
 		}
-		rusd, _, _ := llm.EstimateRank(calls, p, batch)
-		fmt.Fprintf(w, "ranking ≈ %d call(s), $%.2f at %s, if every frame lands in an 8-frame set (pairs cost more per frame; frames in no set cost nothing)\n", calls, rusd, rate(batch))
 		usd += rusd
 	}
 	return usd

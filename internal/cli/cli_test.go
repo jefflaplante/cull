@@ -279,6 +279,18 @@ func TestCullEstimateNeedsNoKeyAndCallsNothing(t *testing.T) {
 	if err != nil || !strings.Contains(out, "no per-token cost") {
 		t.Fatalf("openai estimate: err=%v\n%s", err, out)
 	}
+	// A scanned folder: ranking is priced from its sets, not the 8-frame guess.
+	sdir := t.TempDir()
+	for _, n := range []string{"L1.DNG", "L2.DNG", "L3.DNG"} {
+		tinyDNG(t, filepath.Join(sdir, n))
+	}
+	if out, err := run(t, "scan", sdir); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out)
+	}
+	out, err = run(t, "judge", "--estimate", sdir)
+	if err != nil || !strings.Contains(out, "already found") {
+		t.Fatalf("scanned estimate: err=%v\n%s", err, out)
+	}
 }
 
 // --batch results are costed at half price; the summary must say so rather than

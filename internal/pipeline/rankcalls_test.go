@@ -165,3 +165,48 @@ func TestRankCallsMakesNoModelCallsAndMovesNothing(t *testing.T) {
 		}
 	}
 }
+
+func loadReport(t *testing.T, path string) *report.Report {
+	t.Helper()
+	rep, err := report.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rep
+}
+
+// scanShoot scans n identical textured frames: one set, nothing judged.
+func scanShoot(t *testing.T, n int) (Config, []string) {
+	t.Helper()
+	dir := t.TempDir()
+	var files []string
+	for i := 1; i <= n; i++ {
+		f := filepath.Join(dir, fmt.Sprintf("L%07d.DNG", i))
+		texturedDNG(t, f)
+		files = append(files, f)
+	}
+	c := moveCfg(dir)
+	c.MoveCulled, c.DryRun = false, true
+	c.Seq = group.Options{Gap: time.Minute, MaxLook: group.DefaultLook}
+	if _, _, err := Run(context.Background(), c, nil); err != nil {
+		t.Fatal(err)
+	}
+	return c, files
+}
+
+func TestEstimateRankingFromScanSets(t *testing.T) {
+	c, files := scanShoot(t, 9)
+	rep := loadReport(t, c.ReportPath)
+	e := EstimateRanking(rep, files, c)
+	if !e.Grouped || e.Sets != 1 || e.Calls != 3 { // 9 frames: 2 chunks + a final
+		t.Fatalf("got %+v", e)
+	}
+	if e := EstimateRanking(nil, files, c); e.Grouped || e.Calls != 2 { // no report: ⌈9/8⌉
+		t.Fatalf("no report: %+v", e)
+	}
+	c3, f3 := scanShoot(t, 3)
+	c3.RankTwice = true
+	if e := EstimateRanking(loadReport(t, c3.ReportPath), f3, c3); e.Calls != 2 { // one call + its reverse
+		t.Fatalf("twice: %+v", e)
+	}
+}

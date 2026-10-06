@@ -262,10 +262,11 @@
   });
 
   /* ---------- terminal replays ----------
-     Two real runs, recorded 2026-10-03 on 17 M11-P frames, played back when their
+     Two real runs on 17 M11-P frames, played back when their
      terminal comes into view. The text is what cull printed, verbatim, except that
      local paths are shortened and each ranking reason is cut after its first
-     sentence. Time is compressed; the "left" figures are the run's own. */
+     sentence. Time is compressed; the "left" figures are the run's own. The judge run was
+     recorded on 2026-10-03; the offload run was re-run with v0.2.0 on 2026-10-06. */
   var SCAN = [
     '[1/17] M1103817.DNG preview 9504x6320 (tiff-ifd) [no subject: no face; scan does not call a model]',
     '[2/17] M1103823.DNG preview 9504x6320 (tiff-ifd) [face q=287]',
@@ -311,8 +312,8 @@
       ['out', 'shoot folder: 2025-12-28 Forest portraits (date from earliest capture date, M1103813.DNG)'],
       ['out', '  into ' + SHOOT],
       ['out', '17 of 17 DNGs to copy, 1.1 GB (M1103813.DNG … M1104119.DNG)'],
-      ['bytes', 'offload', 1.07e9, 2200, 2, 624],
-      ['out', 'copied 17, skipped 0 (already there), failed 0: 1.1 GB in 2s (624 MB/s, verified)'],
+      ['bytes', 'offload', 1.07e9, 2200, 2, 601],
+      ['out', 'copied 17, skipped 0 (already there), failed 0: 1.1 GB in 2s (601 MB/s, verified)'],
       ['out', 'all 17 files verified on ' + SHOOT + ': safe to format the card', 'hi'],
       ['out', '17 DNGs found, 0 already done, 17 to process'],
       ['frames', 'scan', SCAN, 260, 0.78, false],

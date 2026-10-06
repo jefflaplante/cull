@@ -366,7 +366,8 @@ func TestCalibrateCommand(t *testing.T) {
 	os.WriteFile(log, []byte(`{"file":"L1000001.DNG","label":"keep","stars":0,"at":"2026-09-27T20:00:00Z"}`+"\n"+
 		`{"file":"X.DNG","label":"","stars":3,"at":"2026-09-27T20:00:01Z"}`+"\n"), 0o644)
 	out, err := run(t, "calibrate", rp) // the log beside the report, by default
-	if err != nil || !strings.Contains(out, "false-cull rate (keep → cull):   1/1") || !strings.Contains(out, "sweep") {
+	if err != nil || !strings.Contains(out, "false-cull rate (keep → cull):   1/1") || !strings.Contains(out, "policy grid") ||
+		strings.Contains(out, "review-below-sharpness sweep") || strings.Contains(out, "keep-best sweep") {
 		t.Fatalf("calibrate: %v\n%s", err, out)
 	}
 	if strings.Contains(out, "not in the report") {

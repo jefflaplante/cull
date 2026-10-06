@@ -97,40 +97,6 @@ func ratio(a, b int) float64 {
 	return float64(a) / float64(b)
 }
 
-// SweepRow is the agreement at one --review-below-sharpness value.
-type SweepRow struct {
-	Threshold float64
-	Matrix    Matrix
-}
-
-// Sweep re-decides every labeled frame from its stored assessment with
-// ReviewBelowSharpness set to each threshold. decide, when set, returns the
-// whole report decided with a policy (the pipeline's decide: sets regrouped,
-// outranked frames demoted), so the sweep matches what decide would do and the
-// confusion matrix above it; nil re-decides each frame alone (no set demotion).
-func Sweep(rep *report.Report, labels map[string]string, base eval.Policy, thresholds []float64, decide func(eval.Policy) *report.Report) []SweepRow {
-	var rows []SweepRow
-	for _, t := range thresholds {
-		p := base
-		p.ReviewBelowSharpness = t
-		var m Matrix
-		if decide != nil {
-			m = Compare(decide(p), labels)
-		} else {
-			m = compare(rep, labels, func(r report.Result) string {
-				if r.Evaluation == nil { // junk: decided without an assessment, no threshold applies
-					return string(r.Decision)
-				}
-				e := *r.Evaluation
-				d, _ := p.DecideFacts(&e, r.Facts())
-				return string(d)
-			})
-		}
-		rows = append(rows, SweepRow{Threshold: t, Matrix: m})
-	}
-	return rows
-}
-
 // Format writes the confusion matrix and rates for one report.
 func Format(w io.Writer, name string, rep *report.Report, m Matrix) {
 	model := rep.Backend + "/" + rep.Model
@@ -158,15 +124,6 @@ func Format(w io.Writer, name string, rep *report.Report, m Matrix) {
 	}
 }
 
-// FormatSweep writes one line per threshold.
-func FormatSweep(w io.Writer, rows []SweepRow) {
-	fmt.Fprintln(w, "  --review-below-sharpness sweep (re-decided from stored assessments):")
-	for _, r := range rows {
-		fc, mc, rr := r.Matrix.Rates()
-		fmt.Fprintf(w, "    %4.1f  false-cull %5.1f%%  missed-cull %5.1f%%  review %5.1f%%\n", r.Threshold, 100*fc, 100*mc, 100*rr)
-	}
-}
-
 // SetStats counts how the user's labels line up with each set's stored rank,
 // over multi-frame sets (Group.Size > 1) containing at least one labelled frame.
 // Kept/Culled are label counts; the *RankedOut/*InBest counts are against
@@ -185,7 +142,7 @@ type SetStats struct {
 // decideAll stores Group.Best (max(1, p.KeepBest)) and how report.Group
 // documents Best ("rank 1 when KeepBest is 0"): otherwise a rank-1 keep in a
 // rank-only report would be miscounted as ranked out. It does not re-rank;
-// SweepKeepBest reuses the same stored ranks.
+// Grid re-decides from the same stored ranks.
 func Sets(rep *report.Report, labels map[string]string, keepBest int) SetStats {
 	if keepBest < 1 {
 		keepBest = 1
@@ -220,28 +177,11 @@ func Sets(rep *report.Report, labels map[string]string, keepBest int) SetStats {
 	return s
 }
 
-// KeepBestRow is the set stats recomputed at one keep-best value.
-type KeepBestRow struct {
-	K int
-	SetStats
-}
-
-// SweepKeepBest recomputes SetStats at each keep-best value from the stored
-// Group.Rank, without re-ranking.
-func SweepKeepBest(rep *report.Report, labels map[string]string, ks []int) []KeepBestRow {
-	rows := make([]KeepBestRow, len(ks))
-	for i, k := range ks {
-		rows[i] = KeepBestRow{K: k, SetStats: Sets(rep, labels, k)}
-	}
-	return rows
-}
-
 // FormatSets writes the sets section after the matrix: how often labelled
 // keeps got ranked out of the keep-best cut, how often labelled culls or
-// reviews made it into that cut, and a keep-best sweep recomputed from the
-// stored ranks. It writes nothing when the report has no multi-frame sets
+// reviews made it into that cut. It writes nothing when the report has no multi-frame sets
 // containing labelled frames.
-func FormatSets(w io.Writer, stats SetStats, sweep []KeepBestRow) {
+func FormatSets(w io.Writer, stats SetStats) {
 	if stats.Sets == 0 {
 		return
 	}
@@ -250,11 +190,52 @@ func FormatSets(w io.Writer, stats SetStats, sweep []KeepBestRow) {
 		stats.KeptRankedOut, stats.Kept, 100*ratio(stats.KeptRankedOut, stats.Kept))
 	fmt.Fprintf(w, "    labeled cull/review, ranked into best:   %d/%d = %.1f%%\n",
 		stats.CulledInBest, stats.Culled, 100*ratio(stats.CulledInBest, stats.Culled))
-	if len(sweep) > 0 {
-		fmt.Fprintln(w, "  keep-best sweep (recomputed from stored ranks):")
-		for _, row := range sweep {
-			fmt.Fprintf(w, "    keep-best %d   keep-ranked-out %5.1f%%   cull/review-in-best %5.1f%%\n",
-				row.K, 100*ratio(row.KeptRankedOut, row.Kept), 100*ratio(row.CulledInBest, row.Culled))
+}
+
+// GridRow is the agreement under one combination of the three settings that moved
+// the first calibration most (2026-10-05): keep-best, outranked and raw-clipped.
+type GridRow struct {
+	KeepBest              int
+	Outranked, RawClipped eval.Action
+	Matrix                Matrix
+	Current               bool // the policy the report's decisions came from (or the flags given)
+}
+
+// Grid re-decides the report under every keep-best 1-5 × outranked review/cull ×
+// raw-clipped review/ignore combination, the rest of the policy as base. decide is
+// the pipeline's (sets regrouped, stored ranks applied), so each row is what
+// 'cull decide' with those flags would give.
+func Grid(labels map[string]string, base eval.Policy, decide func(eval.Policy) *report.Report) []GridRow {
+	var rows []GridRow
+	for k := 1; k <= 5; k++ {
+		for _, o := range []eval.Action{eval.ActionReview, eval.ActionCull} {
+			for _, rc := range []eval.Action{eval.ActionReview, eval.ActionIgnore} {
+				p := base
+				p.KeepBest, p.Outranked, p.RawClipped = k, o, rc
+				rows = append(rows, GridRow{KeepBest: k, Outranked: o, RawClipped: rc, Matrix: Compare(decide(p), labels),
+					Current: k == base.KeepBest && o == base.Outranked && rc == base.RawClipped})
+			}
 		}
+	}
+	return rows
+}
+
+// FormatGrid writes one line per combination: false culls (you said keep, it
+// culled), culls caught, missed culls (you said cull, it kept) and the review rate.
+func FormatGrid(w io.Writer, rows []GridRow) {
+	fmt.Fprintln(w, "  policy grid (re-decided from stored assessments and ranks; * = false culls under 1%):")
+	fmt.Fprintf(w, "      %-9s %-9s %-11s %14s %7s %7s %7s\n", "keep-best", "outranked", "raw-clipped", "false culls", "caught", "missed", "review")
+	for _, r := range rows {
+		m := r.Matrix
+		fc, _, rr := m.Rates()
+		mark, cur := " ", ""
+		if fc < 0.01 {
+			mark = "*"
+		}
+		if r.Current {
+			cur = "  ← current"
+		}
+		fmt.Fprintf(w, "    %s %-9d %-9s %-11s %6d (%4.1f%%) %7d %7d %6.1f%%%s\n", mark, r.KeepBest, r.Outranked, r.RawClipped,
+			m.Counts["keep"]["cull"], 100*fc, m.Counts["cull"]["cull"], m.Counts["cull"]["keep"], 100*rr, cur)
 	}
 }

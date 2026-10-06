@@ -174,10 +174,10 @@ func openSource(src string, h hooks) (io.ReadCloser, error) {
 		return h.open(src)
 	}
 	// Read-only, and without F_NOCACHE (unlike the temps and the verify read), so the
-	// kernel reads ahead. Measured 2026-10-06 on the LEICA M card (exFAT): a plain read
-	// streams at 262 MB/s, steady; F_NOCACHE turns read-ahead off and gets ~210 (177–254),
-	// and still leaves 98% of the card's pages cached, so it didn't spare the cache
-	// either. Nothing here relies on the card's pages being uncached: the hash is taken
+	// kernel reads ahead. Measured 2026-10-06 on the LEICA M card (exFAT): plain reads
+	// streamed at 262 MB/s, steady; F_NOCACHE reads were slower and noisy, ~210 (177–254),
+	// even with F_RDAHEAD, and still left 98% of the card's pages cached, so F_NOCACHE
+	// didn't spare the cache either. Nothing here relies on the card's pages being uncached: the hash is taken
 	// from the bytes read, and every copy is verified from its own device. A retry evicts
 	// the card file first (evictPasses), so it reads the card again, not RAM.
 	return os.Open(src)

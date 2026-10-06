@@ -93,7 +93,15 @@ func TestRetryEvictsSourceFirst(t *testing.T) {
 				}
 				p.h.evictSource = func(s string) (int, int, error) {
 					log.add("evict " + filepath.Base(s))
-					return evictPasses(s) // the real thing: it must work on a read-only card
+					// The real thing, which must work on a read-only card. Eviction is best
+					// effort in Run, so its error is checked here: an O_RDWR open or a writable
+					// mapping of the 0444 file fails with EACCES (meaningless as root, who may
+					// write anything).
+					r, n, err := evictPasses(s)
+					if err != nil {
+						t.Errorf("evicting the card file: %v", err)
+					}
+					return r, n, err
 				}
 				res, err := Run(context.Background(), p, nil)
 				if err != nil || !res.Safe || res.Copied != len(names) || len(res.Failed) != 0 {
@@ -117,53 +125,61 @@ func TestRetryEvictsSourceFirst(t *testing.T) {
 // Eviction is best effort: if it fails, or pages stay cached, the retry still runs and
 // the file still copies; one verbose note says so.
 func TestRetryWhenSourceEvictionFails(t *testing.T) {
-	for _, how := range []string{"error", "pages stay cached"} {
-		t.Run(how, func(t *testing.T) {
-			src, data := pipeCard(t, 4, rand.New(rand.NewSource(22)), func(i int) int { return 60000 + i })
-			p := pipePlan(t, src)
-			readOnlyCard(t, p)
-			w := watchPlan(t, p, data)
-			names := planNames(p)
-			k := names[1]
-			w.open = func(n string, try int) error {
-				if n == k && try == 1 {
-					return errors.New("input/output error")
-				}
-				return nil
-			}
-			evicts := 0
-			p.h.evictSource = func(string) (int, int, error) {
-				evicts++
-				if how == "error" {
-					return 0, 0, errors.New("mmap: operation not permitted")
-				}
-				return 7, 100, nil
-			}
-			sink := noteSink{notes: make(chan string, 1000)}
-			res, err := Run(context.Background(), p, sink)
-			close(sink.notes)
-			if err != nil || !res.Safe || res.Copied != len(names) || len(res.Failed) != 0 {
-				t.Fatalf("err %v result %+v", err, res)
-			}
-			if evicts != 1 || w.opened(k) != 2 {
-				t.Fatalf("evictions %d, opens of %s %d; want 1 and 2", evicts, k, w.opened(k))
-			}
-			n := 0
-			for s := range sink.notes {
-				if strings.Contains(s, "page cache") {
-					n++
-					if !strings.Contains(s, k) {
-						t.Errorf("note doesn't name the file: %q", s)
-					}
-					if how == "pages stay cached" && !strings.Contains(s, "7 of 100") {
-						t.Errorf("note doesn't give the count: %q", s)
-					}
-				}
-			}
-			if n != 1 {
-				t.Fatalf("%d notes about the page cache, want 1", n)
-			}
-			recorded(t, p, data, names)
-		})
+	for _, serial := range []bool{false, true} {
+		for _, how := range []string{"error", "pages stay cached"} {
+			t.Run(map[bool]string{false: "pipelined", true: "serial"}[serial]+", "+how, func(t *testing.T) {
+				testRetryWhenSourceEvictionFails(t, serial, how)
+			})
+		}
 	}
+}
+
+// testRetryWhenSourceEvictionFails is one case of TestRetryWhenSourceEvictionFails.
+func testRetryWhenSourceEvictionFails(t *testing.T, serial bool, how string) {
+	src, data := pipeCard(t, 4, rand.New(rand.NewSource(22)), func(i int) int { return 60000 + i })
+	p := pipePlan(t, src)
+	p.h.serial = serial
+	readOnlyCard(t, p)
+	w := watchPlan(t, p, data)
+	names := planNames(p)
+	k := names[1]
+	w.open = func(n string, try int) error {
+		if n == k && try == 1 {
+			return errors.New("input/output error")
+		}
+		return nil
+	}
+	evicts := 0
+	p.h.evictSource = func(string) (int, int, error) {
+		evicts++
+		if how == "error" {
+			return 0, 0, errors.New("mmap: operation not permitted")
+		}
+		return 7, 100, nil
+	}
+	sink := noteSink{notes: make(chan string, 1000)}
+	res, err := Run(context.Background(), p, sink)
+	close(sink.notes)
+	if err != nil || !res.Safe || res.Copied != len(names) || len(res.Failed) != 0 {
+		t.Fatalf("err %v result %+v", err, res)
+	}
+	if evicts != 1 || w.opened(k) != 2 {
+		t.Fatalf("evictions %d, opens of %s %d; want 1 and 2", evicts, k, w.opened(k))
+	}
+	n := 0
+	for s := range sink.notes {
+		if strings.Contains(s, "page cache") {
+			n++
+			if !strings.Contains(s, k) {
+				t.Errorf("note doesn't name the file: %q", s)
+			}
+			if how == "pages stay cached" && !strings.Contains(s, "7 of 100") {
+				t.Errorf("note doesn't give the count: %q", s)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d notes about the page cache, want 1", n)
+	}
+	recorded(t, p, data, names)
 }

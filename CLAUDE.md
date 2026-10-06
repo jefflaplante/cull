@@ -433,6 +433,8 @@ balance`, but no run has tested them yet.
   (the 17 sample frames come from this card). macOS adds `.fseventsd` on mount.
 - Uncached sequential read speed (`F_NOCACHE`): 282 MB/s with 1 file at a time, 271 MB/s
   with 2, 272 MB/s with 4. Parallel reads don't help, so offload reads one file at a time.
+  This didn't reproduce on 2026-10-06 (stage-A profile, same card and reader): 262 MB/s plain,
+  ~210 (177–254) with F_NOCACHE.
 - EXIF for all 992 frames reads in 1.7 s. Every capture time falls between 2025-12-27 23:56
   and 2025-12-28 00:06, and 969 of 991 consecutive pairs are 0 s apart.
   - The user says the card holds several shoots and a multi-day trip, and the camera's clock
@@ -505,14 +507,16 @@ balance`, but no run has tested them yet.
     format", peak memory 50 MB; `--verify` 10/10; every copy byte-identical to the card, manifest
     in card order. A run straight after other reads of the card said 138 MB/s: warm card pages.
 - **Card read with read-ahead (2026-10-06): `openSource` no longer sets F_NOCACHE, and a retry
-  evicts the card file first.** The stage-A profile (`profile_card_test.go`) found F_NOCACHE turns
-  off the card's read-ahead on exFAT (262 MB/s plain vs ~210, 177–254) and still leaves 98% of its
-  pages cached. Temps and the verify read keep F_NOCACHE. cardbench, main vs the change back to back,
+  evicts the card file first.** The stage-A profile (`profile_card_test.go`) found F_NOCACHE reads of
+  the card (exFAT) slower than plain ones: ~210 MB/s (177–254) against 262, steady. F_NOCACHE +
+  F_RDAHEAD didn't help, and F_NOCACHE still left 98% of the pages cached. Temps and the verify read keep F_NOCACHE. cardbench, main vs the change back to back,
   3 rounds × the 10 frames per arm, durable MB/s pipelined (serial in brackets):
-  - Mac SSD: two sessions 209, 209 → 230, 239 (199, 207 → 210, 230). Runs that started with no
-    frame cached: 208–216 → 220–252.
-  - Grey (USB SSD): 147, 157 → 164, 168 (148, 152 → 168, 166). Clean runs: 144–151 → 155–171. Grey
-    stays bound by its own mixed write + verify read.
+  - Mac SSD: two sessions 209, 209 → 230, 239 (199, 207 → 210, 230). Pipelined runs that started
+    with no frame cached, both sessions pooled: 208–216 → 220–252.
+  - Grey (USB SSD): 147, 157 → 164, 168 (148, 152 → 168, 166). Clean pipelined runs, both sessions
+    pooled: 144–151 → 155–171. In session 1 the after arm had 3 of its 6 cull runs start warm (one
+    frame cached), against 1 of 6 before: a small upward bias on its 164 and 168. Grey stays bound
+    by its own mixed write + verify read.
   - NAS over 10 GbE (`/Volumes/photos-1`), one session: 101 → 134 (89 → 101).
   - On both sides some runs started with one frame (3664 of 36780 pages) back in the cache after
     eviction; the ranges above leave those out.

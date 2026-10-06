@@ -195,7 +195,7 @@ Every step, with its full output and screenshots of the live progress view, is i
   `{name}`, `{orig}` (camera name), `{n}` and `{n:W}`. The counter continues from the
   folder's largest number, so a second card carries on from the first. Frames are
   numbered in camera file order, not by capture time.
-- **Speed (measured on an M11-P card over USB):** the card reads at about 280 MB/s. A
+- **Speed (measured on an M11-P card over USB):** the card reads at about 260 MB/s. A
   992-frame, 67.7 GB card went to a USB SSD in 8 minutes, every file verified; to the
   Mac's SSD, the measured 235 MB/s below would take about 5 minutes.
 
@@ -219,13 +219,13 @@ Every step, with its full output and screenshots of the live progress view, is i
   | MB/s | Mac SSD | USB SSD (exFAT) | NAS, SMB over 10 GbE |
   |---|---|---|---|
   | cull, every byte re-read and compared | 235 | 166 | 134 |
-  | cull's older one-file-at-a-time engine, same check | 220 | 167 | 101 |
+  | cull, one file at a time (serial mode, for comparison), same check | 220 | 167 | 101 |
   | `ditto` (macOS's built-in copy command), no check | 104 (241) | 70 (213) | 59 (199) |
   | `cp`, no check | 76 (224) | 78 (215) | 54 (98) |
   | `rsync -a` (openrsync), no check | 80 (168) | 69 (129) | 47 (76) |
 
-  cull reads the next file off the card while the last one is synced and verified; the older
-  engine finished each file before reading the next. The 10 GbE column is a TrueNAS SMB
+  cull reads the next file off the card while the last one is synced and verified; serial mode
+  finishes each file before reading the next. The 10 GbE column is a TrueNAS SMB
   share over a 10GBASE-T link with 0.4 ms round trips. On local disks and on the 10 GbE
   share, the verified copy is as fast as or faster than an unverified one once both are
   durable. The other tools' durable figures swing between sessions with how long `sync`

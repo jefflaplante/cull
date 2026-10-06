@@ -212,16 +212,28 @@ Every step, with its full output and screenshots of the live progress view, is i
   others with `sync` plus an F_FULLFSYNC on the folder. The figure in brackets is the speed
   before that, which is when the tool returns. Finder itself wasn't timed.
 
-  | MB/s | Mac SSD | USB SSD (exFAT) | NAS, SMB over Wi-Fi |
-  |---|---|---|---|
-  | cull engine, every byte re-read and compared | 210 | 153 | 17 |
-  | `ditto` (macOS's built-in copy command), no check | 147 (249) | 143 (200) | 40 |
-  | `cp`, no check | 138 (226) | 145 (194) | 32 |
-  | `rsync -a` (openrsync), no check | 123 (157) | 100 (118) | 21 |
+  | MB/s | Mac SSD | USB SSD (exFAT) | NAS, SMB over Wi-Fi | NAS, SMB over 10 GbE |
+  |---|---|---|---|---|
+  | cull engine, every byte re-read and compared | 210 | 153 | 17 | 91 |
+  | `ditto` (macOS's built-in copy command), no check | 147 (249) | 143 (200) | 40 | 75 (206) |
+  | `cp`, no check | 138 (226) | 145 (194) | 32 | 52 (98) |
+  | `rsync -a` (openrsync), no check | 123 (157) | 100 (118) | 21 | 41 (66) |
 
-  On local disks the verified copy is as fast as an unverified one. On a NAS, the verify
-  re-read crosses the network: it took 46% of the engine's time over Wi-Fi. Copy to the
-  Mac first, then to the NAS.
+  The 10 GbE column is 3 rounds (1.8 GB per tool) to a TrueNAS SMB share over a 10GBASE-T
+  link with 0.4 ms round trips. On local disks and on the 10 GbE share, the verified copy
+  is as fast as or faster than an unverified one once both are durable.
+
+  On a NAS, the verify re-read crosses the network. Over Wi-Fi it took 46% of the engine's
+  time; there, copy to the Mac first. Over 10 GbE it took 21%.
+
+  The 10 GbE share's limit is durable writes, not the network. A 2 GiB probe file over
+  SMB measured:
+
+  | Probe step | MB/s |
+  |---|---|
+  | buffered write | 749 |
+  | write until fsync returned | 159 |
+  | read back uncached | 829 |
 
 ## Your defaults: `~/.cull`
 

@@ -451,6 +451,16 @@ balance`, but no run has tested them yet.
   - **The rate (140 MB/s) is below the 216 MB/s measured to the internal SSD.** Two likely
     causes: the verify re-read also goes over USB to Grey, and Grey's write speed.
 - **SMB share (2026-10-06, the user's NAS at `/Volumes/photos`, smbfs):** F_FULLFSYNC fails with ENOTSUP (45) on files and folders; plain fsync on both succeeds. `flushDrive` falls back to fsync there (every file was already fsync'd before its verify read) and prints a one-line note; 10 card frames (0.6 GB) offloaded at 15 MB/s, "safe to format", `--verify` 10/10.
+- **SMB over 10 GbE (2026-10-06, `/Volumes/photos-1`, TrueNAS ZFS pool with a fast separate log device):**
+  - **Link:** 10GBASE-T, full duplex, 0.4 ms round trips; SMB 3.1.1, encryption off.
+  - **cardbench, 3 rounds × 10 card frames (1.8 GB per tool), durable MB/s:**
+    - the cull engine (every byte re-read and compared): 91; its verify re-read took 21% of
+      its time (46% over Wi-Fi);
+    - ditto 75 (206 before sync), cp 52 (98), rsync 41 (66).
+  - **A 2 GiB SMB probe:** buffered write 749 MB/s, write until fsync returned 159 MB/s,
+    uncached read 829 MB/s.
+  - **So the network isn't the limit:** waiting for the share to commit synced data is.
+    Durable writes top out near 160 MB/s, under the card's ~270 MB/s read.
 - Offload benchmark, 20 real frames per tool, read from the card uncached: the `cull`
   engine runs at 216 MB/s (hash, uncached write, evict, verify from disk, F_FULLFSYNC);
   `cp` runs at 264 MB/s. The gap is the verify re-read, which isn't overlapped with the

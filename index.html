@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cull · culling for DNG shoots</title>
-<meta name="description" content="cull is an open-source command-line tool that culls a shoot of DNG files before import. A vision model assesses each frame; deterministic Go rules decide keep, review or cull.">
+<meta name="description" content="cull is an open-source command-line tool that culls a shoot of DNG files before import. A vision model assesses each frame; fixed rules decide keep, review or cull.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0a0a0b">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23d9261c'/%3E%3C/svg%3E">
@@ -35,7 +35,7 @@
         <li><a href="#judge" data-nav="judge">Judge</a></li>
         <li><a href="#review" data-nav="review">Review</a></li>
         <li><a href="#delivery" data-nav="delivery">Delivery</a></li>
-        <li><a href="#specification" data-nav="specification">Specification</a></li>
+        <li><a href="#specification" data-nav="specification">Comparison</a></li>
         <li><a href="#install" data-nav="install">Install</a></li>
         <li><a href="usage.html">Usage</a></li>
       </ul>
@@ -65,7 +65,7 @@
     </div>
     <div class="hero-grid">
       <div class="reveal">
-        <p class="lede"><strong>cull</strong> is a command-line tool that culls a shoot of DNG files before you import it into Capture One or Lightroom. A vision model assesses each frame&rsquo;s full-resolution preview for focus, exposure and composition. Fixed rules in Go turn that into keep, review or cull.</p>
+        <p class="lede"><strong>cull</strong> is a command-line tool that culls a shoot of DNG files before you import it into Capture One or Lightroom. A vision model assesses each frame&rsquo;s full-resolution preview for focus, exposure and composition. Fixed rules in cull&rsquo;s own code turn that into keep, review or cull.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://github.com/jefflaplante/cull">
             <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
@@ -83,7 +83,7 @@
       <aside class="plate readout reveal" aria-labelledby="h-readout">
         <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span>
         <div class="readout-head">
-          <h2 class="eng" id="h-readout">Recorded run</h2>
+          <h2 class="eng" id="h-readout">Example shoot</h2>
           <span class="eng"><span class="num">17</span> × <span class="nb">M11-P</span> DNG</span>
         </div>
         <dl class="tally">
@@ -93,7 +93,7 @@
         </dl>
         <div class="meter" aria-hidden="true"><i class="m-k"></i><i class="m-r"></i><i class="m-c"></i></div>
         <div class="readout-foot">
-          <div class="row"><span>Frames judged</span><span class="num">17, in under 2 min</span></div>
+          <div class="row"><span>Judging time</span><span>about 5&ndash;20 s a frame</span></div>
           <div class="row"><span>The one cull</span><span>missed focus, sharpness <span class="num">2.5</span></span></div>
         </div>
       </aside>
@@ -107,7 +107,7 @@
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>60</b> Principle</p>
-      <h2 id="h-principle">Three priorities, in order.</h2>
+      <h2 id="h-principle">What decides keep, review or cull.</h2>
     </header>
     <ol class="creed">
       <li class="reveal">
@@ -130,12 +130,12 @@
     <div class="plate decides reveal">
       <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
       <div>
-        <h3>The model assesses.<br><span>Go decides.</span></h3>
+        <h3>The model describes.<br><span>Fixed rules decide.</span></h3>
         <div class="flow" aria-hidden="true">
-          <span class="eng">Preview</span><i></i><span class="eng">Model: assess</span><i></i><span class="eng" style="color:var(--text)">Go: decide</span>
+          <span class="eng">Preview</span><i></i><span class="eng">Model: describe</span><i></i><span class="eng" style="color:var(--text)">Rules: decide</span>
         </div>
       </div>
-      <p>The vision model (Claude) only reports what it sees: where focus should be, how sharp it is there, the exposure, the composition. Keep, review and cull are decided by deterministic rules in Go. The same assessment always gets the same decision, and you can read the rule that made it.</p>
+      <p>The vision model (Claude) only reports what it sees: where focus should be, how sharp it is there, the exposure and the composition. Keep, review and cull are then decided by fixed rules in cull&rsquo;s own code. The same description always gets the same verdict, every verdict comes with the reason for it, and you can tune the rules without paying to judge again.</p>
     </div>
   </div>
 </section>
@@ -147,7 +147,7 @@
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>125</b> Pipeline</p>
       <div>
-        <h2 id="h-pipeline">From card to catalogue, <span>in six steps.</span></h2>
+        <h2 id="h-pipeline">Six steps, <span>from memory card to Capture One.</span></h2>
       </div>
     </header>
 
@@ -171,8 +171,8 @@
         <span class="node" aria-hidden="true"></span>
         <code class="cmd">cull judge</code>
         <h3>Judge</h3>
-        <p>The model assesses each frame and ranks near-identical frames together; Go rules decide.</p>
-        <span class="phase eng">Model assesses · Go decides</span>
+        <p>The model assesses each frame and ranks near-identical frames together; fixed rules decide.</p>
+        <span class="phase eng">Model assesses · rules decide</span>
       </li>
       <li class="station" style="--i:3">
         <span class="node" aria-hidden="true"></span>
@@ -214,7 +214,7 @@
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>250</b> Offload</p>
       <div>
-        <h2 id="h-offload">Read the card once. <span>Verify every file.</span></h2>
+        <h2 id="h-offload">Copy the card once, <span>and check every file against it.</span></h2>
       </div>
     </header>
 
@@ -247,7 +247,7 @@
       <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
         <figure class="shot">
         <div class="replay" data-replay="offload" data-title="cull offload"><img class="replay-fallback" src="img/offload-scanning.png" width="972" height="306" decoding="async" loading="lazy" alt="The scan after offload: frames listed with their 9504x6320 preview and a detected face score."></div>
-        <figcaption><span class="eng">Replay</span><span>The recorded run: copy, verify, then the free scan. Sped up; the text is what it printed.</span></figcaption>
+        <figcaption><span class="eng">Replay</span><span>Example output, sped up: copy, check, then the free scan.</span></figcaption>
       </figure>
     </div>
   </div>
@@ -260,14 +260,14 @@
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>500</b> Judge</p>
       <div>
-        <h2 id="h-judge">Judged at the eyes, <span>at full resolution.</span></h2>
+        <h2 id="h-judge">Focus is checked at the eyes, <span>at full resolution.</span></h2>
       </div>
     </header>
 
     <div class="split wide-r">
       <div class="reveal">
-        <p class="lede">cull reads the embedded JPEG preview inside each DNG: <strong>9504 × 6320</strong> on the <span class="nb">M11-P</span>. Sharpness is judged on a native-resolution crop at the eyes, not on a downscaled frame.</p>
-        <p class="lede">Face detection finds the subject. Without a face, the model first locates what was meant to be sharp. The prompt names the camera, so for a Leica M it expects manual focus and fast lenses shot wide open.</p>
+        <p class="lede">Every DNG carries a full-size JPEG preview made by the camera: <strong>9504 × 6320</strong> pixels on the <span class="nb">M11-P</span>. cull reads that preview instead of developing the raw file, and judges sharpness on a crop of it at 100%, at the eyes, not on a shrunken copy of the whole frame.</p>
+        <p class="lede">Face detection finds the subject. With no face, the model first picks out what was meant to be sharp. It&rsquo;s also told which camera made the frame, so for a Leica M it expects manual focus and fast lenses shot wide open.</p>
       </div>
       <figure class="plate diagram reveal" style="margin:0">
         <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
@@ -333,27 +333,26 @@
     <div class="split" style="margin-top:clamp(48px,6vw,80px)">
       <figure class="plate shot pad reveal" style="grid-column:1/-1">
         <div class="replay" data-replay="judge" data-title="cull judge"><img class="replay-fallback" src="img/judge-ranking.png" width="1026" height="566" decoding="async" loading="lazy" alt="cull judge after a full run: 17 frames with verdicts and scores; keep 14, review 2, cull 1."></div>
-        <figcaption><span class="eng">Replay</span><span>The recorded run: 17 frames judged, then two sets ranked. 14 keep, 2 review, 1 cull. Sped up; the text is what it printed.</span></figcaption>
+        <figcaption><span class="eng">Replay</span><span>Example output, sped up: each frame&rsquo;s verdict and scores, then the bursts ranked.</span></figcaption>
       </figure>
     </div>
 
     <div class="facts">
       <div class="fact reveal">
         <span class="eng">Sets</span>
-        <h3>Best of a burst, side by side.</h3>
-        <p>Frames with near-identical framing, such as a burst, form a set, and the model ranks each set side by side. The best three keep their verdicts; the rest go to review.</p>
+        <h3>Bursts are compared side by side.</h3>
+        <p>Near-identical frames, such as a burst, form a set, and the model ranks each set by looking at its frames together. The best three keep their verdicts; the rest go to review, or straight to cull if you choose.</p>
       </div>
       <div class="fact reveal">
         <span class="eng">Junk filter</span>
-        <h3>Blank frames cost nothing.</h3>
+        <h3>Blank frames are set aside for free.</h3>
         <div>
-          <p>Lens-cap, blown-white and blank frames are set aside without a model call.</p>
-          <p>Tested on 992 real frames: every real frame cleared the thresholds by a wide margin, and the one blank frame was caught.</p>
+          <p>Lens-cap shots, blown-white frames and other blanks are caught by simple brightness checks on your Mac, before any model sees them, so they cost nothing to judge.</p>
         </div>
       </div>
       <div class="fact reveal">
         <span class="eng">Backends</span>
-        <h3>Choose who runs the model.</h3>
+        <h3>Use a Claude plan, an API key, or a local model.</h3>
         <div>
           <table class="backends">
             <caption class="sr-only">Model backends</caption>
@@ -363,7 +362,7 @@
               <tr><th scope="row">Local model</th><td>OpenAI-compatible</td></tr>
             </tbody>
           </table>
-          <p style="margin-top:14px"><code>--estimate</code> prices a run before anything is spent, and <code>--max-cost</code> stops it at a limit. The 17-frame shoot was estimated at $0.37 at list price.</p>
+          <p style="margin-top:14px"><code>--estimate</code> prices a run before anything is spent, and <code>--max-cost</code> stops it at a limit you set. Pay-as-you-go is about 2 cents a frame, or about 1 cent in batch mode.</p>
         </div>
       </div>
     </div>
@@ -377,7 +376,7 @@
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>1000</b> Review</p>
       <div>
-        <h2 id="h-review">Check every verdict <span>on a contact sheet.</span></h2>
+        <h2 id="h-review">Check the verdicts <span>on a contact sheet in your browser.</span></h2>
       </div>
     </header>
 
@@ -401,7 +400,7 @@
           <span class="eng"><span class="num">14</span> keep · <span class="num">2</span> review · <span class="num">1</span> cull</span>
         </div>
         <ul class="tiles" id="tiles" aria-hidden="true"></ul>
-        <figcaption class="eng" style="padding:16px 4px 2px;letter-spacing:.18em">Schematic, not a screenshot: the recorded run&rsquo;s verdicts and sharpness scores</figcaption>
+        <figcaption class="eng" style="padding:16px 4px 2px;letter-spacing:.18em">Schematic, not a screenshot: verdicts and sharpness scores</figcaption>
       </figure>
     </div>
 
@@ -409,10 +408,10 @@
       <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span><span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
       <span class="eng">Calibrate</span>
       <div>
-        <h3>Calibrate before you trust it.</h3>
+        <h3>Measure its accuracy on your own photos.</h3>
         <p>Label a sample of frames. <code style="font-size:.9em">cull calibrate</code> then reports how often cull culled a frame you&rsquo;d keep, and what each combination of policy settings would change.</p>
       </div>
-      <p>Nothing should auto-apply until it&rsquo;s calibrated. The rules are code, so tuning them means moving a threshold, not rewording a prompt.</p>
+      <p>Don&rsquo;t act on its culls until you&rsquo;ve checked it this way. Tuning is one command and calls no model: you pick a row from the grid and apply it. <a href="usage.html#tune">How to tune</a>.</p>
     </div>
   </div>
 </section>
@@ -424,7 +423,7 @@
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>2000</b> Delivery</p>
       <div>
-        <h2 id="h-delivery">Into Capture One <span>as sidecars and keywords.</span></h2>
+        <h2 id="h-delivery">Verdicts arrive in Capture One <span>as labels and keywords.</span></h2>
       </div>
     </header>
 
@@ -432,14 +431,14 @@
       <div class="reveal">
         <div class="sub">
           <h3>XMP sidecars</h3>
-          <p>Stars, colour labels and keywords, written beside each DNG by default as judging runs, for your editor to read on import.</p>
+          <p>Stars, colour labels and keywords, written beside each DNG by default as judging runs, for Capture One to read on import (Lightroom Classic ignores sidecars for DNG files).</p>
           <table class="labels-tbl">
             <caption class="sr-only">Colour labels by verdict</caption>
             <thead><tr><th scope="col" class="eng">Colour label</th><th scope="col" class="eng" style="text-align:right">Verdict</th></tr></thead>
             <tbody>
-              <tr><td>Green</td><td>keep</td></tr>
-              <tr><td>Yellow</td><td>review</td></tr>
-              <tr><td><span class="dot" aria-hidden="true" style="width:7px;height:7px;margin-right:8px;vertical-align:1px"></span>Red</td><td>cull</td></tr>
+              <tr><td><span class="lbl g">Green</span></td><td>keep</td></tr>
+              <tr><td><span class="lbl y">Yellow</span></td><td>review</td></tr>
+              <tr><td><span class="lbl r">Red</span></td><td>cull</td></tr>
             </tbody>
           </table>
           <p class="eng" style="margin:0">Keywords</p>
@@ -475,83 +474,61 @@
 </section>
 
 <!-- 125 · SPECIFICATION -->
-<section class="sec" id="specification" data-n="4000" data-name="Specification" aria-labelledby="h-spec">
+<section class="sec" id="specification" data-n="4000" data-name="Comparison" aria-labelledby="h-spec">
   <div class="wrap">
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
-      <p class="sec-no eng"><b>4000</b> Specification</p>
+      <p class="sec-no eng"><b>4000</b> Comparison</p>
       <div>
-        <h2 id="h-spec">Measured <span>on real <span class="nb">M11-P</span> files.</span></h2>
+        <h2 id="h-spec">What changes <span>when cull does the first pass.</span></h2>
       </div>
     </header>
 
     <div class="spec reveal">
       <div>
         <table>
-          <caption><span class="eng">Input</span></caption>
+          <caption><span class="eng">Copying a card · to the Mac&rsquo;s SSD</span></caption>
           <tbody>
-            <tr><th scope="row">File format</th><td>DNG</td></tr>
-            <tr><th scope="row">Image assessed</th><td>Embedded JPEG preview</td></tr>
-            <tr><th scope="row">Preview size, <span class="nb">M11-P</span></th><td>9504 × 6320 px</td></tr>
-            <tr><th scope="row">Sharpness crop</th><td>Native resolution</td></tr>
-            <tr><th scope="row">Changes to your DNGs</th><td>None</td></tr>
+            <tr><th scope="row"><strong>cull</strong>, every byte checked</th><td class="nw">210 MB/s</td></tr>
+            <tr><th scope="row"><code>ditto</code>, macOS&rsquo;s copy command (like a Finder copy), nothing checked</th><td class="nw">147 MB/s</td></tr>
+            <tr><th scope="row"><code>cp</code>, nothing checked</th><td class="nw">138 MB/s</td></tr>
+            <tr><th scope="row">macOS&rsquo;s built-in <code>rsync</code>, nothing checked</th><td class="nw">123 MB/s</td></tr>
           </tbody>
         </table>
         <table>
-          <caption><span class="eng">Offload · measured</span></caption>
+          <caption><span class="eng">Copying a card · to a USB SSD</span></caption>
           <tbody>
-            <tr><th scope="row">Card</th><td>992 frames · 67.7 GB</td></tr>
-            <tr><th scope="row">Destination</th><td>External SSD</td></tr>
-            <tr><th scope="row">Time</th><td>8 min</td></tr>
-            <tr><th scope="row">Hash</th><td>SHA-256, while reading</td></tr>
-            <tr><th scope="row">Verification</th><td>Read back from disk, every file</td></tr>
-            <tr><th scope="row">Writes to the card</th><td>None</td></tr>
-            <tr><th scope="row">Second backup</th><td>Optional, same single read</td></tr>
-          </tbody>
-        </table>
-        <table>
-          <caption><span class="eng">Junk filter · measured</span></caption>
-          <tbody>
-            <tr><th scope="row">Real frames tested</th><td>992</td></tr>
-            <tr><th scope="row">Model calls</th><td>0</td></tr>
-            <tr><th scope="row">Blank frames caught</th><td>1 of 1</td></tr>
+            <tr><th scope="row"><strong>cull</strong>, every byte checked</th><td class="nw">153 MB/s</td></tr>
+            <tr><th scope="row"><code>cp</code>, nothing checked</th><td class="nw">145 MB/s</td></tr>
+            <tr><th scope="row"><code>ditto</code>, macOS&rsquo;s copy command (like a Finder copy), nothing checked</th><td class="nw">143 MB/s</td></tr>
+            <tr><th scope="row">macOS&rsquo;s built-in <code>rsync</code>, nothing checked</th><td class="nw">100 MB/s</td></tr>
           </tbody>
         </table>
       </div>
       <div>
         <table>
-          <caption><span class="eng">Judge · recorded run</span></caption>
+          <caption><span class="eng">Culling a shoot with cull</span></caption>
           <tbody>
-            <tr><th scope="row">Frames</th><td>17</td></tr>
-            <tr><th scope="row">Time</th><td>Under 2 min</td></tr>
-            <tr><th scope="row">Keep / review / cull</th><td>14 / 2 / 1</td></tr>
-            <tr><th scope="row">Cull reason</th><td>Missed focus, sharpness 2.5</td></tr>
-            <tr><th scope="row">Estimate, 17 frames</th><td>$0.37 list price</td></tr>
+            <tr><th scope="row">Frames to inspect at 100%</th><td>All of them &rarr; about half</td></tr>
+            <tr><th scope="row">Keepers it wrongly culled</th><td>0.5% (3 of 638)</td></tr>
+            <tr><th scope="row">Blank and lens-cap frames</th><td>Set aside, free</td></tr>
+            <tr><th scope="row">Labels and keywords</th><td>In place at Capture One import</td></tr>
+            <tr><th scope="row">Bursts</th><td>Ranked side by side</td></tr>
+            <tr><th scope="row">Culls for moment or taste</th><td>Still yours</td></tr>
           </tbody>
         </table>
         <table>
-          <caption><span class="eng">Backends</span></caption>
+          <caption><span class="eng">Time and cost of judging</span></caption>
           <tbody>
-            <tr><th scope="row">Anthropic API</th><td>Message Batches, half price</td></tr>
-            <tr><th scope="row">Claude subscription</th><td>Via Claude Code</td></tr>
-            <tr><th scope="row">Local</th><td>OpenAI-compatible</td></tr>
-            <tr><th scope="row">Spend control</th><td><code>--estimate</code> · cost cap</td></tr>
-          </tbody>
-        </table>
-        <table>
-          <caption><span class="eng">Delivery &amp; build</span></caption>
-          <tbody>
-            <tr><th scope="row">Sidecars</th><td>XMP: stars, labels, keywords</td></tr>
-            <tr><th scope="row">Keyword hierarchy</th><td>Capture One 16.7, verified</td></tr>
-            <tr><th scope="row">After import</th><td><code>apply-c1</code>, dry run default</td></tr>
-            <tr><th scope="row">Undo</th><td><code>cull restore</code></td></tr>
-            <tr><th scope="row">Language</th><td>Go</td></tr>
-            <tr><th scope="row">Requires</th><td>Go 1.26 · macOS for Capture One</td></tr>
+            <tr><th scope="row">Speed</th><td>About 5&ndash;20 s a frame, unattended</td></tr>
+            <tr><th scope="row">Pay as you go</th><td>About 2&cent; a frame; 1&cent; in batch</td></tr>
+            <tr><th scope="row">Claude plan</th><td>No per-frame charge</td></tr>
+            <tr><th scope="row">Price check first</th><td><code>--estimate</code>, free</td></tr>
           </tbody>
         </table>
       </div>
     </div>
-    <p class="spec-note">Figures are single measured runs on real <span class="nb">M11-P</span> files, not averages. The 17-frame run is unlabelled: it shows the tool working, not its accuracy on your work. That is what <code>cull calibrate</code> is for.</p>
+    <p class="spec-note">Copy speeds: an <span class="nb">M11-P</span> card in a USB card reader, timed until each tool&rsquo;s data was actually on the disk. Ordinary copies report &ldquo;done&rdquo; before the disk has finished writing, and check nothing; cull reads every copy back from the disk and compares it with the card&rsquo;s fingerprint. On both drives the checked copy finished as fast as or faster than the unchecked ones. Finder itself wasn&rsquo;t timed; <code>ditto</code> uses the same system copy routines. Over a slow network the check costs more: to a NAS over Wi-Fi, copy to your Mac first. Culling figures: a 979-frame shoot labelled by hand and compared with cull&rsquo;s verdicts. About half the frames needed no 100% check; choosing moments among the keeps is still yours. Your results depend on how you shoot; <code>cull calibrate</code> measures them on your own photos. Full measurements are in the <a href="https://github.com/jefflaplante/cull#readme">README</a>.</p>
   </div>
 </section>
 
@@ -561,20 +538,20 @@
     <div class="rule" aria-hidden="true"></div>
     <header class="sec-head reveal">
       <p class="sec-no eng"><b>&rarr;</b> Usage</p>
-      <div><h2 id="h-walk">The walkthrough. <span>One shoot, from card to Capture One.</span></h2></div>
+      <div><h2 id="h-walk">A step-by-step guide, <span>from card to Capture One.</span></h2></div>
     </header>
     <div class="walk-grid reveal">
       <ol class="walk-steps">
         <li><span class="eng">60</span>Install</li>
         <li><span class="eng">125</span>Copy the card</li>
-        <li><span class="eng">250</span>Estimate, then judge</li>
-        <li><span class="eng">500</span>Check the verdicts</li>
-        <li><span class="eng">1000</span>Measure and tune</li>
-        <li><span class="eng">2000</span>Tag and sort</li>
-        <li><span class="eng">4000</span>Push changes into Capture One</li>
+        <li><span class="eng">250</span>Check the price, then judge</li>
+        <li><span class="eng">500</span>Look through the verdicts</li>
+        <li><span class="eng">1000</span>Measure it against your picks</li>
+        <li><span class="eng">2000</span>Add keywords and sort</li>
+        <li><span class="eng">4000</span>Send later changes to Capture One</li>
       </ol>
       <div>
-        <p class="lede" style="margin-bottom:26px">A 17-frame <span class="nb">M11-P</span> shoot taken from the card to Capture One, with the commands and what the terminal printed at every step.</p>
+        <p class="lede" style="margin-bottom:26px">Each step of a shoot, with the command to type and what it prints back, written for photographers comfortable typing a few commands.</p>
         <a class="btn btn-primary" href="usage.html">Read the walkthrough <span aria-hidden="true">&rarr;</span></a>
       </div>
     </div>

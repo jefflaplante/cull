@@ -1787,7 +1787,25 @@ func TestDeprecations(t *testing.T) {
 		hint string
 	}{
 		{[]string{"judge", "--estimate", "--resume", dir}, "--fresh"},
-		{[]stringAdd `"os"` to the test file's imports.
+		{[]string{"judge", "--estimate", "--write-xmp", dir}, "--no-xmp"},
+		{[]string{"judge", "--estimate", "--xmp-develop", dir}, "apply-c1"},
+		{[]string{"judge", "--estimate", "--move-culled", dir}, "--sort=culls"},
+		{[]string{"judge", "--estimate", "--project", "p", dir}, "cull tag"},
+		{[]string{"scan", "--event", "e", dir}, "cull tag"},
+		{[]string{"review", "--static", dir}, "cull review"},
+		{[]string{"import-labels", export, dir}, "cull review"},
+		{[]string{"rank", "--estimate", dir}, "cull judge"},
+	}
+	for _, c := range cases {
+		out, _ := run(t, c.args...) // some refuse later for their own reasons; the warning comes first
+		if !strings.Contains(out, "deprecated") || !strings.Contains(out, c.hint) {
+			t.Errorf("%v: want a deprecation naming %q:\n%s", c.args, c.hint, out)
+		}
+	}
+}
+```
+
+Add `"os"` to the test file's imports.
 
 In `dotfile_test.go`, use its `dotfile` helper, and `judgedShoot` from `cli_test.go`
 (L1 sharp → keep, L2 soft → review, L3 missed_focus → cull; no sidecars yet):
@@ -1817,28 +1835,6 @@ func TestDotfileDeprecatedKeys(t *testing.T) {
 	}
 }
 ```
-
-ile(export, nil, 0o644)`.
-
-In `dotfile_test.go`, follow the file's existing pattern for writing a dotfile and running
-a command:
-
-```go
-// Deprecated keys warn and still apply: write-xmp = false means no sidecars, and
-// sort = true means --sort=all.
-func TestDotfileDeprecatedKeys(t *testing.T) {
-	// dotfile: "write-xmp = false\nresume = true\nsort = true\n"
-	// run: judge --estimate <empty dir>
-	// want: the output names write-xmp and resume as deprecated, err == nil
-}
-```
-
-Write the body using the helper `dotfile_test.go` already has. Read the file first, then
-assert:
-- `err == nil`;
-- the output contains `"write-xmp"` and `"deprecated"`;
-- for `sort = true`: run `decide` on a judged temp shoot (use `fakeClaudeCull`) and assert
-  the frame is in `cull/`. The fake culls everything.
 
 - [ ] **Step 2: Run them and check they fail**
 

@@ -22,18 +22,23 @@ make test             # all tests use synthetic fixtures; no network, no API key
 make vet
 ./bin/cull scan --save-inputs /tmp/in <dir>          # no model calls; previews, faces
 ./bin/cull review <dir>                              # browser: label/star; saves labels log + sidecars
-./bin/cull judge <dir>                               # anthropic: spends API credits
+./bin/cull judge <dir>                               # anthropic: spends API credits; re-run continues and ranks
 ./bin/cull judge --backend claude-code <dir>        # subscription quota
 ./bin/cull judge --backend openai --model <m> <dir>  # local OpenAI-compatible server (free)
-./bin/cull rank <dir>                                # rank sequences already judged (or after --no-rank)
+./bin/cull judge --rerank <dir>                      # re-rank every set
+./bin/cull decide --sort <dir>                       # keep/ review/ cull/ (--sort=culls: only culls); sidecars are written by default
 ```
 
 ## Layout
 
 - `cmd/cull` — main; signal-aware context into cobra (binary `cull`; module and repo `github.com/jefflaplante/cull`, first called gophotocull)
-- `internal/cli` — cobra tree: `offload`, `scan`, `judge` (model; code in cull.go), `rank` (rank.go),
-  `decide`, `review`, `calibrate`, `apply-c1`, `restore`, `status`, `tag`, `import-labels`,
+- `internal/cli` — cobra tree: `offload`, `scan`, `judge` (model; code in cull.go; continues, ranks), `rank` (rank.go,
+  deprecated in v0.2.0),
+  `decide`, `review`, `calibrate`, `apply-c1`, `restore`, `status`, `tag`, `import-labels`
+  (deprecated),
   `version` (+ built-in `completion`);
+  help.go (sectioned `--help`, `--help-all`); sortflag.go (`--sort[=all|culls]`, `--move-culled` as its
+  deprecated alias);
   backend.go (`--backend`/`--model`/credential flags shared by judge and rank); dotfile.go (`~/.cull` /
   `$CULL_CONFIG` flag defaults, applied in the root's PersistentPreRunE: typed flag > stored policy >
   dotfile > built-in default; `notInDotfile` refuses one-off/risky flags)
@@ -50,8 +55,8 @@ make vet
   rank call's prompt/schema/request and permutation-checked decode (rank.go)
 - `internal/pipeline` — detect → locate → crops → evaluate → decide; worker pool,
   resume (path+size+mtime; refuses a different backend/model/schema), checkpointing,
-  quota stop, `--save-inputs`, `--move-culled` / `--sort` / `Restore` (move.go: `place` puts frames
-  home, in `culled/`, or in `keep/` `review/` `cull/`; `reconcileMove` searches them all; Discover skips them),
+  quota stop, `--save-inputs`, `--sort` / `Restore` (move.go: `place` puts frames
+  home or in `keep/` `review/` `cull/`; `--sort=culls` puts culls in `cull/`; `culled/` is legacy, read only (moved out on the next sort); `reconcileMove` searches them all; Discover skips them),
   stages.go (shared frame stages), decide.go, groups.go (decideAll: regroups sequences,
   reuses/applies stored ranks, marks best), batch.go (Message Batches driver with
   re-attachable `<report>.batch.json` state), escalation, cost budget; rank.go (`Rank`/
@@ -72,7 +77,7 @@ make vet
 - `internal/labels` — the user's append-only JSONL labels log (last line per file wins),
   `Effective` verdict (label over model), and the one sidecar mapping (`Sidecar`,
   `WriteSidecar`) used by cull, decide, the server; apply-c1 mirrors it
-- `internal/calib` — confusion matrix, rates, sharpness-threshold sweep
+- `internal/calib` — confusion matrix, rates, the policy grid (keep-best × outranked × raw-clipped)
 - `internal/c1` — Capture One AppleScript generator, read-only probe, osascript runner
 - `internal/offload` — `cull offload`: plan.go (hygienic card walk, one folder per run or per event with
   `--split` (capture-time gap or new day; refused when `clockBroken`) / `--split-at` (file names), `MakePlans`,
@@ -99,8 +104,8 @@ make vet
 
 ## Invariants — do not break
 
-- Never modify or delete DNGs. Only `--move-culled` / `--sort` (judge, decide) move them (same-disk
-  rename into `culled/` or `keep/` `review/` `cull/`, never overwriting, recorded as `moved_to`),
+- Never modify or delete DNGs. Only `--sort` (judge, decide, review; `--move-culled` is its deprecated
+  alias) moves them (same-disk rename into `keep/` `review/` `cull/`, never overwriting, recorded as `moved_to`),
   and `restore` undoes it. `offload` only reads cards and never replaces a file. Never overwrite an existing `.xmp` unless `--overwrite-xmp`.
 - Never print, log, or read the API key contents beyond `internal/config`.
 - Keep/review/cull is decided in Go (`eval.Policy`), not by the model. The model
@@ -296,7 +301,7 @@ M1103817 and M1103865 in `photos/c1-kw-test/live/`; the report went to a temp fo
 The user labelled 979 of the 992 frames from the LEICA M card (keep or cull only), in
 `/Volumes/photos/2026/2025-12-27 Card-Offload` on the NAS. The frames were judged with
 `--backend claude-code` (Sonnet → claude-sonnet-5-5), with `--keep-best 2` and otherwise
-default policy; 174 sets were ranked.
+default policy; 174 sets were ranked. (`cull calibrate` now prints this grid, 20 policy rows, for any labelled report.)
 
 `cull calibrate` (rows: the user's label; columns: cull's verdict):
 

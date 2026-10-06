@@ -43,11 +43,12 @@ backend = claude-code
 keep-best = 3
 
 [review]
-sort = true
+sort = all
 ```
 
-A flag you type still wins. A shoot's stored settings (for `decide`, `rank` and
-`judge --resume`) win over the file too. Each run prints the values it took from it.
+With `backend = claude-code` in the file, you don't type `--backend` below. A flag you
+type still wins. A shoot's stored policy and backend (for `decide` and `judge`) win over
+the file too. Each run prints the values it took from it.
 `CULL_CONFIG=/dev/null` switches the file off for one run. The README's
 [Your defaults](README.md#your-defaults-cull) section has the full rules and precedence.
 
@@ -120,14 +121,17 @@ estimate: 17 frames × ~6k in / ~1k out tokens ≈ 102000 in / 17000 out ≈ $0.
 ranking ≈ 3 call(s), $0.09 at list price, if every frame lands in an 8-frame set (pairs cost more per frame; frames in no set cost nothing)
 ```
 
-The ranking figure assumes full 8-frame sets, so it runs high: this shoot had two pairs.
+That output is from before the scan's sets were counted. Now the ranking line prices the
+sets the scan found: `ranking ≈ N call(s) for M set(s) already found, $X at list price
+(at most: frames judged cull leave their sets)`. Without a scan it assumes full 8-frame
+sets, which runs high.
 With `--backend claude-code` nothing is billed per token; it uses your subscription
 quota instead.
 
 ## 3. Judge (this spends money or quota)
 
 ```sh
-cull judge --backend claude-code --write-xmp "Pictures/2025-12-28 Forest portraits"
+cull judge --backend claude-code "Pictures/2025-12-28 Forest portraits"
 ```
 
 **The model assesses each frame:**
@@ -168,14 +172,14 @@ The whole run took 1 minute 56 seconds.
 **Useful flags:**
 - `--batch` (API at half price, slower);
 - `--max-cost 5`;
-- `--no-rank`;
+- `--no-rank` (rank on the next run);
 - `--keep-best 1`;
 - `--quota-stop 0.9` (claude-code);
 - `-v` (focus target, tokens and cost per frame);
 - `-q` (summary only);
 - `--plain` (no live view).
 
-**Interrupted?** Rerun with `--resume`.
+**Interrupted?** Ctrl-C, then run the same command again: it continues where it stopped, and ranks the sets that need it. `--fresh` replaces the report instead.
 
 **Status at any point:**
 
@@ -183,7 +187,7 @@ The whole run took 1 minute 56 seconds.
 $ cull status "Pictures/2025-12-28 Forest portraits"
 /Users/jeff/git/cull/photos/demo/Pictures/2025-12-28 Forest portraits: 17 DNGs; report cull-report.json (claude-code/sonnet → claude-sonnet-5-5, effort default)
   assessed 17 · junk 0 · errors 0 · not yet judged 0
-  model: keep 14 · review 2 · cull 1 · moved out of the shoot folder (culled/ or keep/ review/ cull/) 0
+  model: keep 14 · review 2 · cull 1 · moved out of the shoot folder (keep/ review/ cull/) 0
   you: labelled 0/17 · rated 0 · disagree with the model 0
   sets: 2 (ranked 2, by scores 0)
   spent: not billed per token (claude-code)
@@ -197,8 +201,7 @@ cull review "Pictures/2025-12-28 Forest portraits"
 ```
 
 It opens a contact sheet. Each click or key saves straight to `cull-labels.jsonl` and
-to the frame's `.xmp` sidecar. `--no-xmp` saves only the labels log; `--static` writes
-an offline page instead of serving.
+to the frame's `.xmp` sidecar. `--no-xmp` saves only the labels log.
 
 | key | action |
 |---|---|
@@ -223,7 +226,8 @@ an offline page instead of serving.
   the frame's sidecar, where the frame is now: a frame you rescue from `cull/` stays in
   `cull/` with a green label. To move frames into the folders that match your labels:
   - run `cull decide --sort <dir>` after the session; or
-  - start the session with `cull review --sort <dir>`, which re-sorts once when you stop
+  - start the session with `cull review --sort <dir>` (`--sort=culls` moves only culls),
+    which re-sorts once when you stop
     the server with Ctrl-C. If the server ends any other way (the terminal is closed, the
     process is killed), nothing moves; run `cull decide --sort` yourself.
 
@@ -233,8 +237,9 @@ an offline page instead of serving.
 
 ## 5. Tags: project, event, location, keywords
 
-Tags given at offload are stored in the report, and every later run keeps them.
-`cull tag` shows or changes them:
+Tags are set at offload (`--project`, `--event`, `--location`, `--keyword`), or later with
+`cull tag`. They are stored in the report, and every later run keeps them. `cull tag`
+shows or changes them; `cull decide` then rewrites the sidecars:
 
 ```
 $ cull tag "Pictures/2025-12-28 Forest portraits"
@@ -244,19 +249,24 @@ $ cull tag --event "Fall session" --keyword family "Pictures/2025-12-28 Forest p
 event: Fall session
 location: Forest Park, Portland
 keywords: family
-saved; rewrite the sidecars with: cull decide --write-xmp "Pictures/2025-12-28 Forest portraits"
+saved; rewrite the sidecars with: cull decide "Pictures/2025-12-28 Forest portraits"
 ```
 
 ## 6. Check the tool against your labels, and tune it (free)
 
 ```sh
 cull calibrate "Pictures/2025-12-28 Forest portraits"
-cull decide --review-below-sharpness 7 "Pictures/2025-12-28 Forest portraits"
+cull decide --keep-best 3 --outranked cull "Pictures/2025-12-28 Forest portraits"
 ```
 
 - **`calibrate`** reports false culls (you said keep, it culled), missed culls, and the
-  review rate. It also sweeps `--review-below-sharpness`, and lists any junk frame you
-  labelled keep.
+  review rate. It lists any junk frame you labelled keep.
+- **The policy grid** under it has 20 rows: `--keep-best` 1–5, `--outranked` review or
+  cull, and `--raw-clipped` review or ignore. Each row gives the false culls (count and
+  percent of your keeps), culls caught, culls missed and review rate. `*` marks rows under
+  1% false culls; `← current` marks the report's own policy. Pick a row you can live with,
+  then apply it with `decide`. The grid is measured on the frames you labelled, so confirm
+  a row on the next labelled shoot.
 - **`calibrate --compare a.json b.json`** shows how often two runs over the same frames
   disagree. Verdicts can't be more trustworthy than they are stable.
 - **`decide`** re-applies the policy with no model calls. The policy is saved in the
@@ -265,7 +275,7 @@ cull decide --review-below-sharpness 7 "Pictures/2025-12-28 Forest portraits"
 ## 7. Before importing: sidecars, and sorting into folders
 
 ```
-$ cull decide --write-xmp --sort "Pictures/2025-12-28 Forest portraits"
+$ cull decide --sort "Pictures/2025-12-28 Forest portraits"
 decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull/, 0 back into the shoot folder
 ```
 
@@ -280,7 +290,8 @@ cull/: 1 DNGs, 1 sidecars
 **Import `keep/` and `review/` into Capture One** (or Lightroom, or anything else).
 - **Sort before importing:** a catalog loses track of frames moved after import.
 - **Undo:** `cull restore <dir>` puts every frame back where it was.
-- **Culls only:** `--move-culled` moves just the culls, into `culled/`.
+- **Culls only:** `--sort=culls` moves just the culls, into `cull/`. Write the `=`:
+  `--sort culls <dir>` is an error.
 
 **Each sidecar carries:**
 - your stars;
@@ -364,22 +375,27 @@ tags, as plain words) and your stars.
 **The dry run is a readable AppleScript.** For this shoot it was 639 lines, looking up
 each distinct keyword once.
 
-## Ranking on its own
+## Re-ranking
+
+Every `judge` run ranks the sets that have no current ranking, so you rarely rank by hand.
+Re-rank every set when you've changed what the sets are:
 
 ```sh
-cull rank --estimate <dir>    # exact cost, free
-cull rank <dir>               # rank the sets that need it
-cull rank --batch <dir>       # half price
+cull judge --estimate <dir>   # free: the ranking calls for the sets already found
+cull judge --rerank <dir>     # rank every set again
+cull judge --rerank --batch <dir>   # half price
 ```
 
-`rank` uses the report's backend, model and stored policy. It skips sets whose saved
-order is still valid.
+- **When:** after re-judging frames with `--fresh`, or after changing `--seq-gap` or
+  `--seq-look` so the sets differ. A changed `--keep-best` or `--outranked` needs only
+  `cull decide`, which is free.
+- **What it uses:** the report's backend, model and stored policy, unless you type others.
 
 ## Things to know
 
 - **Your DNGs are never modified.**
   - `offload` only reads the card, and never replaces a file.
-  - `--sort` and `--move-culled` move frames within the shoot folder, recorded in the
+  - `--sort` moves frames within the shoot folder, recorded in the
     report and undone by `cull restore`.
   - Sidecars that cull didn't write are never overwritten unless you pass
     `--overwrite-xmp`.

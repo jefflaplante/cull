@@ -119,13 +119,13 @@ go install github.com/jefflaplante/cull/cmd/cull@latest
 cull offload /Volumes/LEICA\ M ~/Pictures --name "Forest portraits"   # card → verified copy → free scan
 S=~/Pictures/"2026-10-02 Forest portraits"   # the shoot folder offload created
 cull judge --estimate "$S"                    # free: what judging would cost
-cull judge "$S"                               # model assessment + decisions + set ranking
+cull judge "$S"                               # model assessment + decisions + set ranking; re-run to continue
 cull review "$S"                              # browser: check, label keep/review/cull, add stars
-cull decide --write-xmp --sort "$S"           # sidecars; keep/ review/ cull/ for import
+cull decide --sort "$S"                       # keep/ review/ cull/ for import (sidecars are already written)
 ```
 
 Everything is recorded in `cull-report.json` in the shoot folder. `cull restore "$S"`
-undoes `--sort` and `--move-culled`.
+undoes `--sort`.
 
 **A real run, 17 frames:**
 
@@ -135,7 +135,7 @@ $ cull offload LEICA_M Pictures --name "Forest portraits" --location "Forest Par
 copied 17, skipped 0 (already there), failed 0: 1.1 GB in 2s (624 MB/s, verified)
 all 17 files verified on Pictures/2025-12-28 Forest portraits: safe to format the card
 
-$ cull judge --backend claude-code --write-xmp "Pictures/2025-12-28 Forest portraits"
+$ cull judge --backend claude-code "Pictures/2025-12-28 Forest portraits"
 …
 [1/17] M1103817.DNG CULL  sharp 2.5(missed_focus) exp 7.0(+0.3EV) comp 6.5(good)  [model: Woman's eyes with glasses]
 [3/17] M1103823.DNG KEEP  sharp 8.6(sharp) exp 6.5(+0.5EV) comp 6.5(croppable)  [face q=287]
@@ -143,7 +143,7 @@ $ cull judge --backend claude-code --write-xmp "Pictures/2025-12-28 Forest portr
 ranked set 1 (2 frames): M1104115.DNG wins — … Sharpness at the eyes is the top priority, so Frame 2 wins narrowly.
 results: map[cull:1 keep:14 review:2]
 
-$ cull decide --write-xmp --sort "Pictures/2025-12-28 Forest portraits"
+$ cull decide --sort "Pictures/2025-12-28 Forest portraits"
 decided 17 frame(s); no decision changed; sorted 17 into keep/, review/ and cull/, 0 back into the shoot folder
 ```
 
@@ -206,15 +206,12 @@ the flag.
 
 ```ini
 # ~/.cull
-backend = claude-code     # judge and rank on your Claude subscription
+backend = claude-code     # judge on your Claude subscription
 keep-best = 3
 outranked = cull
 
-[judge]
-write-xmp = true
-
 [review]
-sort = true               # re-sort by your labels when the review server stops
+sort = all                # re-sort by your labels when the review server stops
 ```
 
 Booleans take `true` or `false`. A repeatable flag (`keyword`) takes one line per value.
@@ -236,22 +233,27 @@ Quotes around a value are optional.
   - a malformed line also stops the command.
 - **What it can't set:** one-off and risky flags are refused with a warning, so you always
   type them on purpose: `yes`, `fresh`, `force`, `run`, `probe`, `verify`, `dry-run`,
-  `estimate`, `prepare`, `clear-cache`, `resume`, `overwrite-xmp`, `report`, and the
-  verbosity flags `quiet`, `verbose`, `debug` and `log-level`.
+  `estimate`, `prepare`, `clear-cache`, `rerank`, `overwrite-xmp`, `report`, `help`,
+  `version`, and the verbosity flags `quiet`, `verbose`, `debug` and `log-level`.
+- **Old keys still work, with a warning:** `write-xmp = false` means no sidecars,
+  `move-culled = true` means `sort = culls`, `sort = true` means `sort = all` (write
+  `sort = all`), and `resume` is ignored. If both `sort` and `move-culled` come from the
+  file, `sort` wins.
 
 ### Precedence: which value wins
 
 From strongest to weakest:
 
 1. **A flag you type** on the command line always wins.
-2. **The shoot's stored policy**, for the decision rules and the set grouping only.
-   These are `keep-best`, `outranked`, `eyes-closed`, `raw-clipped`,
+2. **The shoot's stored policy and backend** (`decide` and `judge`). The policy covers the
+   decision rules and the set grouping: `keep-best`, `outranked`, `eyes-closed`, `raw-clipped`,
    `raw-clip-threshold`, `junk`, `review-below-sharpness`, `cull-max-sharpness`,
    `min-crop-area`, `seq-gap` and `seq-look`.
-   - Every `judge`, `decide`, `rank` and `review --sort` saves the full policy it used in
-     the shoot's `cull-report.json`.
-   - `decide`, `rank`, `calibrate`, `judge --resume` and `review --sort` start from that
-     stored policy, so tuning done on one shoot stays with it.
+   - Every `judge`, `decide` and `review --sort` saves the full policy it used in the
+     shoot's `cull-report.json`.
+   - `decide`, `calibrate`, a continued `judge` and `review --sort` start from that stored
+     policy, so tuning done on one shoot stays with it.
+   - A continued `judge` also takes its backend, model and effort from the report.
 3. **`~/.cull`**: a `[command]` section first, then the lines above any header.
 4. **The built-in default.**
 
@@ -259,9 +261,9 @@ Some special cases:
 
 | Situation | What happens |
 |---|---|
-| A fresh `cull judge` (no `--resume`) | There's no stored policy yet: typed flags, then `~/.cull`, then the defaults. The result becomes the shoot's stored policy. |
-| `cull rank` | `--backend`, `--model` and `--effort` come from the report the shoot was judged with, not `~/.cull`, unless you type them. A set is ranked by the model that judged it. |
-| `cull judge --resume` | The backend, model and effort must match the report's. A different `backend` in `~/.cull` is refused, with the flags that continue the run. |
+| The first `cull judge` of a shoot | There's no stored policy yet: typed flags, then `~/.cull`, then the defaults. The result becomes the shoot's stored policy. |
+| `cull judge` on a shoot that has a report | `--backend`, `--model` and `--effort` come from the report, not `~/.cull`, unless you type them. A set is ranked by the model that judged it. A typed flag that differs from the report's is refused, naming `--fresh` and `-o`. |
+| `cull judge --fresh` | Replaces the report, so it judges with `--backend` (or `~/.cull`'s, or the default), not the replaced report's. |
 | `~/.cull` says `keep-best = 3`, the shoot's report says 2 | `cull decide` uses 2, and the note `policy from the report: --keep-best 2` says so. Type `--keep-best 3` to change the shoot, which then stores 3. |
 | You want a built-in default back on a tuned shoot | Type it: `cull decide --keep-best 3 <dir>`. Leaving a flag off keeps the stored value. |
 
@@ -273,15 +275,15 @@ for example with `jq '.policy, .seq' cull-report.json`.
 Every judged frame gets up to 8 **content keywords** from the model, such as `portrait`,
 `forest`, `red dress` or `laughing`. The model is asked for 3–8, and Go cleans them. Every frame also gets the **shoot's tags**:
 - **Set them** with `--project`, `--event`, `--location` and `--keyword` (repeatable) on
-  `offload`, `scan` or `judge`.
+  `offload`, or later with `cull tag`.
 - **They're stored in the report,** so later runs keep them, including `judge --fresh`
   (tags describe the shoot). Flags given again replace them field by field.
 - **Tags belong to the report,** not the folder: a run with `-o other.json` starts
   without them.
 - **Values can't contain `|`** (it separates keyword levels) or start with `cull:`
   (cull's own markers).
-- **`cull tag <dir>`** shows them or changes them (`--clear-location` and so on). Then
-  run `cull decide --write-xmp <dir>` to rewrite the sidecars.
+- **`cull tag <dir>`** shows them or changes them (`--clear-location` and so on). The
+  sidecars pick them up on the next `cull decide <dir>`, which rewrites them by default.
 
 **Sidecars** carry them as plain keywords in `dc:subject` and as paths in
 `lr:hierarchicalSubject`: `content|forest`, `project|Smith wedding`, `event|…`,
@@ -299,18 +301,20 @@ Junk frames get your tags but no content keywords, since the model never saw the
 |---|---|---|
 | `offload <card>... <dest>` | Copy a card into a dated shoot folder, every file verified; then scan it (`--verify <folder>` re-checks later) | no |
 | `scan <dir>` | Extract previews, EXIF, faces and look fingerprints, flag junk frames; write the report | no |
-| `judge <dir>` | Assess every frame, decide keep/review/cull, then rank the sets | yes |
-| `rank <dir>` | Rank the sets in an existing report (after `judge --no-rank`, or after new frames) | yes |
-| `decide <dir>` | Re-apply the policy to stored assessments; regroup sets; write sidecars; sort into keep/ review/ cull/ (`--sort`) or move culls | no |
+| `judge <dir>` | Assess every frame, decide keep/review/cull, then rank the sets; continues an existing report | yes |
+| `decide <dir>` | Re-apply the policy to stored assessments; regroup sets; rewrite sidecars; sort into keep/ review/ cull/ (`--sort`) or only culls into cull/ (`--sort=culls`) | no |
 | `review <dir>` | Browser contact sheet for checking, labelling and rating frames | no |
-| `calibrate <report>...` | Compare a report's decisions with your labels; sweep thresholds | no |
+| `calibrate <report>...` | Compare a report's decisions with your labels; print a grid of policy settings | no |
 | `apply-c1 <dir>` | AppleScript that applies verdicts, stars and keywords in Capture One (dry run by default) | no |
 | `tag <dir>` | Show or change the shoot's project, event, location and keywords | no |
-| `restore <dir>` | Move frames that `--sort` or `--move-culled` moved back where they were | no |
+| `restore <dir>` | Move frames that `--sort` moved back where they were | no |
 | `status <dir>` | Where a shoot stands (judged, labelled, ranked, spent) and the next command to run | no |
 | `version`, `completion` | Build version; shell completion | no |
 
-Every command has `--help` with examples.
+Every command has `--help`, which shows the flags in sections (Flags, Policy, Backend,
+Sidecar and folder) with examples. `--help-all` also lists the Tuning and Experimental
+flags. The v0.1 commands that v0.2.0 folded into others still run, with a warning; see
+[Changed in v0.2.0](#changed-in-v020).
 
 ## How decisions are made
 
@@ -351,7 +355,7 @@ For each DNG:
    - Frames ranked below `--keep-best` in their set → `--outranked` (default review).
 5. **Report.** `cull-report.json` is the source of truth: assessments, decisions,
    reasons, sets, cost, and the policy used. It is checkpointed as `judge` runs, and
-   `--resume` skips files already done. `jq` works on it, e.g.
+   running `judge` again skips files already done. `jq` works on it, e.g.
    `jq '.results[] | select(.decision=="cull") | .file' cull-report.json`.
 
 ## Sequences and best of set
@@ -387,14 +391,14 @@ A set of more than 8 frames is split into chunks of at most 8. The top frames of
 chunk then meet in one final call; a 40-frame set takes 6 calls. Frames that failed
 the sharpness gate stay in the set but aren't ranked.
 
-**Ranking twice (`--rank-twice`, on `judge` and `rank`).** Models favour some positions
+**Ranking twice (`--rank-twice`, on `judge`; experimental, so only in `--help-all`).** Models favour some positions
 in a list. With this flag, each set of up to 8 frames is ranked a second time with its
 frames shown in reverse, which doubles those calls.
 - A frame inside `--keep-best` in both orders is best.
 - A frame outside it in both orders is outranked.
 - A frame the two orders disagree on is disputed: a keep goes to review (unless
   `--outranked ignore`), and it isn't marked best.
-- Sets already ranked once are re-ranked only with `--force`.
+- Sets already ranked once are re-ranked only with `--rerank`.
 
 **Keeping the best.**
 - `--keep-best` (default 3, range 0–5; 0 ranks without demoting) sets how many of
@@ -402,29 +406,33 @@ frames shown in reverse, which doubles those calls.
   default `review`).
 - Ranking only demotes keep; it never promotes a frame.
 - A set that isn't ranked (`--no-rank`, a failed call, the cost limit) is ordered by
-  the frames' own scores instead, and the reason says so.
+  the frames' own scores instead, and the reason says so. The next `judge` run ranks it.
 - The best frames get the keyword `cull:best`.
 
 **Reuse.** A set's ranking is reused, with no new call, while every rankable frame in
 it is still covered. A frame dropping out keeps the order; a new frame makes the set
-unranked until the next `cull rank`. `cull decide` regroups and re-applies stored
+unranked until the next `cull judge`. `cull decide` regroups and re-applies stored
 rankings for free, so changing `--keep-best` or `--outranked` costs nothing.
-The report also stores the grouping (`--seq-gap`, `--seq-look`): later `decide`, `rank`
-and `judge --resume` runs regroup with it unless you type those flags again.
+The report also stores the grouping (`--seq-gap`, `--seq-look`): later `decide`
+and `judge` runs regroup with it unless you type those flags again.
 Regrouping can lose rankings:
 - when two ranked sets merge, only the first one's order is kept;
 - `--seq-gap 0` drops them all.
 
 A split set keeps its order. What was paid always stays in the report's cost total.
 
-**Ranking separately.**
-- `cull rank <dir>` ranks sets that have no current ranking. `--force` re-ranks all of
-  them, `--estimate` gives the exact call count and cost, and `--batch` runs it at
-  half price.
-- It uses the backend and model the report was judged with, unless you pass others.
-  `--batch` implies anthropic.
+**Re-ranking.** Ranking happens at the end of every `judge` run, for the sets that have no
+current ranking, so a plain re-run also ranks sets that new frames joined.
+- `cull judge --rerank <dir>` ranks every set again, even ones the model already ranked.
+  Use it after re-judging frames or changing the grouping. A policy change alone needs
+  only `cull decide`, which is free.
+- `--no-rank` skips ranking for one run; the next run ranks.
+- `cull judge --estimate <dir>` gives the exact call count once a scan has found the sets,
+  and `--batch` runs the ranking at half price.
+- A continued run uses the backend and model the report was judged with, unless you
+  type others. `--batch` implies anthropic.
 - An interrupted `--batch` ranking leaves `cull-report.json.rank-batch.json`.
-  Re-running `cull rank --batch` re-attaches without paying twice; deleting the file
+  Running `cull judge --batch` again re-attaches without paying twice; deleting the file
   abandons it.
 
 ## Reviewing and labelling
@@ -433,14 +441,13 @@ A split set keeps its order. What was paid always stays in the report's cost tot
 per-session token, then opens your browser.
 - **Saving:** every change is saved at once, to `cull-labels.jsonl` beside the report
   and to the frame's XMP sidecar.
-- **Other modes:** `--no-xmp` saves only the labels log. `--static` writes an offline
-  page that keeps labels in the browser, with JSONL export and import. Bring exported
-  labels into the shoot's log with `cull import-labels <export.jsonl> <dir>`.
+- **Other modes:** `--no-xmp` saves only the labels log.
 - **Files don't move while you review.** A label change rewrites only the labels log and
   the frame's sidecar, where the frame is now: a frame you rescue from `cull/` stays in
   `cull/` with a green label. To move frames into the folders that match your labels:
   - run `cull decide --sort <dir>` after the session; or
-  - start the session with `cull review --sort <dir>`, which re-sorts once when you stop
+  - start the session with `cull review --sort <dir>` (`--sort=culls` moves only culls),
+    which re-sorts once when you stop
     the server with Ctrl-C. If the server ends any other way (the terminal is closed, the
     process is killed), nothing moves; run `cull decide --sort` yourself.
 
@@ -474,7 +481,7 @@ For example, *Keep + Unrated* shows the keepers you haven't starred yet.
 showing how many keepers it has, and **−** / **+** buttons (or **-** / **=**) to change
 that number. Changing it labels the set's top N frames, by the model's rank, as keep and
 the rest of its ranked frames as cull. These are your labels, so sidecars,
-`decide --move-culled`, `apply-c1` and `calibrate` all follow them. Each frame in a set
+`decide --sort`, `apply-c1` and `calibrate` all follow them. Each frame in a set
 also has a **✓ keeper** toggle that flips just that frame between keep and cull.
 Keepers have a green border.
 
@@ -495,7 +502,7 @@ Keepers have a green border.
 Your labels never change the report's decisions: the report stays the model's
 record. Everything that writes sidecars or moves files uses them by default, so your
 verdict wins and your stars become the rating. That covers `decide`, `apply-c1`, and
-`judge --write-xmp` / `--move-culled`. `--labels <path>` reads the log from somewhere
+`judge` with `--sort`. `--labels <path>` reads the log from somewhere
 else; `--no-labels` ignores it. `calibrate` reads the same log.
 
 **Calibrating.**
@@ -503,26 +510,34 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
 2. Run `cull calibrate <dir>` (or a report path). It reports:
    - the false-cull rate (you kept, it culled) and missed-cull rate;
    - the review rate;
-   - a `--review-below-sharpness` sweep;
-   - a `--keep-best` sweep for sets.
+   - a grid of policy settings, below.
 3. For stability, judge the same frames twice (`-o run1.json`, `-o run2.json`) and run
    `cull calibrate --compare run1.json run2.json`. It counts decision flips, keep↔cull
    crossings and sharpness status changes, and needs no labels.
 4. Apply the settings you pick with `cull decide`. The report stores that policy, so
-   later `decide`, `rank`, `calibrate` and `judge --resume` runs start from it. A flag
-   you type overrides only its own setting.
+   later `decide`, `calibrate` and `judge` runs start from it. A flag you type overrides
+   only its own setting.
+
+**The grid.** `cull calibrate` re-applies your labels to the report under 20 policy
+settings and prints a row for each: `--keep-best` 1–5, `--outranked` review or cull, and
+`--raw-clipped` review or ignore. Each row gives the false culls (count and percent of
+your keeps), the culls caught, the culls missed and the review rate. `*` marks the rows
+under 1% false culls, and the row for the report's current policy says `← current`. Pick a
+row, then apply it with `cull decide --keep-best 3 --outranked cull <dir>`. It costs
+nothing, but the grid is measured on the frames you labelled: confirm a row on the next
+labelled shoot before relying on it.
 
 ## Model backends
 
 | `--backend` | Default model | Auth and billing |
 |---|---|---|
 | `anthropic` (default) | `claude-sonnet-5-5` | API key, billed per token. Looked up in `--api-key-file`, `$ANTHROPIC_API_KEY`, `~/.anthropic/api_key`, `~/.config/anthropic/api_key`, `~/.anthropic_api_key` |
-| `claude-code` | `sonnet` | Your Claude subscription, via `claude -p`. Never uses an API key. Stops at `--quota-stop` (default 0.9 of the 5-hour or 7-day window); continue later with `--resume` |
+| `claude-code` | `sonnet` | Your Claude subscription, via `claude -p`. Never uses an API key. Stops at `--quota-stop` (default 0.9 of the 5-hour or 7-day window); run `judge` again later to continue |
 | `openai` | required (`--model`) | Any OpenAI-compatible server at `--base-url` (default `http://127.0.0.1:8000/v1`); key optional. Streams, and stops as soon as the JSON is complete |
 
 - A model missing from `cull`'s price table is refused with `--max-cost` (it would count as $0), and warned about otherwise.
-- `--resume` refuses a report written by a different backend or model. Use `-o` to
-  keep one report per backend when comparing them.
+- A continued `judge` refuses a different backend or model than the report's, naming
+  `--fresh` and `-o`. Use `-o` to keep one report per backend when comparing them.
 - `--escalate-backend` / `--escalate-model` re-assess doubtful frames on a stronger
   model; `--escalate-on` picks the outcomes that escalate. When the two models
   disagree on whether a frame failed (one says sharp, the other missed focus), it goes
@@ -531,21 +546,22 @@ else; `--no-labels` ignores it. `calibrate` reads the same log.
 
 ## Cost control
 
-- `judge --estimate` and `rank --estimate` print the cost without calling a model or
-  needing a key.
-  - `rank`'s figure is exact.
-  - `judge`'s includes an approximate ranking cost that assumes 8-frame sets. It
-    usually overestimates.
-- On a terminal, `judge` and `rank` ask before spending when the estimate is over $1.
+- `judge --estimate` prints the cost without calling a model or needing a key.
+  - After a scan (or an earlier judge) found the sets, the ranking part counts their real
+    calls: `ranking ≈ N call(s) for M set(s) already found`. It is an upper bound, because
+    frames judged cull leave their sets.
+  - Without a scan, it assumes every frame is in an 8-frame set, which usually
+    overestimates.
+- On a terminal, `judge` asks before spending when the estimate is over $1.
   `--yes` skips the question; scripts (no terminal) aren't asked.
-- `--max-cost USD` stops the run once it has spent that much. Continue with `--resume`.
-- A re-run without `--resume` refuses to replace a report that holds assessments:
-  `--fresh` (on `judge` and `scan`) starts over, and `-o` writes a separate report.
-  Even `--fresh` is refused while the report records frames moved into `culled/`.
+- `--max-cost USD` stops the run once it has spent that much. Run the same command again to continue.
+- Re-running `judge` continues the report: frames already judged cost nothing. To replace
+  a report that holds assessments, use `--fresh` (on `judge` and `scan`); `-o` writes a
+  separate report. Even `--fresh` is refused while the report records frames moved out
+  of the shoot folder by `--sort`.
 - `--batch` (anthropic) uses the Message Batches API: half price, with results within
-  minutes to hours. Ctrl-C is safe; `--resume` re-attaches to batches already paid for.
-- Costs so far are recorded in the report; `judge` and `rank` print them when they
-  finish.
+  minutes to hours. Ctrl-C is safe; run the same command again to re-attach to batches already paid for.
+- Costs so far are recorded in the report; `judge` prints them when it finishes.
 - On the API the system prompt is cached, so frames after the first read it at a
   tenth of the input price. The report's cost includes cache writes (1.25× input) and
   reads.
@@ -566,15 +582,16 @@ cull calibrate --compare base.json low.json
 
 Adopt a lever only if `--compare` shows no keep↔cull crossings, and labels agree. On
 `--backend claude-code` these runs cost quota, not money. The report records the
-effort, and `--resume` refuses a different one.
+effort, and a continued run refuses a different one.
 
-## Output: sidecars, Capture One and moving culls
+## Output: sidecars, Capture One and sorting
 
-**XMP sidecars** (`L1000123.xmp` beside `L1000123.DNG`) are written:
-- by `review`, unless `--no-xmp`;
-- by `judge` and `decide`, with `--write-xmp`.
+**XMP sidecars** (`L1000123.xmp` beside `L1000123.DNG`) are written by default:
+- by `judge` and `decide`, which keep cull's own sidecars current and create missing ones;
+- by `review`, as you label.
 
-Sidecars that `cull` didn't write are never overwritten without `--overwrite-xmp`.
+`--no-xmp` turns them off. Sidecars that `cull` didn't write are never overwritten without
+`--overwrite-xmp`.
 
 | Field | Value |
 |---|---|
@@ -582,8 +599,8 @@ Sidecars that `cull` didn't write are never overwritten without `--overwrite-xmp
 | Label | the verdict (yours if you labelled, else the model's): keep **Green**, review **Yellow**, cull **Red** |
 | Keywords | `cull:<verdict>`; `cull:labeled` when the verdict is yours; `cull:best` for a set's best frames |
 
-`--xmp-develop` also writes `crs:Exposure2012` and `crs:Crop*` for Adobe Camera Raw
-and Bridge.
+Sidecars carry no exposure or crop: Capture One 16.7.2 ignores `crs:` develop settings in
+a sidecar on import (tested). Use `apply-c1 --exposure --crop` to set them.
 
 | Target | Rating, label, keywords | Exposure, crop |
 |---|---|---|
@@ -593,36 +610,34 @@ and Bridge.
 
 **Exposure from review.** Set a frame's exposure in the review page (the slider in the
 detail view, or `,` `.` `<` `>`). The page previews it from the camera JPEG, and it's
-saved with your labels. The sidecar gets `crs:Exposure2012` for Adobe tools, but
-Capture One 16.7.2 ignores that on import (tested). `apply-c1 --exposure` sets it in
-Capture One instead. Your EV always overwrites Capture One's exposure, while the model's
-suggestion applies only where it is still 0.
+saved with your labels. `apply-c1 --exposure` sets it in Capture One. Your EV always
+overwrites Capture One's exposure, while the model's suggestion applies only where it is
+still 0.
 
 **`apply-c1`** writes an AppleScript for the open Capture One document. Run
 `--probe` first (read-only), read the dry-run output, then use `--run` to apply it.
 
-**Moving culls.** `--move-culled` (on `judge` or `decide`) moves each culled DNG and
-its sidecar into a `culled/` folder beside it.
-- **When:** do it before importing into Capture One. Moving files the catalog
-  already references makes them show as missing.
-- **Safety:** moves are same-disk renames that never overwrite, and each is recorded
-  in the report.
-- **Later runs** skip `culled/`, and `cull restore` puts everything back.
-- Look through `culled/` before deleting anything.
-
-**Sorting for import.** `--sort` (on `judge` or `decide`) moves every judged frame, and
-its sidecar, into `keep/`, `review/` or `cull/` beside it, by its verdict (your label
-first).
+**Sorting for import.** `--sort` (on `judge`, `decide` or `review`) moves every judged
+frame, and its sidecar, into `keep/`, `review/` or `cull/` beside it, by its verdict (your
+label first).
+- **Culls only:** `--sort=culls` moves just the culls, into `cull/`. Write it with the
+  `=`: `--sort culls <dir>` is an error, since `culls` would read as the folder.
 - **Then import** `keep/` and `review/` into Capture One, Lightroom or anything else. No
   sidecar support is needed for that split.
 - **Re-sorting:** run `decide --sort` again after changing labels in `review`, and frames
   move between the folders.
 - **Do it before importing:** the catalog loses track of frames moved afterwards.
-- **Safety:** frames that failed stay where they are. The same rules as `--move-culled`
-  apply (no overwrites, recorded in the report, `cull restore` undoes it). The two
-  options can't be combined.
+- **Safety:** moves are same-disk renames that never overwrite, and each is recorded in
+  the report. Frames that failed stay where they are. `cull restore` undoes it.
+- **Older shoots:** frames an earlier version put in a `culled` folder move to `cull/` on the next
+  sort, and `restore` brings back both. Later runs skip all of these folders.
+- Look through `cull/` before deleting anything.
 
 ## Flag reference
+
+`cull <command> --help` shows a command's flags in sections; `--help-all` adds the Tuning
+and Experimental ones. This reference follows the same sections. Defaults are in
+parentheses.
 
 **Global** (every command): `-o/--report` sets the report path; `-r/--recursive`
 includes subfolders.
@@ -630,55 +645,140 @@ includes subfolders.
 **Verbosity** (every command): `-q/--quiet` prints only warnings, errors and the final
 summary; the default adds progress and a line per frame; `-v/--verbose` adds per-stage
 and per-call detail; `--debug` adds backend events and raw model answers (never
-credentials). `--log-level quiet|normal|verbose|debug` is the long form.
+credentials). `--log-level quiet|normal|verbose|debug` is the long form. `--plain` turns
+off the live view.
 
-On an interactive terminal, `scan`, `judge` and `rank` show a live view: a progress bar
+On an interactive terminal, `scan` and `judge` show a live view: a progress bar
 per stage with an ETA, keep/review/cull tallies, spend and any warnings, with each
 frame's line printed above it. Piped or redirected output (and `--plain`, and `-q`) stays
 plain lines. Ctrl-C works as before: in-flight frames finish, the report is saved.
 
-**Image** (`scan`, `judge`):
-- `--max-edge` (1024) sets the size of the full frame sent to the model. It was
-  1568 before 2026-10-01: 1024 cut input tokens by 16% with verdicts unchanged.
-- `--min-preview-edge` (1500) sets the preview size below which a frame is flagged.
-- `--face-min-q` (80) is the face-detection confidence needed.
-- `--tiles` (1) sets how many "where focus landed" tiles to send. Add
-  `--landed-with-subject` to send them even when there's a subject crop.
-- `--save-inputs <dir>` writes exactly what the model sees.
+### `judge`
 
-**Grouping** (`scan`, `judge`, `rank`, `decide`, `calibrate`): `--seq-gap` (60 s) and
-`--seq-look` (0.08).
+**Flags**
+- `--backend` (`anthropic`), `-m/--model`, `-j/--concurrency` (0 = the backend's default).
+- `--estimate`: print the cost and exit.
+- `--max-cost USD` (0 = no limit): stop once this run has cost that much.
+- `--batch`: Message Batches API, half price (anthropic).
+- `--yes`: don't ask before spending.
+- `--fresh`: replace an existing report that holds assessments, judging with `--backend`
+  (or `~/.cull`'s, or the default), not the report's. The default is to continue it.
+- `--rerank`: rank every set again, even ones the model already ranked.
+- `--sort [=all|culls]`: move judged frames (with their sidecars) into `keep/` `review/`
+  `cull/`, or with `--sort=culls` only culls into `cull/`.
 
-**Policy** (`judge`, `rank`, `decide`, `calibrate`):
-- `--review-below-sharpness` (0 = off);
-- `--cull-max-sharpness` (2.9; 0 = the status alone culls);
-- `--eyes-closed`, `--raw-clipped` and `--outranked` (each `ignore`, `review` or
-  `cull`; default `review`);
-- `--junk` (`cull`, `review` or `ignore`; default `cull`): blank frames, decided without
-  a model call.
-  - **Changing it:** `decide --junk review` (or `cull`) re-decides junk frames for free,
-    and rewrites their sidecars with `--write-xmp`. `decide --junk ignore` takes back a
-    junk cull and leaves the frame unjudged; `judge --resume --junk ignore` then has the
-    model judge it.
+**Policy** (stored in the report; also on `decide` and `calibrate`; `--seq-gap` and
+`--seq-look` also on `scan`)
+- `--keep-best` (3; 0–5): per set, how many best-ranked frames keep their decision;
+  0 ranks without demoting.
+- `--outranked` (`review`): `ignore`, `review` or `cull`, for frames ranked below
+  `--keep-best`.
+- `--eyes-closed` (`review`) and `--raw-clipped` (`review`): `ignore`, `review` or `cull`.
+- `--raw-clip-threshold` (0.5): percent of raw samples at the white level that counts
+  as clipped.
+- `--junk` (`cull`): `cull`, `review` or `ignore` for blank frames, decided without a
+  model call.
+  - **Changing it:** `decide --junk review` (or `cull`) re-decides junk frames for free
+    and rewrites their sidecars. `decide --junk ignore` takes back a junk cull and leaves
+    the frame unjudged; `judge --junk ignore` then has the model judge it.
   - **The thresholds come from one photographer's outdoor work.** A night sky, a concert or
     white-seamless product frames could cross them. `calibrate` lists any junk frame you
     labelled keep: check it on a new kind of shoot.
   - **Cost estimates** count every DNG, because junk is only found while frames are read.
-    Junk frames are never charged;
-- `--raw-clip-threshold` (0.5 % of raw samples);
-- `--min-crop-area` (0.6);
-- `--keep-best` (3).
+    Junk frames are never charged.
+- `--cull-max-sharpness` (2.9; 0 = the status alone culls).
+- `--review-below-sharpness` (0 = off).
+- `--min-crop-area` (0.6).
+- `--seq-gap` (60 s; 0 = no grouping) and `--seq-look` (0.08).
 
-**`judge`:**
-- **Backend:** `--backend`, `--model`, `-j/--concurrency`, `--locate`, `--resume`,
-  `--checkpoint`.
-- **Cost:** `--estimate`, `--max-cost`, `--batch`, `--quota-stop`.
-- **Ranking:** `--no-rank`.
-- **Other assessment options:** `--escalate-*`, `--raw-clip` (on by default),
-  `--second-opinion` (ask the model again about soft-or-worse frames; when the two
-  answers disagree on whether the frame failed, it goes to review; not with `--batch`).
-- **Output:** `--write-xmp`, `--xmp-develop`, `--overwrite-xmp`, `--move-culled`,
-  `--no-labels`.
+**Backend**
+- `--effort`: `low`, `medium`, `high`, `xhigh` or `max` (the model's own); recorded in
+  the report.
+- `--quota-stop` (0.9): claude-code stops at this fraction of the 5-hour or 7-day window.
+- `--api-key-file`; `--base-url` (`http://127.0.0.1:8000/v1`) and `--openai-key-file` for
+  the openai backend.
+
+**Sidecar and folder** (also on `decide` and `review`)
+- `--no-xmp`: write no sidecars.
+- `--overwrite-xmp`: overwrite sidecars cull didn't write.
+- `--labels <path>`, `--no-labels`: where your labels log is, or ignore it.
+
+**Tuning** (`--help-all`)
+- `--checkpoint` (25): save the report every N results.
+- `--locate model|off` (`model`), `--locate-effort`.
+- `--max-edge` (1024): long edge of the full frame sent to the model. It was 1568 before
+  2026-10-01; 1024 cut input tokens by 16% with verdicts unchanged.
+- `--min-preview-edge` (1500): preview size below which a frame is flagged.
+- `--face-min-q` (80): face-detection confidence needed.
+- `--tiles` (1): "where focus landed" tiles to send.
+- `--raw-clip` (on): measure highlight clipping in the raw data.
+- `--no-rank`: skip ranking this run.
+- `--no-review-images`: don't pre-render the review sheet's images.
+- `--save-inputs <dir>`: write exactly what the model sees.
+- `--batch-poll` (30s), `--claude-bin`, `--openai-stream` (on).
+
+**Experimental** (`--help-all`; not yet measured against labels)
+- `--escalate-backend`, `--escalate-model`, `--escalate-on`: re-assess doubtful frames on
+  a stronger model.
+- `--second-opinion`: ask the model again about soft-or-worse frames; when the two answers
+  disagree on whether the frame failed, it goes to review. Not with `--batch`.
+- `--rank-twice`: rank each set of up to 8 frames again with its frames reversed.
+- `--landed-with-subject`: send "where focus landed" tiles even with a subject crop.
+
+### `scan`
+
+`--fresh`, `-j/--concurrency` (4), `--raw-clip` (off here), `--save-inputs`; Policy
+`--seq-gap` and `--seq-look`; Tuning `--face-min-q`, `--max-edge`, `--min-preview-edge`,
+`--tiles`, `--no-review-images`; Experimental `--landed-with-subject`.
+
+### `decide`
+
+`--sort [=all|culls]`; every Policy flag above; Sidecar and folder `--no-xmp`,
+`--overwrite-xmp`, `--labels`, `--no-labels`. It rewrites cull's own sidecars by default.
+
+### `review`
+
+`--sort [=all|culls]` (re-sort when the server stops), `--no-open`, `--prepare`,
+`--clear-cache`; Sidecar and folder `--no-xmp`, `--overwrite-xmp`, `--labels`; Tuning
+`-j/--concurrency` (8), `--force`, `--out`, `--port`.
+
+### `calibrate`
+
+`--compare`, `--labels`, and the Policy flags, which set the row marked `← current`.
+
+### `offload`, `tag`, `status`, `restore`, `apply-c1`
+
+- `offload`: `--name`, `--date`, `--backup`, `--rename`, `--split`, `--split-gap`,
+  `--split-at`, `--dry-run`, `--verify`, `--no-scan`, `--checksum`, and the shoot's tags
+  `--project`, `--event`, `--location`, `--keyword`.
+- `tag`: the same four tag flags, and `--clear-project`, `--clear-event`,
+  `--clear-location`, `--clear-keywords`.
+- `status`: `--labels`. `restore`: no flags.
+- `apply-c1`: `--probe`, `--run`, `--exposure`, `--crop`, `--rating`, `--label`,
+  `--keyword`, `--labels`, `--no-labels`, `--osascript`.
+
+## Changed in v0.2.0
+
+<!-- v0.2.0 renames -->
+For v0.1 users. Every old form below still works in v0.2.0, with a warning, and goes in
+the next release.
+
+| Old | New |
+|---|---|
+| `judge --resume …` | `judge …` (re-run continues) |
+| `--fresh` | still replaces the existing report; `judge` continues one by default |
+| `cull rank <dir>` | `cull judge <dir>` (ranks what needs it) |
+| `cull rank --force` | `cull judge --rerank` |
+| `cull rank --batch` | `cull judge --batch` |
+| `--move-culled`, `culled/` | `--sort=culls`, `cull/` |
+| `--write-xmp` | nothing (sidecars are the default); `--no-xmp` turns them off |
+| `decide --write-xmp --move-culled` | `decide --sort=culls` |
+| `--xmp-develop` | dropped: Capture One ignores it; use `apply-c1 --exposure --crop` |
+| tag flags on `scan` and `judge` | on `offload`, or `cull tag` |
+| `review --static` and `import-labels` | dropped: the served review only |
+| the `--review-below-sharpness` sweep in `calibrate` | the policy grid |
+| "`--help` lists every flag" | `--help` shows sections; `--help-all` shows everything |
+<!-- /v0.2.0 renames -->
 
 ## Limitations
 

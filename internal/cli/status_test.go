@@ -231,3 +231,42 @@ func TestStatusNothingMovedSuggestsSort(t *testing.T) {
 		t.Errorf("%s", out)
 	}
 }
+
+// A judged report with an unranked multi-frame set points at judge, not rank.
+func TestStatusUnrankedSetPointsAtJudge(t *testing.T) {
+	dir := statusShoot(t)
+	path := filepath.Join(dir, "cull-report.json")
+	rep, err := report.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.Sets = []report.Set{{ID: 1, Of: 2, By: "scores", Members: []string{rep.Results[0].File, rep.Results[1].File}}}
+	if err := rep.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "status", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"cull judge --estimate", "unranked set"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "cull rank") {
+		t.Errorf("mentions cull rank:\n%s", out)
+	}
+}
+
+// A recorded ranking batch is re-attached with judge --batch.
+func TestStatusRankBatchPointsAtJudge(t *testing.T) {
+	dir := statusShoot(t)
+	os.WriteFile(filepath.Join(dir, "cull-report.json.rank-batch.json"), []byte("{}"), 0o644)
+	out, err := run(t, "status", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "next: cull judge --batch") || strings.Contains(out, "cull rank") {
+		t.Fatalf("%s", out)
+	}
+}

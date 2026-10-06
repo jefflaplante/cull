@@ -45,11 +45,19 @@ func TestFlagValidation(t *testing.T) {
 		"missing dir arg":           {"judge"},
 		"not a directory":           {"scan", dir + "/nope"},
 		"fresh with resume":         {"judge", "--fresh", "--resume", dir},
+		"rerank with no-rank":       {"judge", "--rerank", "--no-rank", dir},
 	}
 	for name, args := range cases {
 		if _, err := run(t, args...); err == nil || strings.Contains(err.Error(), "unknown command") {
 			t.Errorf("%s: expected error", name)
 		}
+	}
+}
+
+func TestRerankContradictsNoRank(t *testing.T) {
+	_, err := run(t, "judge", "--rerank", "--no-rank", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "contradict") {
+		t.Fatalf("want a contradiction error, got %v", err)
 	}
 }
 

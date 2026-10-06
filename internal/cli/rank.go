@@ -36,7 +36,7 @@ func newRankCmd(so *sharedOpts) *cobra.Command {
 --seq-look) side by side with one model call per set (more for large sets, chunked
 and merged into a final call, whether sent one wave at a time or, with --batch, all
 at once). The --keep-best best of each set keep their decision; the rest get
---outranked. Run it after 'judge --no-rank'.
+--outranked. Deprecated: 'cull judge' ranks the sets that need it.
 
 rank re-applies the full policy the way 'cull decide' does, starting from the
 policy stored in the report (so tuning from an earlier decide carries over); a

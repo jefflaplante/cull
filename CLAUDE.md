@@ -463,6 +463,22 @@ balance`, but no run has tested them yet.
     uncached read 829 MB/s.
   - **So the network isn't the limit:** waiting for the share to commit synced data is.
     Durable writes top out near 160 MB/s, under the card's ~270 MB/s read.
+- **The pool and `logbias` (2026-10-06, user-supplied `zpool status` and `lsblk`):**
+  - **Pool:** one mirror of two 21.8 TB HDDs. The log device is a 240 GB SATA data-centre
+    SSD (IBM-branded Micron `MTFDDAK240MBP`, power-loss protection), and the cache is the
+    same model. `sync=standard`, `logbias=latency` (both defaults).
+  - **`logbias=throughput` was much worse:**
+
+    | Measure | `latency` | `throughput` |
+    |---|---|---|
+    | 2 GiB probe, MB/s until committed | 159–209 | 55–58 (fsync 35–37 s) |
+    | cardbench cull pipeline / serial | 107 / 92 | 74 / 70 |
+    | ditto / cp / rsync | — | 65 / 39 / 36 |
+
+    Reads were unchanged. Synced data written straight to the HDD mirror is slow; the
+    SATA log SSD is the faster path and sets the committed-write ceiling.
+  - **Keep the default (`latency`).** To go faster: an NVMe log device with power-loss
+    protection, until the mirror's ~250 MB/s becomes the limit. Never `sync=disabled`.
 - Offload benchmark, 20 real frames per tool, read from the card uncached: the `cull`
   engine runs at 216 MB/s (hash, uncached write, evict, verify from disk, F_FULLFSYNC);
   `cp` runs at 264 MB/s. The gap was the verify re-read, which wasn't overlapped with the

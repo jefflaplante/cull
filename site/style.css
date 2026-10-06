@@ -628,6 +628,7 @@ html:not(.js) .schem-rail,html:not(.js) .schem-dots{display:none}
 .spec.steps th{white-space:nowrap;padding-right:28px}
 .spec.steps td{text-align:left}
 .hero .spec.steps th,.hero .spec.steps td{padding-block:8px}
+@media (max-width:640px){.spec.steps th{white-space:normal;padding-right:16px}.spec.steps th code{overflow-wrap:anywhere}.spec.steps td{overflow-wrap:anywhere}}
 
 /* terminal replays: a recorded run, played back when the terminal comes into view */
 .replay{border-radius:8px;overflow:hidden;background:#151517;font-family:var(--mono);

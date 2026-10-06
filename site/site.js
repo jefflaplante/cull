@@ -321,7 +321,7 @@
       ['out', 'next: cull judge --estimate "' + SHOOT + '"', 'dim']
     ],
     judge: [
-      ['cmd', 'cull judge --backend claude-code --write-xmp "' + SHOOT + '"'],
+      ['cmd', 'cull judge --backend claude-code "' + SHOOT + '"'],
       ['out', 'backend: claude-code, model: sonnet, auth: Claude subscription via ~/.local/bin/claude'],
       ['out', '17 DNGs found, 0 already done, 17 to process'],
       ['frames', 'judge', JUDGED, 420, 6.3, true],

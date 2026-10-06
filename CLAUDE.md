@@ -85,7 +85,7 @@ make vet
   `writeStage` single-read tee, SHA-256 while reading, F_NOCACHE temps; `finishStage` fsync,
   evict + mincore check, uncached verify, link-based no-replace rename), run.go (pipeline: file
   N's `finishStage` overlaps N+1's card read, settled in plan order; `hooks.serial` is the old
-  one-at-a-time engine for tests and cardbench; retries, verified-only manifest
+  one-at-a-time engine for tests and cardbench; retries, each after evicting the card file; verified-only manifest
   `cull-offload.jsonl`, F_FULLFSYNC per destination, `Safe`, `Verify`), sys_darwin.go
   (fcntl/msync/mincore; no-ops elsewhere). `go test -tags cardbench` benchmarks against
   `cp` on the LEICA M card.
@@ -504,6 +504,29 @@ balance`, but no run has tested them yet.
     --no-scan` with the card's pages evicted first: 10 of 10, 0.6 GB in 6.2 s (102 MB/s), "safe to
     format", peak memory 50 MB; `--verify` 10/10; every copy byte-identical to the card, manifest
     in card order. A run straight after other reads of the card said 138 MB/s: warm card pages.
+- **Card read with read-ahead (2026-10-06): `openSource` no longer sets F_NOCACHE, and a retry
+  evicts the card file first.** The stage-A profile (`profile_card_test.go`) found F_NOCACHE turns
+  off the card's read-ahead on exFAT (262 MB/s plain vs ~210, 177–254) and still leaves 98% of its
+  pages cached. Temps and the verify read keep F_NOCACHE. cardbench, main vs the change back to back,
+  3 rounds × the 10 frames per arm, durable MB/s pipelined (serial in brackets):
+  - Mac SSD: two sessions 209, 209 → 230, 239 (199, 207 → 210, 230). Runs that started with no
+    frame cached: 208–216 → 220–252.
+  - Grey (USB SSD): 147, 157 → 164, 168 (148, 152 → 168, 166). Clean runs: 144–151 → 155–171. Grey
+    stays bound by its own mixed write + verify read.
+  - NAS over 10 GbE (`/Volumes/photos-1`), one session: 101 → 134 (89 → 101).
+  - On both sides some runs started with one frame (3664 of 36780 pages) back in the cache after
+    eviction; the ranges above leave those out.
+  - mincore can't show whether the card was opened F_NOCACHE: on APFS an F_NOCACHE read left
+    2048/2048 pages cached, as a plain read did. Writes do show it (F_NOCACHE 0/2048, normal
+    2048/2048), which `TestTempCopiesStayUncached` guards for the temps.
+  - **Retries:** before each retry (never try 0), `evictPasses` evicts the card file through a
+    read-only mapping (msync MS_INVALIDATE, mincore, up to 5 passes), so the retry reads the card,
+    not RAM. Best effort: a failure or pages left only add a verbose note. Retries run with nothing
+    else in flight, so this never evicts while the card streams (which cost 262 → 189 in the
+    profile). Not yet exercised live: no file has failed on the real card.
+  - **Live:** `cull offload "/Volumes/LEICA M" /Volumes/Grey/cull-ra-tmp --name ratest --no-scan`:
+    10 of 10, "safe to format", `--verify` 10/10; the card's listing and SHA-256s unchanged. Its
+    300 MB/s means nothing: the card's pages were warm from the benches.
 - Page cache (internal SSD, `mincore`):
   - a normal write leaves every page cached, so a re-read verifies RAM;
   - with `F_NOCACHE` on the write handle, 0 of 4097 pages stayed cached in a quiet probe;

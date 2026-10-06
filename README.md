@@ -197,7 +197,7 @@ Every step, with its full output and screenshots of the live progress view, is i
   numbered in camera file order, not by capture time.
 - **Speed (measured on an M11-P card over USB):** the card reads at about 280 MB/s. A
   992-frame, 67.7 GB card went to a USB SSD in 8 minutes, every file verified; to the
-  Mac's SSD, the measured 194 MB/s below would take about 6 minutes.
+  Mac's SSD, the measured 235 MB/s below would take about 5 minutes.
 
   `go test -tags cardbench -run CardBench ./internal/offload` compares the copy engine with
   the usual tools on the mounted card. Every read must come from the card, not RAM: each
@@ -207,8 +207,10 @@ Every step, with its full output and screenshots of the live progress view, is i
   per run and rounds (every second round runs the tools in reverse order).
 
   Results for 10 M11-P frames (602 MB), from one session on 2026-10-06: 3 rounds (1.8 GB per
-  tool) to each destination. The card held only 10 frames, so every run copied the same ones,
-  evicted first (a few runs still started with one frame cached). Each tool is timed until
+  tool) to each destination. cull's two rows are from a later build the same day, which reads
+  the card with the kernel's read-ahead: the mean of two sessions (the NAS: one session). The
+  card held only 10 frames, so every run copied the same ones, evicted first (a few runs still
+  started with one frame cached). Each tool is timed until
   its data is durable: cull fsyncs every file and ends with F_FULLFSYNC (fsync on a network
   share), and the others end with `sync` plus an F_FULLFSYNC on the folder. The figure in
   brackets is the speed before that, which is when the tool returns. Finder itself wasn't
@@ -216,8 +218,8 @@ Every step, with its full output and screenshots of the live progress view, is i
 
   | MB/s | Mac SSD | USB SSD (exFAT) | NAS, SMB over 10 GbE |
   |---|---|---|---|
-  | cull, every byte re-read and compared | 194 | 153 | 107 |
-  | cull's older one-file-at-a-time engine, same check | 190 | 142 | 92 |
+  | cull, every byte re-read and compared | 235 | 166 | 134 |
+  | cull's older one-file-at-a-time engine, same check | 220 | 167 | 101 |
   | `ditto` (macOS's built-in copy command), no check | 104 (241) | 70 (213) | 59 (199) |
   | `cp`, no check | 76 (224) | 78 (215) | 54 (98) |
   | `rsync -a` (openrsync), no check | 80 (168) | 69 (129) | 47 (76) |

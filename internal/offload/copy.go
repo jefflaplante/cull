@@ -120,7 +120,7 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 		}
 	}()
 	for _, f := range w.temps {
-		if err := plainSync(f); err != nil {
+		if err := syncTemp(f); err != nil {
 			return fmt.Errorf("sync %s: %w", f.Name(), err)
 		}
 		if err := f.Close(); err != nil {
@@ -161,6 +161,10 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 	}
 	return nil
 }
+
+// syncTemp is stage B's fsync of each temp copy; tests swap it to inject the errors a
+// network share reports there (a full share, an I/O error).
+var syncTemp = plainSync
 
 func openSource(src string, h hooks) (io.ReadCloser, error) {
 	if h.open != nil {

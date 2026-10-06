@@ -155,7 +155,16 @@ func (r *runner) pipeline() {
 		if b == nil {
 			return true
 		}
-		<-b.done
+		select {
+		case <-b.done:
+		case <-r.ctx.Done():
+			select {
+			case <-b.done:
+			default: // Ctrl-C: say why the run doesn't stop at once
+				r.emit(ui.Event{Note: &ui.Note{Level: ui.Normal, Text: fmt.Sprintf("finishing %s (already read from the card)…", b.f.Name)}})
+				<-b.done
+			}
+		}
 		ok := r.settleStageB(b)
 		b = nil
 		return ok
@@ -185,6 +194,10 @@ func (r *runner) pipeline() {
 				return
 			}
 			continue
+		}
+		if r.ctx.Err() != nil {
+			w.discard() // read, but Ctrl-C came before its stage B began: no new work starts
+			return
 		}
 		b = &inB{i: i, f: f, w: w, done: make(chan struct{})}
 		go func(b *inB) {

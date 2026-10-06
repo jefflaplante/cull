@@ -37,87 +37,47 @@ type Result struct {
 }
 
 // Run carries out p. Files that fail after retries are listed and the run goes on; a
-// cancelled ctx stops after the file in flight (its temp files removed) and returns
-// what was done with ctx.Err().
+// cancelled ctx starts no new card read, abandons the file being read (its temp files
+// removed), lets the file already in stage B finish (verified in full, or removed),
+// and returns what was done with ctx.Err().
+//
+// Each file goes through two stages (copy.go): A reads the card into temp copies, B
+// fsyncs, verifies and names them. While file N is in stage B, file N+1 is in stage A,
+// so the card keeps streaming while a destination commits and re-reads: on a NAS the
+// fsync alone is a large share of each file's time. Each stage holds one file, so at
+// most two are in flight, and stage B taking one file at a time, in plan order, keeps
+// the manifest in card order. A file is recorded only once its own stage B passed.
 func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 	start := time.Now()
-	res := &Result{Plan: p}
-	emit := func(e ui.Event) {
-		if sink != nil {
-			sink.Emit(e)
-		}
-	}
-	warn := func(format string, args ...any) {
-		emit(ui.Event{Note: &ui.Note{Sev: ui.Warn, Text: fmt.Sprintf(format, args...)}})
-	}
+	r := &runner{ctx: ctx, p: p, res: &Result{Plan: p}, sink: sink}
 	for _, d := range p.Dests {
 		if err := os.MkdirAll(d, 0o755); err != nil {
-			return res, err
+			return r.res, err
 		}
 		stale, _ := filepath.Glob(filepath.Join(d, ".*.cull-*.tmp"))
 		for _, s := range stale {
 			os.Remove(s)
 		}
 	}
-	emit(ui.Event{Stage: &ui.Stage{Name: "offload", Unit: "bytes", Total: p.Bytes}})
-	defer emit(ui.Event{Stage: &ui.Stage{Name: "offload", Done: true}})
+	r.emit(ui.Event{Stage: &ui.Stage{Name: "offload", Unit: "bytes", Total: p.Bytes}})
+	defer r.emit(ui.Event{Stage: &ui.Stage{Name: "offload", Done: true}})
 
-	for i, f := range p.Files {
-		if f.Skip != "" {
-			res.Skipped++
-			if f.Unverified {
-				res.Unverified++
-			}
-			continue
-		}
-		if ctx.Err() != nil {
-			break
-		}
-		sum, err := copyWithRetries(ctx, f, p.h, warn)
-		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-			break
-		}
-		if destinationFull(err) {
-			res.Failed = append(res.Failed, f.Name+": destination full: "+err.Error())
-			warn("%s not copied, the destination is full: %v", f.Name, err)
-			for _, rest := range p.Files[i+1:] {
-				if rest.Skip == "" {
-					res.Failed = append(res.Failed, rest.Name+": not attempted: destination full")
-				}
-			}
-			break
-		}
-		if err != nil {
-			res.Failed = append(res.Failed, f.Name+": "+err.Error())
-			warn("%s not copied: %v", f.Name, err)
-			continue
-		}
-		e := Entry{Src: f.Src, Orig: filepath.Base(f.Src), Name: f.Name, Size: f.Size, ModTime: f.ModTime,
-			SHA256: hexOf(sum[:]), At: time.Now().UTC()}
-		for _, d := range f.To {
-			if err := appendManifest(d, e); err != nil {
-				res.Failed = append(res.Failed, f.Name+": manifest: "+err.Error())
-				warn("%s copied but not recorded in %s: %v", f.Name, d, err)
-			}
-		}
-		if f.Unverified {
-			res.Unverified++
-		}
-		res.Copied++
-		res.Bytes += f.Size
-		emit(ui.Event{Stage: &ui.Stage{Name: "offload", Add: f.Size}})
-		emit(ui.Event{Note: &ui.Note{Level: ui.Verbose, Text: fmt.Sprintf("%s → %s (sha256 %s…)", filepath.Base(f.Src), f.Name, hexOf(sum[:4]))}})
+	if p.h.serial {
+		r.serial()
+	} else {
+		r.pipeline()
 	}
-	// The drive's own cache, flushed once per destination: fsync stops at the drive.
-	// That can take a few seconds after a big copy, so it shows as a stage. A network
-	// share gets fsync instead (flushDrive).
+	res := r.res
+	// Only now, with no file in either stage, is each destination's drive cache flushed,
+	// once: fsync stops at the drive. That can take a few seconds after a big copy, so
+	// it shows as a stage. A network share gets fsync instead (flushDrive).
 	ft := ui.Track(sink, "flush", "flushing the drive's write cache", "drives", len(p.Dests))
 	for _, d := range p.Dests {
 		fsyncOnly, err := flushDrive(d)
 		switch {
 		case err != nil:
 			res.SyncErrs = append(res.SyncErrs, d+": "+err.Error())
-			warn("couldn't flush %s's drive cache: %v", d, err)
+			r.warn("couldn't flush %s's drive cache: %v", d, err)
 		case fsyncOnly:
 			res.FsyncOnly = append(res.FsyncOnly, d)
 		}
@@ -130,9 +90,184 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 	return res, ctx.Err()
 }
 
+// runner is one Run's state. Only Run's goroutine touches it (stage B's goroutine only
+// runs finishStage), so the result, the manifests and the sink need no locks.
+type runner struct {
+	ctx  context.Context
+	p    *Plan
+	res  *Result
+	sink ui.Sink
+}
+
+func (r *runner) emit(e ui.Event) {
+	if r.sink != nil {
+		r.sink.Emit(e)
+	}
+}
+
+func (r *runner) warn(format string, args ...any) {
+	r.emit(ui.Event{Note: &ui.Note{Sev: ui.Warn, Text: fmt.Sprintf(format, args...)}})
+}
+
+// skip counts a file the plan skips.
+func (r *runner) skip(f File) {
+	r.res.Skipped++
+	if f.Unverified {
+		r.res.Unverified++
+	}
+}
+
+// serial is the engine before the pipeline: each file read, verified and named before
+// the next is opened. A test seam (hooks.serial), to compare with the pipeline.
+func (r *runner) serial() {
+	for i, f := range r.p.Files {
+		if f.Skip != "" {
+			r.skip(f)
+			continue
+		}
+		if r.ctx.Err() != nil {
+			return
+		}
+		sum, err := copyWithRetries(r.ctx, f, r.p.h, r.warn)
+		if !r.settle(i, f, sum, err) {
+			return
+		}
+	}
+}
+
+// inB is the file in stage B: finishStage runs on its own goroutine and closes done.
+type inB struct {
+	i    int
+	f    File
+	w    *written
+	err  error
+	done chan struct{}
+}
+
+// pipeline runs stage A of each file on this goroutine while the previous file's
+// stage B runs on another. Before acting on file N+1's stage A it waits for file N's
+// stage B and settles N (retrying it, recording it, or stopping), so everything is
+// settled in plan order and never more than two files are in flight.
+func (r *runner) pipeline() {
+	var b *inB
+	// wait settles the file in stage B, if any; false means stop the run.
+	wait := func() bool {
+		if b == nil {
+			return true
+		}
+		<-b.done
+		ok := r.settleStageB(b)
+		b = nil
+		return ok
+	}
+	defer wait() // a break with a file still in stage B: wait for it, record it if it passed
+
+	for i, f := range r.p.Files {
+		if f.Skip != "" {
+			r.skip(f)
+			continue
+		}
+		if r.ctx.Err() != nil {
+			return
+		}
+		w, err := writeStage(r.ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, r.p.h)
+		if !wait() {
+			if w != nil {
+				w.discard() // read and written, but the run stops: never named
+			}
+			return
+		}
+		if err != nil {
+			// The pipelined read was try 0; the retries are serial, re-reading the card,
+			// as copyWithRetries does. Nothing else is in flight meanwhile.
+			sum, err := retryFailed(r.ctx, f, r.p.h, r.warn, err)
+			if !r.settle(i, f, sum, err) {
+				return
+			}
+			continue
+		}
+		b = &inB{i: i, f: f, w: w, done: make(chan struct{})}
+		go func(b *inB) {
+			defer close(b.done)
+			// Not cancelled with ctx: this file's card read is complete, so on Ctrl-C it
+			// finishes, as it would have before the next card read in a serial run. It
+			// still either verifies in full and is named, or is removed.
+			b.err = finishStage(context.WithoutCancel(r.ctx), b.w, r.p.h)
+		}(b)
+	}
+}
+
+// settleStageB settles a file whose stage B ended: a failure that a retry might fix is
+// retried serially from the card (the pipelined attempt was try 0), while the next
+// file, if already read, waits with its temps unsynced and unnamed.
+func (r *runner) settleStageB(b *inB) bool {
+	sum, err := b.w.sum, b.err
+	if err != nil {
+		sum, err = retryFailed(r.ctx, b.f, r.p.h, r.warn, err)
+	}
+	return r.settle(b.i, b.f, sum, err)
+}
+
+// settle records file i's outcome; false means stop the run (cancelled, or the
+// destination is full). A file that copied and verified is recorded even if ctx was
+// cancelled meanwhile: it has its final name, so the manifest must say it verified.
+func (r *runner) settle(i int, f File, sum [32]byte, err error) bool {
+	res := r.res
+	if err == nil {
+		r.record(f, sum)
+		return r.ctx.Err() == nil
+	}
+	if errors.Is(err, context.Canceled) || r.ctx.Err() != nil {
+		return false
+	}
+	if destinationFull(err) {
+		res.Failed = append(res.Failed, f.Name+": destination full: "+err.Error())
+		r.warn("%s not copied, the destination is full: %v", f.Name, err)
+		for _, rest := range r.p.Files[i+1:] {
+			if rest.Skip == "" {
+				res.Failed = append(res.Failed, rest.Name+": not attempted: destination full")
+			}
+		}
+		return false
+	}
+	res.Failed = append(res.Failed, f.Name+": "+err.Error())
+	r.warn("%s not copied: %v", f.Name, err)
+	return true
+}
+
+// record writes f's manifest line in each destination and counts it.
+func (r *runner) record(f File, sum [32]byte) {
+	res := r.res
+	e := Entry{Src: f.Src, Orig: filepath.Base(f.Src), Name: f.Name, Size: f.Size, ModTime: f.ModTime,
+		SHA256: hexOf(sum[:]), At: time.Now().UTC()}
+	for _, d := range f.To {
+		if err := appendManifest(d, e); err != nil {
+			res.Failed = append(res.Failed, f.Name+": manifest: "+err.Error())
+			r.warn("%s copied but not recorded in %s: %v", f.Name, d, err)
+		}
+	}
+	if f.Unverified {
+		res.Unverified++
+	}
+	res.Copied++
+	res.Bytes += f.Size
+	r.emit(ui.Event{Stage: &ui.Stage{Name: "offload", Add: f.Size}})
+	r.emit(ui.Event{Note: &ui.Note{Level: ui.Verbose, Text: fmt.Sprintf("%s → %s (sha256 %s…)", filepath.Base(f.Src), f.Name, hexOf(sum[:4]))}})
+}
+
 func copyWithRetries(ctx context.Context, f File, h hooks, warn func(string, ...any)) ([32]byte, error) {
+	sum, err := copyFile(ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, h)
+	if err == nil {
+		return sum, nil
+	}
+	return retryFailed(ctx, f, h, warn, err)
+}
+
+// retryFailed carries on after try 0 of f failed with err: it copies f again with
+// copyFile, from the card, up to len(retryDelays) more times.
+func retryFailed(ctx context.Context, f File, h hooks, warn func(string, ...any), err error) ([32]byte, error) {
+	var sum [32]byte
 	for try := 0; ; try++ {
-		sum, err := copyFile(ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, h)
 		// Retried: card reads and verify mismatches (a flaky reader, a reseated card).
 		// Not retried: a full disk or a name taken since planning won't change, and
 		// each retry would read the whole file off the card again.
@@ -145,6 +280,7 @@ func copyWithRetries(ctx context.Context, f File, h hooks, warn func(string, ...
 		case <-ctx.Done():
 			return sum, ctx.Err()
 		}
+		sum, err = copyFile(ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, h)
 	}
 }
 
@@ -159,7 +295,7 @@ func FsyncOnlyNote(dest string) string {
 // flushDrive empties dir's drive cache with F_FULLFSYNC. A network share (smbfs on
 // macOS returns ENOTSUP, measured 2026-10-06) has no drive here to flush: it falls
 // back to fsync on the folder, and fsyncOnly says so. That counts as flushed even if
-// the share refuses fsync on a folder too, because copyFile fsyncs every file before
+// the share refuses fsync on a folder too, because finishStage fsyncs every file before
 // its verify read and fails the file if that fsync fails: the server has acknowledged
 // every file's data, the most a share can promise. Any other error is a failure.
 func flushDrive(dir string) (fsyncOnly bool, err error) {

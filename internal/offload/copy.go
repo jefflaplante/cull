@@ -26,6 +26,9 @@ type hooks struct {
 	afterWrite   func(tmp string)
 	beforeVerify func(tmp string)
 	write        func(f *os.File, p []byte) (int, error)
+	// serial makes Run copy one file at a time, each finished before the next card
+	// read starts: the engine before the pipeline, for tests and the bench to compare.
+	serial bool
 }
 
 type chunk struct {
@@ -38,81 +41,125 @@ type chunk struct {
 // src's SHA-256 (computed during that one read). A copy appears under name only after
 // its temp file is fsynced, re-read without the page cache and matched against the
 // hash; nothing existing is ever replaced. On any failure every temp file is removed.
+// It is the two stages Run overlaps, one after the other: retries use it.
 func copyFile(ctx context.Context, src, name string, dirs []string, size int64, mtime time.Time, h hooks) (sum [32]byte, err error) {
-	in, err := openSource(src, h)
+	w, err := writeStage(ctx, src, name, dirs, size, mtime, h)
 	if err != nil {
 		return sum, err
 	}
+	return w.sum, finishStage(ctx, w, h)
+}
+
+// written is a file after stage A: its card read is done and hashed, and its bytes sit
+// in hidden temp files, still open, not yet fsynced or verified. Only finishStage or
+// discard may follow.
+type written struct {
+	name  string
+	dirs  []string
+	temps []*os.File // one per dir, same order
+	size  int64
+	mtime time.Time
+	sum   [32]byte // the card's bytes, hashed during the one read; never recomputed from a copy
+}
+
+// discard closes and removes w's temp files: what every failure or abandonment of a
+// file ends with. Closing an already closed file only returns an error.
+func (w *written) discard() {
+	for _, f := range w.temps {
+		f.Close()
+		os.Remove(f.Name())
+	}
+}
+
+// writeStage is stage A: it reads src once, hashing it while writing a hidden temp copy
+// into every folder in dirs, and checks the size. Everything here talks to the card;
+// nothing is synced. On failure its temps are already removed.
+func writeStage(ctx context.Context, src, name string, dirs []string, size int64, mtime time.Time, h hooks) (w *written, err error) {
+	in, err := openSource(src, h)
+	if err != nil {
+		return nil, err
+	}
 	defer in.Close()
 
-	temps := make([]*os.File, 0, len(dirs))
+	w = &written{name: name, dirs: dirs, size: size, mtime: mtime, temps: make([]*os.File, 0, len(dirs))}
 	defer func() {
 		if err != nil {
-			for _, f := range temps {
-				f.Close()
-				os.Remove(f.Name())
-			}
+			w.discard()
+			w = nil
 		}
 	}()
 	for _, d := range dirs {
 		f, err := createTemp(d, name)
 		if err != nil {
-			return sum, err
+			return w, err
 		}
-		temps = append(temps, f)
+		w.temps = append(w.temps, f)
 	}
 
 	hs := sha256.New()
-	n, err := stream(ctx, in, hs, temps, h)
+	n, err := stream(ctx, in, hs, w.temps, h)
 	if err != nil {
-		return sum, err
+		return w, err
 	}
 	if n != size { // a reader that ends early without an error is still a failed read
-		return sum, fmt.Errorf("short read of %s: %d of %d bytes", name, n, size)
+		return w, fmt.Errorf("short read of %s: %d of %d bytes", name, n, size)
 	}
-	copy(sum[:], hs.Sum(nil))
+	copy(w.sum[:], hs.Sum(nil))
+	return w, nil
+}
 
-	for _, f := range temps {
+// finishStage is stage B: for each copy, in this order, fsync, evict from the page
+// cache and check nothing stayed, re-read from the device and compare with the hash
+// stage A took from the card, and only then link it to its final name (never replacing
+// anything). It doesn't touch the card, so Run overlaps it with the next file's stage
+// A. On failure every temp is removed.
+func finishStage(ctx context.Context, w *written, h hooks) (err error) {
+	defer func() {
+		if err != nil {
+			w.discard()
+		}
+	}()
+	for _, f := range w.temps {
 		if err := plainSync(f); err != nil {
-			return sum, fmt.Errorf("sync %s: %w", f.Name(), err)
+			return fmt.Errorf("sync %s: %w", f.Name(), err)
 		}
 		if err := f.Close(); err != nil {
-			return sum, fmt.Errorf("close %s: %w", f.Name(), err)
+			return fmt.Errorf("close %s: %w", f.Name(), err)
 		}
-		if err := os.Chtimes(f.Name(), mtime, mtime); err != nil {
-			return sum, err
+		if err := os.Chtimes(f.Name(), w.mtime, w.mtime); err != nil {
+			return err
 		}
 		if err := os.Chmod(f.Name(), 0o644); err != nil {
-			return sum, err
+			return err
 		}
 		if h.afterWrite != nil {
 			h.afterWrite(f.Name())
 		}
 	}
-	for _, f := range temps {
+	for _, f := range w.temps {
 		if err := dropCache(f.Name()); err != nil {
-			return sum, err
+			return err
 		}
 		if h.beforeVerify != nil {
 			h.beforeVerify(f.Name())
 		}
 		got, err := hashUncached(ctx, f.Name())
 		if err != nil {
-			return sum, fmt.Errorf("verify %s: %w", filepath.Dir(f.Name()), err)
+			return fmt.Errorf("verify %s: %w", filepath.Dir(f.Name()), err)
 		}
-		if got != sum {
-			return sum, fmt.Errorf("verify %s: the copy in %s differs from the card", name, filepath.Dir(f.Name()))
+		if got != w.sum {
+			return fmt.Errorf("verify %s: the copy in %s differs from the card", w.name, filepath.Dir(f.Name()))
 		}
 	}
-	for i, f := range temps {
-		final := filepath.Join(dirs[i], name)
+	for i, f := range w.temps {
+		final := filepath.Join(w.dirs[i], w.name)
 		if err := linkNoReplace(f.Name(), final); err != nil {
-			return sum, err
+			return err
 		}
 		os.Remove(f.Name())
-		syncDir(dirs[i])
+		syncDir(w.dirs[i])
 	}
-	return sum, nil
+	return nil
 }
 
 func openSource(src string, h hooks) (io.ReadCloser, error) {

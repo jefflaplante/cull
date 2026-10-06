@@ -472,8 +472,11 @@ balance`, but no run has tested them yet.
   card's 10 frames (1.8 GB per arm), the card's pages evicted before every run (one frame
   sometimes stays cached; the bench logs it). Durable MB/s, serial → pipelined:
   - Mac SSD 190 → 194 (within round-to-round noise, 177–224; 1 of 3 pipelined runs started with
-    a frame cached). The card read is ~88% of the serial engine's time there, so there's little
-    to overlap.
+    a frame cached). **Not explained yet.** The serial split there was card read + hash + write +
+    fsync 8.31 s and verify + link + manifest 1.16 s of 9.5 s. The fsync and verify are stage B and
+    overlap, and the card-bound ceiling that session was about 240 MB/s (`ditto` before sync, 241).
+    So some gain was expected. Candidates, unmeasured: stage B's fsync and verify read contending
+    with stage A's uncached writes on the same SSD, or fsync being a small share there.
   - Grey (USB SSD, exFAT) 142 → 153 (+8%). All 3 pipelined runs started with one of the 10
     frames still cached on the card side (1 of 3 serial runs did), so part of the gain is that.
   - NAS over 10 GbE (`/Volumes/photos-1`) 92 → 107 (+16%); no cache bias against serial.

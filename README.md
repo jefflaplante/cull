@@ -206,30 +206,33 @@ Every step, with its full output and screenshots of the live progress view, is i
   `CULL_BENCH_DST` for the destination; `CULL_BENCH_N` and `CULL_BENCH_ROUNDS` set frames
   per run and rounds (every second round runs the tools in reverse order).
 
-  Results for 10 M11-P frames (602 MB), 2026-10-06. The card held only 10 frames, so every
-  run copied the same ones, evicted first (a few runs still started with one frame cached).
-  Each tool is timed until its data is durable: the engine ends with F_FULLFSYNC, and the
-  others with `sync` plus an F_FULLFSYNC on the folder. The figure in brackets is the speed
-  before that, which is when the tool returns. Finder itself wasn't timed.
+  Results for 10 M11-P frames (602 MB), from one session on 2026-10-06: 3 rounds (1.8 GB per
+  tool) to each destination. The card held only 10 frames, so every run copied the same ones,
+  evicted first (a few runs still started with one frame cached). Each tool is timed until
+  its data is durable: cull fsyncs every file and ends with F_FULLFSYNC (fsync on a network
+  share), and the others end with `sync` plus an F_FULLFSYNC on the folder. The figure in
+  brackets is the speed before that, which is when the tool returns. Finder itself wasn't
+  timed.
 
-  | MB/s | Mac SSD | USB SSD (exFAT) | NAS, SMB over Wi-Fi | NAS, SMB over 10 GbE |
-  |---|---|---|---|---|
-  | cull (pipelined), every byte re-read and compared | 194 | 153 | 17 | 107 |
-  | `ditto` (macOS's built-in copy command), no check | 147 (249) | 143 (200) | 40 | 75 (206) |
-  | `cp`, no check | 138 (226) | 145 (194) | 32 | 52 (98) |
-  | `rsync -a` (openrsync), no check | 123 (157) | 100 (118) | 21 | 41 (66) |
+  | MB/s | Mac SSD | USB SSD (exFAT) | NAS, SMB over 10 GbE |
+  |---|---|---|---|
+  | cull, every byte re-read and compared | 194 | 153 | 107 |
+  | cull's older one-file-at-a-time engine, same check | 190 | 142 | 92 |
+  | `ditto` (macOS's built-in copy command), no check | 104 (241) | 70 (213) | 59 (199) |
+  | `cp`, no check | 76 (224) | 78 (215) | 54 (98) |
+  | `rsync -a` (openrsync), no check | 80 (168) | 69 (129) | 47 (76) |
 
-  The cull row is `offload.Run` as shipped since 2026-10-06, which reads the next file off the
-  card while the last one is synced and verified. In the same runs the one-file-at-a-time
-  engine measured 190, 142 and 92 MB/s on the Mac SSD, USB SSD and 10 GbE share; the Wi-Fi
-  figure is that older engine's.
+  cull reads the next file off the card while the last one is synced and verified; the older
+  engine finished each file before reading the next. The 10 GbE column is a TrueNAS SMB
+  share over a 10GBASE-T link with 0.4 ms round trips. On local disks and on the 10 GbE
+  share, the verified copy is as fast as or faster than an unverified one once both are
+  durable. The other tools' durable figures swing between sessions with how long `sync`
+  takes: an earlier session the same day measured `ditto` at 147 MB/s to the Mac SSD.
 
-  The 10 GbE column is 3 rounds (1.8 GB per tool) to a TrueNAS SMB share over a 10GBASE-T
-  link with 0.4 ms round trips. On local disks and on the 10 GbE share, the verified copy
-  is as fast as or faster than an unverified one once both are durable.
-
-  On a NAS, the verify re-read crosses the network. Over Wi-Fi it took 46% of the engine's
-  time; there, copy to the Mac first. Over 10 GbE it took 21%.
+  On a NAS, the verify re-read crosses the network. Over Wi-Fi (an earlier session, older
+  engine only) cull managed 17 MB/s against `ditto`'s 40, `cp`'s 32 and `rsync`'s 21, and the
+  re-read took 46% of its time; there, copy to the Mac first. Over 10 GbE the re-read took
+  21% of the older engine's time.
 
   The 10 GbE share's limit is durable writes, not the network. A 2 GiB probe file over
   SMB measured:

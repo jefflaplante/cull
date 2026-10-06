@@ -185,7 +185,7 @@
         <span class="node" aria-hidden="true"></span>
         <code class="cmd">cull decide</code>
         <h3>Sort</h3>
-        <p>Writes XMP sidecars and moves the frames into <code>keep/</code>, <code>review/</code> and <code>cull/</code>.</p>
+        <p>Keeps the sidecars current and moves the frames into <code>keep/</code>, <code>review/</code> and <code>cull/</code>.</p>
         <span class="phase eng">Your call</span>
       </li>
       <li class="station" style="--i:5">
@@ -410,7 +410,7 @@
       <span class="eng">Calibrate</span>
       <div>
         <h3>Calibrate before you trust it.</h3>
-        <p>Label a sample of frames. <code style="font-size:.9em">cull calibrate</code> then reports how often cull culled a frame you&rsquo;d keep, and what each threshold would change.</p>
+        <p>Label a sample of frames. <code style="font-size:.9em">cull calibrate</code> then reports how often cull culled a frame you&rsquo;d keep, and what each combination of policy settings would change.</p>
       </div>
       <p>Nothing should auto-apply until it&rsquo;s calibrated. The rules are code, so tuning them means moving a threshold, not rewording a prompt.</p>
     </div>
@@ -432,7 +432,7 @@
       <div class="reveal">
         <div class="sub">
           <h3>XMP sidecars</h3>
-          <p>Stars, colour labels and keywords, written beside each DNG for your editor to read on import.</p>
+          <p>Stars, colour labels and keywords, written beside each DNG by default as judging runs, for your editor to read on import.</p>
           <table class="labels-tbl">
             <caption class="sr-only">Colour labels by verdict</caption>
             <thead><tr><th scope="col" class="eng">Colour label</th><th scope="col" class="eng" style="text-align:right">Verdict</th></tr></thead>
@@ -629,8 +629,8 @@
 <span class="c"># label, star and compare in the browser</span>
 <span class="p">$ </span><span class="k">cull review</span> <span class="a">"$SHOOT"</span>
 
-<span class="c"># sidecars, then keep/ review/ cull/</span>
-<span class="p">$ </span><span class="k">cull decide</span> <span class="a">--write-xmp --sort "$SHOOT"</span></code></pre>
+<span class="c"># sidecars are already written; sort into keep/ review/ cull/</span>
+<span class="p">$ </span><span class="k">cull decide</span> <span class="a">--sort "$SHOOT"</span></code></pre>
       </div>
     </div>
   </div>

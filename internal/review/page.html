@@ -570,7 +570,7 @@ function fmtEV(ev) { return !ev ? "0" : (ev > 0 ? "+" : "") + (Math.round(ev * 1
   function openLoupe() {
     const c = currentCard();
     if (!c || !c.native) return;
-    if (!serve) { note = "the 100% view needs the review server (it isn't available with --static)"; render(); return; }
+    if (!serve) { note = "the 100% view needs the review server; this offline page goes in the next release"; render(); return; }
     loupeOpen = true;
     loupeIdx = cards.indexOf(c); // label keys act on this frame, whatever moves underneath
     loupeName = c.file;

@@ -450,6 +450,7 @@ balance`, but no run has tested them yet.
   - **`--verify` matched all 992 from disk.**
   - **The rate (140 MB/s) is below the 216 MB/s measured to the internal SSD.** Two likely
     causes: the verify re-read also goes over USB to Grey, and Grey's write speed.
+- **SMB share (2026-10-06, the user's NAS at `/Volumes/photos`, smbfs):** F_FULLFSYNC fails with ENOTSUP (45) on files and folders; plain fsync on both succeeds. `flushDrive` falls back to fsync there (every file was already fsync'd before its verify read) and prints a one-line note; 10 card frames (0.6 GB) offloaded at 15 MB/s, "safe to format", `--verify` 10/10.
 - Offload benchmark, 20 real frames per tool, read from the card uncached: the `cull`
   engine runs at 216 MB/s (hash, uncached write, evict, verify from disk, F_FULLFSYNC);
   `cp` runs at 264 MB/s. The gap is the verify re-read, which isn't overlapped with the

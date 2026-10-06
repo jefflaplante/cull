@@ -28,9 +28,11 @@ type Result struct {
 	Bytes      int64
 	Elapsed    time.Duration
 	SyncErrs   []string // destinations whose final F_FULLFSYNC failed
+	FsyncOnly  []string // destinations flushed with fsync: F_FULLFSYNC isn't supported there (FsyncOnlyNote)
 	// Safe: every planned file is on every destination and was verified against the
 	// card (now, or by an earlier run's manifest, or by --checksum), and each
-	// destination's drive cache was flushed. Only then may the card be formatted.
+	// destination's drive cache was flushed (on a network share: fsync, see
+	// flushDrive). Only then may the card be formatted.
 	Safe bool
 }
 
@@ -107,12 +109,17 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 		emit(ui.Event{Note: &ui.Note{Level: ui.Verbose, Text: fmt.Sprintf("%s → %s (sha256 %s…)", filepath.Base(f.Src), f.Name, hexOf(sum[:4]))}})
 	}
 	// The drive's own cache, flushed once per destination: fsync stops at the drive.
-	// That can take a few seconds after a big copy, so it shows as a stage.
+	// That can take a few seconds after a big copy, so it shows as a stage. A network
+	// share gets fsync instead (flushDrive).
 	ft := ui.Track(sink, "flush", "flushing the drive's write cache", "drives", len(p.Dests))
 	for _, d := range p.Dests {
-		if err := flushDrive(d); err != nil {
+		fsyncOnly, err := flushDrive(d)
+		switch {
+		case err != nil:
 			res.SyncErrs = append(res.SyncErrs, d+": "+err.Error())
 			warn("couldn't flush %s's drive cache: %v", d, err)
+		case fsyncOnly:
+			res.FsyncOnly = append(res.FsyncOnly, d)
 		}
 		ft.Add(1)
 	}
@@ -141,13 +148,39 @@ func copyWithRetries(ctx context.Context, f File, h hooks, warn func(string, ...
 	}
 }
 
-func flushDrive(dir string) error {
+// fullSyncFn and plainSyncFn are the destination flush's syscalls; tests swap them.
+var fullSyncFn, plainSyncFn = fullSync, plainSync
+
+// FsyncOnlyNote is the one line a run prints for a destination in Result.FsyncOnly.
+func FsyncOnlyNote(dest string) string {
+	return dest + ": network share — flushed with fsync (F_FULLFSYNC isn't supported there); the NAS is responsible for its own disk cache"
+}
+
+// flushDrive empties dir's drive cache with F_FULLFSYNC. A network share (smbfs on
+// macOS returns ENOTSUP, measured 2026-10-06) has no drive here to flush: it falls
+// back to fsync on the folder, and fsyncOnly says so. That counts as flushed even if
+// the share refuses fsync on a folder too, because copyFile fsyncs every file before
+// its verify read and fails the file if that fsync fails: the server has acknowledged
+// every file's data, the most a share can promise. Any other error is a failure.
+func flushDrive(dir string) (fsyncOnly bool, err error) {
 	d, err := os.Open(dir)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer d.Close()
-	return fullSync(d)
+	if err := fullSyncFn(d); !unsupported(err) {
+		return false, err
+	}
+	if err := plainSyncFn(d); err != nil && !unsupported(err) {
+		return false, err
+	}
+	return true, nil
+}
+
+// unsupported reports a sync the filesystem doesn't implement (ENOTSUP and
+// EOPNOTSUPP differ on darwin).
+func unsupported(err error) bool {
+	return errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP)
 }
 
 // Verify re-hashes every file folder's manifest records, from the disk, and reports

@@ -134,7 +134,7 @@ func TestCardBench(t *testing.T) {
 				command("sync")
 			}
 			s1 := time.Now()
-			flushErr := flushDrive(dir) // F_FULLFSYNC, as offload does once per destination
+			_, flushErr := flushDrive(dir) // F_FULLFSYNC, as offload does once per destination
 			if tool.name == "cull engine" {
 				split.flush += time.Since(s1)
 			}

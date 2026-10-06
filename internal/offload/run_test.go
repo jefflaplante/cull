@@ -197,3 +197,88 @@ func TestVerifyFindsLaterCorruption(t *testing.T) {
 		t.Fatalf("backup: %+v", v)
 	}
 }
+
+// stubFlush swaps the destination flush's F_FULLFSYNC and fsync for the test, counting
+// fsync calls.
+func stubFlush(t *testing.T, full, plain error) *int {
+	t.Helper()
+	oldFull, oldPlain := fullSyncFn, plainSyncFn
+	t.Cleanup(func() { fullSyncFn, plainSyncFn = oldFull, oldPlain })
+	plains := 0
+	fullSyncFn = func(*os.File) error { return full }
+	plainSyncFn = func(*os.File) error { plains++; return plain }
+	return &plains
+}
+
+// An SMB share (smbfs, measured 2026-10-06 against the user's NAS) refuses
+// F_FULLFSYNC with ENOTSUP. Every file was fsync'd before its verify read, so the
+// server has acknowledged every file's data: the destination is flushed with fsync,
+// counts as flushed, and the run says so once per destination.
+func TestFlushFallsBackToFsyncWhereFullSyncIsUnsupported(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		full, plain error
+	}{
+		{"ENOTSUP", syscall.ENOTSUP, nil},
+		{"EOPNOTSUPP", syscall.EOPNOTSUPP, nil},
+		{"fsync on the folder unsupported too", syscall.ENOTSUP, syscall.ENOTSUP},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, o := threeFiles(t)
+			p, _ := MakePlan(o)
+			plains := stubFlush(t, tc.full, tc.plain)
+			res, err := Run(context.Background(), p, nil)
+			if err != nil || !res.Safe || len(res.SyncErrs) != 0 {
+				t.Fatalf("err %v result %+v", err, res)
+			}
+			if *plains != len(p.Dests) {
+				t.Fatalf("fsync on %d destinations, want %d", *plains, len(p.Dests))
+			}
+			if len(res.FsyncOnly) != len(p.Dests) || res.FsyncOnly[0] != p.Dests[0] || res.FsyncOnly[1] != p.Dests[1] {
+				t.Fatalf("FsyncOnly %v, want %v", res.FsyncOnly, p.Dests)
+			}
+			if n := FsyncOnlyNote(p.Dests[0]); !strings.HasPrefix(n, p.Dests[0]+": network share") || !strings.Contains(n, "F_FULLFSYNC isn't supported") || strings.Contains(n, "\n") {
+				t.Fatalf("note %q", n)
+			}
+		})
+	}
+}
+
+// Any other flush failure is still a failure: not flushed, not safe, no fallback.
+func TestFlushErrorIsNotSafe(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		full, plain error
+		plains      int
+	}{
+		{"F_FULLFSYNC EIO", syscall.EIO, nil, 0},
+		{"unsupported, then fsync EIO", syscall.ENOTSUP, syscall.EIO, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, o := threeFiles(t)
+			p, _ := MakePlan(o)
+			plains := stubFlush(t, tc.full, tc.plain)
+			res, err := Run(context.Background(), p, nil)
+			if err != nil || res.Safe || len(res.SyncErrs) != len(p.Dests) || len(res.FsyncOnly) != 0 {
+				t.Fatalf("err %v result %+v", err, res)
+			}
+			if !strings.Contains(res.SyncErrs[0], "input/output error") {
+				t.Fatalf("SyncErrs %v", res.SyncErrs)
+			}
+			if *plains != tc.plains {
+				t.Fatalf("fsync called %d times, want %d", *plains, tc.plains)
+			}
+		})
+	}
+}
+
+// A local disk keeps F_FULLFSYNC: no fsync fallback, no note.
+func TestFlushUsesFullSyncWhereSupported(t *testing.T) {
+	_, o := threeFiles(t)
+	p, _ := MakePlan(o)
+	plains := stubFlush(t, nil, nil)
+	res, err := Run(context.Background(), p, nil)
+	if err != nil || !res.Safe || len(res.FsyncOnly) != 0 || *plains != 0 {
+		t.Fatalf("err %v result %+v fsyncs %d", err, res, *plains)
+	}
+}

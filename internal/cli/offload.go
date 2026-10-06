@@ -110,6 +110,9 @@ judge it next.`,
 				}
 				fmt.Fprintf(w, "\n%scopied %d, skipped %d (already there), failed %d: %.1f GB in %s (%.0f MB/s, verified)\n",
 					label, res.Copied, res.Skipped, len(res.Failed), float64(res.Bytes)/1e9, res.Elapsed.Round(1e9), mbps)
+				for _, d := range res.FsyncOnly {
+					fmt.Fprintln(w, offload.FsyncOnlyNote(d))
+				}
 				safe = safe && res.Safe
 				files += len(res.Plan.Files)
 			}

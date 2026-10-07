@@ -261,6 +261,26 @@ Every step, with its full output and screenshots of the live progress view, is i
   | write until fsync returned | 159 |
   | read back uncached | 829 |
 
+  **NFS versus SMB to the same share** (2026-10-07, same NAS, link and card; NFSv3 with
+  the share's Mapall user set to the dataset's owner; 3 rounds × 10 frames per tool, run
+  back to back). NFS commits writes faster but reads back slower, and cull's offload does
+  both, so it gains nothing:
+
+  | MB/s | SMB | NFSv3, 64 KB blocks |
+  |---|---|---|
+  | cull, every byte re-read and compared | 124 | 111 |
+  | cull, serial mode | 96 | 89 |
+  | 2 GiB probe: write until stored | 181–191 | 227–229 |
+  | 2 GiB probe: read back uncached | 745–793 | 417–529 |
+
+  The other tools' durable rates swung widely within each run (`ditto` 19–127 MB/s over SMB,
+  59–86 over NFS) with how long `sync` took, so no protocol ranking follows from them.
+
+  **Stay on SMB.** If you try NFS from a Mac anyway, mount it `soft,intr` and keep the block
+  size at or below 64 KB (`rsize=65536,wsize=65536`). macOS mounts NFS `hard` by default, so a
+  stalled server freezes every program that touches the share. On this NAS, 128 KB blocks
+  stalled the client mid-write every time, and a 1 MB attempt froze the Mac until a restart.
+
 ## Fixing capture dates
 
 A camera whose clock has stopped stamps every frame with the same date and time, so

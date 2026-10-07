@@ -585,6 +585,30 @@ balance`, but no run has tested them yet.
     SATA log SSD is the faster path and sets the committed-write ceiling.
   - **Keep the default (`latency`).** To go faster: an NVMe log device with power-loss
     protection, until the mirror's ~250 MB/s becomes the limit. Never `sync=disabled`.
+- **NFS vs SMB to the same share (2026-10-07, user-approved; NFSv3 export
+  `10.1.68.9:/mnt/tank/photos`, back to back with SMB at `/Volumes/photos`):**
+  - **Access:** the dataset is owned by uid/gid 1000, mode 770. The Mac's NFSv3 identity is
+    502/20, so it was refused until the user set the NFS share's Mapall user and group to
+    `jeff`. After that, files written over NFS are owned by 1000, matching SMB. Only v3 is
+    registered with rpcbind. A non-root `mount_nfs` works without `resvport`.
+  - **2 GiB probe** (write until fsync returns / uncached read, MB/s):
+    - SMB: 181–191 / 745–793.
+    - NFS, 32 KB blocks (the macOS default): 217–233 / 282–390.
+    - NFS, 64 KB: 227–229 / 417–529.
+    - NFS commits about 20% faster and reads about half as fast.
+  - **Blocks over 64 KB break the client.** At 128 KB, a `soft` mount failed the write with
+    ENXIO ("Device not configured") and dropped the mount. A 1 MB attempt on the default
+    `hard,nointr` mount froze the Mac until a restart. The cause is unknown (macOS client,
+    TrueNAS, or a NIC offload); 64 KB works, so a jumbo-frame mismatch is unlikely.
+  - **cardbench, 3 rounds × the card's 10 frames, durable MB/s, SMB → NFS at 64 KB:**
+    - cull pipeline 124 → 111 (NFS rounds 99, 119, 120; one SMB round started with a
+      frame cached);
+    - cull serial 96 → 89.
+    - The other tools' totals swung with `sync` time (SMB `ditto` rounds 109, 127, 19), so
+      they rank nothing.
+    - The faster commit is cancelled by the slower verify re-read.
+  - **Verdict: stay on SMB.** Any NFS mount from a Mac in this project's tests must be
+    `soft,intr,locallocks,rsize=65536,wsize=65536`, with every command time-limited.
 - Offload benchmark, 20 real frames per tool, read from the card uncached: the `cull`
   engine runs at 216 MB/s (hash, uncached write, evict, verify from disk, F_FULLFSYNC);
   `cp` runs at 264 MB/s. The gap was the verify re-read, which wasn't overlapped with the

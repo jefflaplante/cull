@@ -7,11 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/jefflaplante/cull/internal/journal"
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/llm"
 	"github.com/jefflaplante/cull/internal/pipeline"
@@ -65,8 +64,17 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	if cfg.ReportPath != filepath.Join(cfg.Dir, "cull-report.json") {
 		dir = "-o " + shellQuote(cfg.ReportPath) + " " + dir // suggested commands keep the same report
 	}
+	which, finish, unfinished := journal.Incomplete(cfg.Dir)
+	pending := func() {
+		fmt.Fprintf(w, "  unfinished: a %s (cull-%s.json); judge, decide and review refuse until it's finished\n", which, which)
+	}
 	if rep == nil {
 		fmt.Fprintf(w, "%s: %d DNGs; no report at %s\n", cfg.Dir, len(files), cfg.ReportPath)
+		if unfinished {
+			pending()
+			fmt.Fprintf(w, "next: %s\n", finish)
+			return
+		}
 		fmt.Fprintf(w, "next: cull scan %s   (free), or cull judge --estimate %s\n", dir, dir)
 		return
 	}
@@ -169,8 +177,14 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 		fmt.Fprintf(w, "  pending: a ranking batch (%s.rank-batch.json)\n", filepath.Base(cfg.ReportPath))
 	}
 
+	if unfinished {
+		pending()
+	}
+
 	var next string
 	switch {
+	case unfinished:
+		next = finish
 	case judgeBatch:
 		next = "cull judge --batch " + dir + "   (re-attaches; already paid for)"
 	case rankBatch:
@@ -195,16 +209,8 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	fmt.Fprintf(w, "next: %s\n", next)
 }
 
-// safeShell are the characters a shell argument can hold unquoted.
-var safeShell = regexp.MustCompile(`^[A-Za-z0-9_./:@%+=,-]+$`)
-
 // shellQuote makes a path safe to paste into a POSIX shell: single quotes unless it
 // needs none.
-func shellQuote(s string) string {
-	if safeShell.MatchString(s) {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
+func shellQuote(s string) string { return journal.ShellQuote(s) }
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }

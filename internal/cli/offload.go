@@ -205,17 +205,26 @@ func parseSetDate(o *offload.Options, day, clock string, timeTyped bool) error {
 		}
 		return nil
 	}
+	t, err := parseLocalTime("--set-date", day, clock)
+	if err != nil {
+		return err
+	}
+	o.SetDate, o.SetDateSet = t, true
+	return nil
+}
+
+// parseLocalTime is a date (YYYY-MM-DD, given as dateFlag) at a time of day
+// (HH:MM:SS, --time), in local time: offload's --set-date and redate's --date.
+func parseLocalTime(dateFlag, day, clock string) (time.Time, error) {
 	d, err := time.ParseInLocation(time.DateOnly, day, time.Local)
 	if err != nil || d.Format(time.DateOnly) != day {
-		return fmt.Errorf("--set-date %q: want YYYY-MM-DD", day)
+		return time.Time{}, fmt.Errorf("%s %q: want YYYY-MM-DD", dateFlag, day)
 	}
 	c, err := time.ParseInLocation(time.TimeOnly, clock, time.Local)
 	if err != nil || c.Format(time.TimeOnly) != clock {
-		return fmt.Errorf("--time %q: want HH:MM:SS", clock)
+		return time.Time{}, fmt.Errorf("--time %q: want HH:MM:SS", clock)
 	}
-	o.SetDate = time.Date(d.Year(), d.Month(), d.Day(), c.Hour(), c.Minute(), c.Second(), 0, time.Local)
-	o.SetDateSet = true
-	return nil
+	return time.Date(d.Year(), d.Month(), d.Day(), c.Hour(), c.Minute(), c.Second(), 0, time.Local), nil
 }
 
 func runVerify(cmd *cobra.Command, so *sharedOpts, folder string) error {

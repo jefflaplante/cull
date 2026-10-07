@@ -101,7 +101,7 @@ naming one is skipped with a warning.`,
 	for _, c := range []*cobra.Command{scan, judge, rank, decide} {
 		so.registerSeq(c.Flags())
 	}
-	root.AddCommand(newOffloadCmd(&so), newTagCmd(&so), scan, judge, rank, decide, newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newStatusCmd(&so), newImportLabelsCmd(&so), newVersionCmd())
+	root.AddCommand(newOffloadCmd(&so), newTagCmd(&so), scan, judge, rank, decide, newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newRedateCmd(&so), newStatusCmd(&so), newImportLabelsCmd(&so), newVersionCmd())
 	return root
 }
 

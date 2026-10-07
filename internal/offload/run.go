@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jefflaplante/cull/internal/dng"
 	"github.com/jefflaplante/cull/internal/ui"
 )
 
@@ -55,10 +56,7 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return r.res, err
 		}
-		stale, _ := filepath.Glob(filepath.Join(d, ".*.cull-*.tmp"))
-		for _, s := range stale {
-			os.Remove(s)
-		}
+		RemoveStaleTemps(d)
 	}
 	r.emit(ui.Event{Stage: &ui.Stage{Name: "offload", Unit: "bytes", Total: p.Bytes}})
 	defer r.emit(ui.Event{Stage: &ui.Stage{Name: "offload", Done: true}})
@@ -329,15 +327,19 @@ func (r *runner) noteDates(f File, w *written) {
 }
 
 // noteUndated says, once per run, how many copies --set-date skipped as already
-// there were made without it, and how to fix their dates.
+// there were made without it, and how to fix their dates. A copy whose dates can't be
+// read at all (not a TIFF) isn't counted: redate can't fix it either.
 func (r *runner) noteUndated() {
+	if r.p.setDate == nil {
+		return
+	}
 	n := 0
 	for _, f := range r.p.Files {
-		if f.Skip != "" && f.Undated {
+		if f.Skip != "" && f.Undated && !unreadableDates(locate(r.p.Dests[0], f.Name)) {
 			n++
 		}
 	}
-	if n == 0 || r.p.setDate == nil {
+	if n == 0 {
 		return
 	}
 	at := ""
@@ -347,6 +349,24 @@ func (r *runner) noteUndated() {
 	r.emit(ui.Event{Note: &ui.Note{Level: ui.Normal, Text: fmt.Sprintf(
 		"%d copies already there were made without --set-date; fix their dates with `cull redate %q --date %s%s`",
 		n, r.p.Dests[0], r.p.setDate.Format(time.DateOnly), at)}})
+}
+
+// unreadableDates reports a file whose capture dates can't be read because of its
+// format (dng.PatchDates fails without an I/O error). It reads only the metadata. A
+// file that can't be opened or read counts as readable: it may still need fixing.
+func unreadableDates(p string) bool {
+	f, err := os.Open(p)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	ra := &ioErrAt{r: f}
+	_, _, err = dng.PatchDates(ra, st.Size(), time.Date(2000, 1, 1, 0, 0, 0, 0, time.Local))
+	return err != nil && ra.err == nil
 }
 
 // noteSigned names, in one note per run, the Content Credentials frames --set-date
@@ -427,11 +447,17 @@ func flushDrive(dir string) (fsyncOnly bool, err error) {
 		return false, err
 	}
 	defer d.Close()
-	if err := fullSyncFn(d); !unsupported(err) {
+	return durable(d)
+}
+
+// durable flushes f to the media with F_FULLFSYNC, or with fsync where the filesystem
+// doesn't support it (a network share: fsyncOnly), as flushDrive does for a folder.
+func durable(f *os.File) (fsyncOnly bool, err error) {
+	if err := fullSyncFn(f); !unsupported(err) {
 		return false, err
 	}
-	if err := plainSyncFn(d); err != nil && !unsupported(err) {
-		return false, err
+	if err := plainSyncFn(f); err != nil && !unsupported(err) {
+		return true, err
 	}
 	return true, nil
 }
@@ -481,7 +507,7 @@ func Verify(ctx context.Context, folder string, sink ui.Sink) (v Verified, err e
 			problem = fmt.Sprintf("size %d, the card's was %d", st.Size(), e.Size)
 		} else if sum, err := hashFromDisk(ctx, p); err != nil {
 			problem = err.Error()
-		} else if hexOf(sum[:]) != e.fileSHA() {
+		} else if hexOf(sum[:]) != e.CurrentSHA256() {
 			problem = "differs from the card (checksum mismatch)"
 			if e.FileSHA256 != "" {
 				problem = "differs from the recorded checksum (its dates were patched)"

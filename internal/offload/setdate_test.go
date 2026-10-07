@@ -662,6 +662,13 @@ func TestSetDateNotesCopiesMadeWithout(t *testing.T) {
 	for _, rename := range []string{"", "{n:4}"} {
 		t.Run("rename="+rename, func(t *testing.T) {
 			src, _ := threeDNGs(t)
+			// A file whose dates can't be read at all: redate can't fix it either, so
+			// the note doesn't count it.
+			junk := filepath.Join(src, "DCIM", "100LEICA", "X4.DNG")
+			if err := os.WriteFile(junk, []byte("not a tiff"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			os.Chtimes(junk, t0, t0)
 			o := setDateOpts(t, src)
 			o.Rename, o.SetDateSet, o.Date = rename, false, "2026-10-04"
 			runPlan(t, o, nil)

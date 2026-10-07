@@ -282,6 +282,26 @@ func (r *Report) Save(path string) error {
 	return os.Rename(tmp, path)
 }
 
+// ResultFor is the result describing the frame at path: the one moved there
+// (MovedTo), else the one whose home it is, unless that one is recorded as moved to a
+// file that still exists. nil when the report has none.
+func (r *Report) ResultFor(path string) *Result {
+	for i := range r.Results {
+		if r.Results[i].MovedTo == path {
+			return &r.Results[i]
+		}
+	}
+	for i := range r.Results {
+		x := &r.Results[i]
+		if x.File == path {
+			if _, err := os.Lstat(x.MovedTo); x.MovedTo == "" || err != nil {
+				return x
+			}
+		}
+	}
+	return nil
+}
+
 // Facts are the measurements the policy combines with a frame's assessment.
 func (r Result) Facts() eval.Facts {
 	var f eval.Facts

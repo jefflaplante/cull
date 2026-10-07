@@ -471,7 +471,7 @@ func matchesEntry(f File, e Entry, path string) (bool, error) {
 		return false, nil
 	}
 	b, err := hashFromDisk(context.Background(), path)
-	return err == nil && hexOf(b[:]) == e.fileSHA(), err
+	return err == nil && hexOf(b[:]) == e.CurrentSHA256(), err
 }
 
 // sameDated is same for a copy --set-date made that no manifest records: a crash

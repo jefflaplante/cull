@@ -155,6 +155,9 @@ model and effort default to the report's. --fresh replaces it.`,
 			if err != nil {
 				return err
 			}
+			if err := refuseUnfinished(cfg.Dir); err != nil {
+				return err
+			}
 			fl := cmd.Flags()
 			// The report this run continues (nil: none, or --fresh). A scan report
 			// holds nothing judged, so it fixes no backend and no policy.

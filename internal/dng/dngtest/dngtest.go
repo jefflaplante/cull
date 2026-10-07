@@ -7,13 +7,16 @@
 //
 //	header (8 bytes)
 //	filler (16)
-//	IFD0: NewSubfileType 0, [DateTime], [XMLPacket], [ExifIFD pointer], [C2PA 0xCD41]
+//	IFD0: NewSubfileType 0 (1 with a Preview), [Compression, StripOffsets,
+//	  StripByteCounts: the Preview], [DateTime], [XMLPacket], [ExifIFD pointer],
+//	  [C2PA 0xCD41]
 //	filler (16)
 //	[Exif IFD: DateTimeOriginal, DateTimeDigitized, OffsetTime, SubSecTime, SubSecTimeOriginal,
 //	  SubSecTimeDigitized]
 //	filler (16)
 //	out-of-line values, in entry order, each followed by filler (8, plus 1 to keep
 //	  the next value on an even offset when needed)
+//	[Preview, then filler (16)]
 //	Payload, then filler (16)
 //
 // Filler is a fixed non-ASCII pattern (0xA5 0x5A 0xC3 0x3C, repeating), so a test
@@ -54,10 +57,17 @@ type Fixture struct {
 	// Payload stands in for raw image data: it is written after the values, so two
 	// fixtures with the same dates can still differ in content (and hash).
 	Payload []byte
+	// Preview, when non-nil, is a baseline JPEG stored as IFD0's strip, with IFD0
+	// marked reduced-resolution (NewSubfileType 1) and JPEG-compressed: what
+	// dng.Extract finds as the embedded preview, so the pipeline can judge the file.
+	Preview []byte
 }
 
 const (
 	tagNewSubfileType = 0x00FE
+	tagCompression    = 0x0103
+	tagStripOffsets   = 0x0111
+	tagStripByteCount = 0x0117
 	tagDateTime       = 0x0132
 	tagXMLPacket      = 0x02BC
 	tagExifIFD        = 0x8769
@@ -71,6 +81,7 @@ const (
 
 	typeByte  = 1
 	typeASCII = 2
+	typeShort = 3
 	typeLong  = 4
 	typeUndef = 7
 )
@@ -130,6 +141,18 @@ func Build(tb testing.TB, f Fixture) []byte {
 	}
 
 	ifd0 := []entry{{tag: tagNewSubfileType, typ: typeLong, count: 1, raw: make([]byte, 4)}}
+	stripAt := -1
+	if f.Preview != nil {
+		bo.PutUint32(ifd0[0].raw, 1) // reduced resolution: a preview
+		comp := make([]byte, 4)
+		bo.PutUint16(comp, 7) // JPEG
+		ifd0 = append(ifd0, entry{tag: tagCompression, typ: typeShort, count: 1, raw: comp})
+		stripAt = len(ifd0)
+		ifd0 = append(ifd0, entry{tag: tagStripOffsets, typ: typeLong, count: 1, raw: make([]byte, 4)})
+		n := make([]byte, 4)
+		bo.PutUint32(n, uint32(len(f.Preview)))
+		ifd0 = append(ifd0, entry{tag: tagStripByteCount, typ: typeLong, count: 1, raw: n})
+	}
 	if f.DateTime != "" {
 		ifd0 = append(ifd0, ascii(tagDateTime, f.DateTime))
 	}
@@ -175,6 +198,11 @@ func Build(tb testing.TB, f Fixture) []byte {
 	}
 	place(ifd0)
 	place(exif)
+	if stripAt >= 0 {
+		bo.PutUint32(ifd0[stripAt].raw, dataOff+uint32(len(data)))
+		data = append(data, f.Preview...)
+		data = append(data, filler(gap)...)
+	}
 
 	writeIFD := func(out []byte, es []entry) []byte {
 		out = bo.AppendUint16(out, uint16(len(es)))

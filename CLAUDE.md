@@ -789,8 +789,8 @@ same timestamp. The facts below were measured while building `--set-date`, `reda
     the camera's 2026-10-05 19:23, with a cull sidecar giving 2026-10-03 12:00, Green,
     4 stars). On import it showed 2026-10-03, the green label and 4 stars. So the
     sidecar's `exif:DateTimeOriginal` / `xmp:CreateDate` / `photoshop:DateCreated` win
-    over the file's EXIF there. The `--set-date` and redated copies (A, B) weren't
-    reported; their EXIF holds the target date anyway.
+    over the file's EXIF there. The `--set-date` copy (A, 2026-10-04) and the redated
+    copy (B, 2026-10-03), both without sidecars, showed their patched EXIF dates.
 
 ## Unverified assumptions — check before building on them
 

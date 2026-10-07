@@ -609,6 +609,22 @@ balance`, but no run has tested them yet.
     - The faster commit is cancelled by the slower verify re-read.
   - **Verdict: stay on SMB.** Any NFS mount from a Mac in this project's tests must be
     `soft,intr,locallocks,rsize=65536,wsize=65536`, with every command time-limited.
+  - **Tuning follow-up (same day): NFS isn't reliable here at any block size.**
+    - Mount: `soft,intr,timeo=50,retrans=3,deadtimeout=60`.
+    - Read blocks of 256 KB with writes at 64 KB raised plain reads from 370–420 to
+      618–637 MB/s. Uncached reads (cull's verify path) stayed at 533–583, the same as
+      at 64 KB.
+    - But 6 of about 32 fresh mounts stalled. The server answered nothing for 60 s,
+      a few to 16 MB into a write, and the client dropped the mount (ENXIO). That
+      happened at 64, 128 and 256 KB read blocks, with fresh mount folders and 5 s
+      pauses.
+    - Stall times (Mac local, 2026-10-07): 14:19, 14:43, about 14:46 (twice), 14:48 and
+      14:50. A `hard` mount, macOS's default, waits forever instead: that was the earlier
+      freeze.
+    - Read-ahead and `nfsiod_thread_max` weren't tried; there was no point while the
+      mounts stall. Cause unknown. TrueNAS's `journalctl -u nfs-server` and `dmesg` at
+      those times would be the next place to look.
+    - SMB, on the same link and pool, never stalled in any session.
 - Offload benchmark, 20 real frames per tool, read from the card uncached: the `cull`
   engine runs at 216 MB/s (hash, uncached write, evict, verify from disk, F_FULLFSYNC);
   `cp` runs at 264 MB/s. The gap was the verify re-read, which wasn't overlapped with the

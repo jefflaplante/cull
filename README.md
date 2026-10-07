@@ -280,6 +280,10 @@ Every step, with its full output and screenshots of the live progress view, is i
   size at or below 64 KB (`rsize=65536,wsize=65536`). macOS mounts NFS `hard` by default, so a
   stalled server freezes every program that touches the share. On this NAS, 128 KB blocks
   stalled the client mid-write every time, and a 1 MB attempt froze the Mac until a restart.
+  A follow-up found the stalls aren't about block size. About 1 in 5 fresh NFS mounts stopped
+  answering for a full minute early in a write, at every block size tried, while SMB never
+  stalled. Larger read blocks (256 KB) sped up ordinary reads but not the uncached re-read
+  cull's verify does.
 
 ## Fixing capture dates
 

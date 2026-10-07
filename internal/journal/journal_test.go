@@ -90,8 +90,18 @@ func TestRenameJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := LoadRename(dir)
-	if err != nil || got == nil || len(got.Moves) != 1 || got.Moves[0] != j.Moves[0] || got.Phase != 1 {
+	if err != nil || got == nil || len(got.Moves) != 1 || got.Phase != 1 {
 		t.Fatalf("load %+v %v", got, err)
+	}
+	// Times compare with Equal: JSON brings a time back in UTC or Local depending on
+	// the machine's zone, so == on the struct fails under TZ=UTC (the release runner).
+	gm, wm := got.Moves[0], j.Moves[0]
+	if !gm.ModTime.Equal(wm.ModTime) {
+		t.Fatalf("mod time %v, want %v", gm.ModTime, wm.ModTime)
+	}
+	gm.ModTime, wm.ModTime = time.Time{}, time.Time{}
+	if gm != wm {
+		t.Fatalf("load %+v, want %+v", gm, wm)
 	}
 	which, finish, ok := Incomplete(dir)
 	want := "cull rename '" + dir + "' '{date}_{n:4}' (or cull rename --undo '" + dir + "')"

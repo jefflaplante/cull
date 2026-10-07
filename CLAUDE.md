@@ -784,15 +784,16 @@ same timestamp. The facts below were measured while building `--set-date`, `reda
     format"; `--undo` then `--verify` 10/10.
   - **After the DCF fix,** a rename dry run numbered the `M…` frames 0001–0005 and the
     `L…` frames 0006–0010 (camera order).
-  - **Pending: Capture One's displayed date for redated, `--set-date` and Content
-    Credentials frames: pending the user's import test.**
+  - **Capture One takes a Content Credentials frame's date from cull's sidecar**
+    (user-tested 2026-10-07; `DATETEST_C`, a byte-identical `L…` copy whose EXIF keeps
+    the camera's 2026-10-05 19:23, with a cull sidecar giving 2026-10-03 12:00, Green,
+    4 stars). On import it showed 2026-10-03, the green label and 4 stars. So the
+    sidecar's `exif:DateTimeOriginal` / `xmp:CreateDate` / `photoshop:DateCreated` win
+    over the file's EXIF there. The `--set-date` and redated copies (A, B) weren't
+    reported; their EXIF holds the target date anyway.
 
 ## Unverified assumptions — check before building on them
 
-- Whether Capture One 16.7 shows the capture date from the DNG's EXIF or from cull's
-  sidecar. This matters for Content Credentials frames: their EXIF keeps the camera's
-  date, and only the sidecar carries the corrected one. The plan's live check imports a
-  redated frame and a `--set-date` frame to find out.
 - What makes the M11-P write Content Credentials on some frames (`L…`) and not others
   (`M…`). It was seen on one card only.
 - The cost of `--set-date`'s proof: one extra full re-read of every patched copy, and one
@@ -864,7 +865,8 @@ same timestamp. The facts below were measured while building `--set-date`, `reda
    `--duplicates`. Ranking quality/stability still unverified (see above).
 7. ~~Date fixing and bulk renaming~~ built 2026-10-06/07 (`offload --set-date`, `redate`,
    `rename`; spec and plan in `docs/superpowers/`) for a camera whose clock stopped. Checked
-   live on the card 2026-10-07; the Capture One date check is still to do.
+   live on the card 2026-10-07; Capture One shows a Content Credentials frame's corrected
+   date from the sidecar.
 
 ## Working style
 

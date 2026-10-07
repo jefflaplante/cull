@@ -134,6 +134,7 @@ fields:
 | `file_sha256` | the patched file's hash |
 | `dates_set` | the corrected value |
 | `patched_at` | when the patch was applied |
+| `camera_time` | the card's DateTimeOriginal (+SubSec) before the first patch; never replaced (amendment, below) |
 
 - `--verify` checks `file_sha256` when present, `sha256` otherwise.
 - The skip logic for a re-run of offload must treat a patched entry as already copied when
@@ -163,9 +164,10 @@ fields:
 
 Then the bookkeeping, per file, in this order:
 
-- the manifest entry gets `file_sha256`, `dates_set` and `patched_at`;
-- the report's `Result.ModTime` and `Exif.DateTimeOriginal` are updated, and the report is
-  saved;
+- the manifest entry gets `file_sha256`, `dates_set` and `patched_at`, and `camera_time`
+  the first time the frame is patched;
+- the report's `Result.ModTime`, `DatesSet` and (when empty) `CameraTime` are updated, and
+  the report is saved. `Result.Exif` is left as judged (amendment, below);
 - the sidecar is rewritten (if cull's).
 
 **The report must be updated.** Its key is path + size + modification time, and
@@ -196,7 +198,7 @@ for imported frames; `apply-c1` doesn't set dates, which is out of scope.
    - an offload or redate journal is incomplete.
 
    `--dry-run` prints the plan: `old → new`, with folders.
-2. **Journal** (`cull-rename.jsonl` in the shoot folder): written and fsynced before any
+2. **Journal** (`cull-rename.json` in the shoot folder): written and fsynced before any
    move, with every `old → temp → new` triple for the DNG and its sidecar.
 3. **Phase 1:** rename each DNG and sidecar to a unique hidden temp name in the same
    folder, link-no-replace style.
@@ -292,3 +294,32 @@ after the proof step. Everything else is unchanged.
   plus reference entries for `redate` and `rename`) and `CLAUDE.md` (Layout, Invariants,
   Verified facts after the live checks).
 - The help texts and `status` hints.
+
+## Amendments during implementation
+
+Changed while building (2026-10-06/07); the sections above are updated to match.
+
+- **Content Credentials frames are never byte-patched** (C2PA, IFD0 tag 0xCD41): the
+  signature covers the date fields. Only their file times change; `Result.DatesSet` carries
+  the corrected date to cull's sidecar.
+- **redate leaves `Result.Exif` as judged.** Sequence grouping reads capture times, so
+  rewriting `Exif.DateTimeOriginal` would regroup the shoot's sets and re-rank them. The
+  corrected date lives in `Result.DatesSet` (§3's bookkeeping).
+- **Grouping reads the camera's own time (`camera_time`).** After `offload --set-date`, or
+  a redate before the first judge, a fresh scan read patched frames at the target date
+  while Content Credentials frames kept the camera's, splitting or merging sets where they
+  met. The manifest entry now records `camera_time` (the card's DateTimeOriginal and
+  SubSecTimeOriginal before the first patch, never replaced; superseding lines carry it),
+  the pipeline copies it into `Result.CameraTime` (the manifest wins), and `GroupFrame`
+  uses it over Exif's. redate records it in the report too, and its journal carries it
+  across an interrupted swap. Limit: a folder with no manifest, redated before its first
+  scan, has nowhere to keep it and is grouped by the new date; its Content Credentials
+  frames have nowhere to keep the corrected date either, and redate warns (scan first).
+- **The rename journal is `cull-rename.json`** (one JSON document, kept for `--undo`), not
+  `cull-rename.jsonl`.
+- **Camera order is DCF order** (`internal/dcf`): the M11-P numbers `M…` and `L…` frames
+  from one counter, so name order put every `L…` first. rename's `{n}`, offload's
+  `--rename` numbering and grouping's tie-break use it.
+- **A folder lock** (`.cull.lock` gate plus per-reader holder files, exclusive flocks only)
+  keeps readers and redate/rename apart; not in the original design.
+

@@ -431,7 +431,12 @@ cull redate "Pictures/2025-12-28 Forest portraits" --date 2026-10-02
   redate puts it back.
 - **The report, the manifest and cull's sidecars follow,** so `judge` carries on without
   calling the model again. The sets stay as they were: cull still groups frames by the
-  time the camera wrote.
+  time the camera wrote (so does a scan after `--set-date`). A folder with no offload
+  manifest, redated before its first scan, is the exception: it is grouped by the new date.
+- **Content Credentials frames need somewhere to keep the new date:** the offload manifest
+  or cull's report. A folder with neither (copied with Finder, never scanned) has none, and
+  redate says how many frames that leaves out: run `cull scan <folder>` first, then redate
+  again.
 - **The folder keeps its name:** redate doesn't rename it.
 - **Interrupted?** Run the same command again. Until it has finished, the commands that
   read or change its frames refuse the folder, and `cull status` tells you what to run.

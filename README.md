@@ -312,19 +312,26 @@ for byte, everywhere except the dates.
   `redate` puts it back (and `cull status` says so).
 - **The manifest keeps both checksums:** the card's (`sha256`) and the patched file's
   (`file_sha256`). `offload --verify` checks each frame against the right one, and running
-  offload again on the same card copies nothing.
+  offload again on the same card copies nothing. It also keeps the camera's own capture
+  time (`camera_time`), recorded the first time a frame's dates are rewritten.
 
 **Content Credentials.** Some frames carry a signed Content Credentials (C2PA) record, and
 its signature covers the dates; on the one M11-P card checked, these were the `L…` files.
 Changing the dates would break the signature, so those frames keep their dates inside the
 file. Their file times still change, and cull's sidecar carries the corrected date. The run
-names them (all of them with `-v`).
+names them (all of them with `-v`). The corrected date is kept in the offload manifest or
+cull's report, so a folder with neither (copied with Finder and never scanned) has nowhere
+to keep it: redate says how many such frames there are. Run `cull scan <folder>` first,
+then redate again.
 
 **What doesn't change:**
-- **redate doesn't change the shoot's sets and rankings.** cull's report keeps the
-  capture time it read when the shoot was scanned, which the sets are grouped by. A
-  `judge` afterwards continues the report without calling the model again. (After
-  `offload --set-date`, the scan reads the fixed dates.)
+- **Neither redate nor `--set-date` changes the shoot's sets and rankings.** Sets are
+  grouped by the camera's own capture time: the time the report read when the shoot was
+  scanned, or the `camera_time` the manifest recorded before the first date change. (Content
+  Credentials frames keep the camera's dates, so grouping by the new date would split sets
+  wherever they meet the other frames.) A `judge` after redate continues the report without
+  calling the model again. The one exception: a folder with no manifest, redated before its
+  first scan, is grouped by the new date.
 - **The shoot folder's name.** redate doesn't rename it; `offload --set-date` names a new
   folder by the date you give.
 

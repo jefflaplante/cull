@@ -21,6 +21,8 @@ make build            # bin/cull, version stamped from git describe
 make test             # all tests use synthetic fixtures; no network, no API key
                       # (eval tests bind loopback via httptest: under the Claude Code
                       # sandbox this needs sandbox.network.allowLocalBinding: true)
+                      # slowest packages: rename (~110 s) and pipeline (~60 s); under -race,
+                      # redate and rename need -timeout 60m
 make vet
 ./bin/cull scan --save-inputs /tmp/in <dir>          # no model calls; previews, faces
 ./bin/cull review <dir>                              # browser: label/star; saves labels log + sidecars
@@ -66,7 +68,8 @@ make vet
 - `internal/pipeline` — detect → locate → crops → evaluate → decide; worker pool,
   resume (path+size+mtime; refuses a different backend/model/schema), checkpointing,
   quota stop, `--save-inputs`, `--sort` / `Restore` (move.go: `place` puts frames
-  home or in `keep/` `review/` `cull/`; `--sort=culls` puts culls in `cull/`; `culled/` is legacy, read only (moved out on the next sort); `reconcileMove` searches them all; Discover skips them, and every hidden file: temps end in `.DNG`),
+  home or in `keep/` `review/` `cull/`; `--sort=culls` puts culls in `cull/`; `culled/` is legacy, read only (moved out on the next sort); `reconcileMove` searches them all; Discover skips them, and every hidden file: temps end in `.DNG`;
+  with -r it skips hidden folders too, so `holdShoot -r` never locks `.Trashes`),
   stages.go (shared frame stages), decide.go, groups.go (decideAll: regroups sequences,
   reuses/applies stored ranks, marks best), batch.go (Message Batches driver with
   re-attachable `<report>.batch.json` state), escalation, cost budget; rank.go (`Rank`/
@@ -109,7 +112,9 @@ make vet
   Dates: patch.go (`streamPatched`: `orig` and `want` SHA-256s in one read; `applyPatches`;
   `proveFrom`: evict + uncached re-read must hash to `want`; `setFileTimes`: mtime and
   creation time). `--set-date` runs in stage B: verify against the card → patch → prove →
-  times → link. Manifest entries gain `file_sha256`, `dates_set`, `patched_at`
+  times → link. Manifest entries gain `file_sha256`, `dates_set`, `patched_at`, and
+  `camera_time` (the card's DateTimeOriginal + SubSec before the first patch, by
+  `--set-date` or redate; never replaced, carried by every superseding line)
   (`CurrentManifest`, `AppendManifest`); a re-run finds copies by their recorded name.
   replace.go: `ReplacePatched`, redate's one replace (stream into `.cull-redate-<hex>.<name>`,
   prove, F_FULLFSYNC, `rename(2)` over the original, F_FULLFSYNC the folder), `RedateTemps`,
@@ -119,7 +124,7 @@ make vet
 - `internal/redate` — `cull redate`: per frame `PatchDates` → `ReplacePatched` (file times
   only for Content Credentials or nothing to patch), proven against the manifest's checksum
   when one is recorded (a mismatch is refused, never "fixed"), else against the frame as
-  read; then a manifest line, the report (`ModTime`, `DatesSet`), cull's sidecar. The journal `cull-redate.json` records each frame before its
+  read; then a manifest line, the report (`ModTime`, `DatesSet`, `CameraTime` when empty), cull's sidecar. The journal `cull-redate.json` records each frame (with its camera time) before its
   swap; `settleTemps` restores or removes temps an interruption left; refuses a sort folder,
   a parent of shoots, a pending batch. `Folders`/`ShootOf` are shared with rename.
 - `internal/rename` — `cull rename` / `--undo`: plans every name and refuses before moving
@@ -133,11 +138,16 @@ make vet
   exclusive flocks only. redate and rename hold the gate `.cull.lock` and check every
   `.cull-holder-<pid>-<hex>`; each reader (judge, decide, the review server, restore,
   offload, scan, tag, rank, import-labels) holds its own holder file and probes the gate.
-  Released by close alone, never `LOCK_UN`; EACCES on the gate counts as held (a stale SMB
-  lock). `cmd/cull` calls `RemoveHolders` on exit.
+  Released by close alone, never `LOCK_UN`; EACCES on the gate, or on a reader's own new
+  holder file, counts as held (a stale or contended SMB lock). `cmd/cull` calls
+  `RemoveHolders` on exit. `redate -r` and `rename -r` hold only the parent folder's gate: a
+  reader run on a subfolder alone (`judge <sub>`) registers there and doesn't see them.
 - `internal/report` — JSON source of truth (schema v4); `Tags` (the shoot's project/event/
   location/keywords, merged per run by `MergeTags`, changed by `cull tag`, cli/tags.go);
   `Result.DatesSet` (the date `--set-date`/redate set; the sidecar prefers it over EXIF);
+  `Result.CameraTime` (the manifest's `camera_time`, filled by the pipeline, the manifest
+  winning; also set by redate; `GroupFrame` uses it over Exif's time, so re-dating never
+  regroups);
   `Result.CardName` (`100LEICA/M1103127.DNG`, from the manifest's `Entry.CardName`; judge
   refreshes it, rename leaves it) and `GroupFrame`/`CameraName`, the one frame key judge,
   decide and rename's reorder check group with;
@@ -172,6 +182,13 @@ make vet
   - **`redate` never rewrites the report's `Result.Exif`**: sequence grouping reads it, so a
     rewrite would regroup and re-rank. The corrected date lives in `Result.DatesSet` (and
     `ModTime` follows the file).
+  - **Grouping reads the camera's own time** (2026-10-07, final review): `Result.CameraTime`
+    from the manifest's `camera_time`, else Exif's. After `--set-date` (or redate before
+    the first judge) a scan reads patched `M…` frames at the target date while Content
+    Credentials `L…` frames keep the camera's, which split or merged sets where they met.
+    Limit: a folder with no manifest, redated before its first scan, is grouped by the new
+    date, and its Content Credentials frames have nowhere to keep the corrected date
+    (redate warns: scan first).
 - Only `--sort` (judge, decide, review; `--move-culled` is its deprecated alias) moves DNGs
   (same-disk rename into `keep/` `review/` `cull/`, never overwriting, recorded as `moved_to`),
   and `restore` undoes it. `rename` (and `--undo`) renames them in their folders: journalled,
@@ -755,9 +772,20 @@ same timestamp. The facts below were measured while building `--set-date`, `reda
     when no cull command is running.
   - **Exclusive flocks across processes work** there, and on APFS, exFAT and FAT32, with no
     "lock unavailable" note.
-- **Not yet run on real frames:** `offload --set-date`, `redate` and `rename` themselves.
-  They're tested on synthetic DNGs, on APFS and on exFAT and FAT32 images; the folder
-  lock also on the NAS. The live check on the card (each step followed by `--verify`) is the plan's Task 8.
+- **Live on the user's card (2026-10-07, 10 frames, read only; every destination a temp
+  folder):**
+  - **`offload --set-date`:** 10 of 10, "safe to format"; `--verify` 10/10. The 5 `M…`
+    copies had their 5 date fields at the target (15 bytes differ from the card); the 5
+    `L…` copies were byte-identical to the card, with their file times set. The card's
+    listing and SHA-256s were unchanged.
+  - **`redate`** on a plain offload: the dry run matched the real run (patched 5, times
+    only 5); `--verify` 10/10; a re-run said "already set 10".
+  - **`rename`** then `--verify` 10/10; offload re-run after the rename copied 0, "safe to
+    format"; `--undo` then `--verify` 10/10.
+  - **After the DCF fix,** a rename dry run numbered the `M…` frames 0001–0005 and the
+    `L…` frames 0006–0010 (camera order).
+  - **Pending: Capture One's displayed date for redated, `--set-date` and Content
+    Credentials frames: pending the user's import test.**
 
 ## Unverified assumptions — check before building on them
 
@@ -835,8 +863,8 @@ same timestamp. The facts below were measured while building `--set-date`, `reda
    filmstrip, and a calibrate sets section. Replaces `--burst-gap`, `--burst-hash`,
    `--duplicates`. Ranking quality/stability still unverified (see above).
 7. ~~Date fixing and bulk renaming~~ built 2026-10-06/07 (`offload --set-date`, `redate`,
-   `rename`; spec and plan in `docs/superpowers/`) for a camera whose clock stopped. The
-   live check on the card and the Capture One date check are still to do.
+   `rename`; spec and plan in `docs/superpowers/`) for a camera whose clock stopped. Checked
+   live on the card 2026-10-07; the Capture One date check is still to do.
 
 ## Working style
 

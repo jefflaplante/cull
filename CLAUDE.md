@@ -625,6 +625,18 @@ balance`, but no run has tested them yet.
       mounts stall. Cause unknown. TrueNAS's `journalctl -u nfs-server` and `dmesg` at
       those times would be the next place to look.
     - SMB, on the same link and pool, never stalled in any session.
+    - **Not the 10 GbE adapter** (15:06–15:22). The same loop was run over the Mac's 1 GbE
+      Thunderbolt port (`en6`, MTU 1500) to the NAS's other address, `10.1.66.9`; the share
+      needed `10.1.66.0/24` added to its networks first. Stalls:
+      - 1 GbE: 3 of 60 fresh mounts (5%);
+      - 10 GbE (`en8`, MTU 1500), a 20-mount control in between: 1 of 20;
+      - 10 GbE, all day: 7 of 52.
+
+      Each stall was the same 60 s silence, with about 9 MB written. Both paths stall, so
+      neither the adapter nor jumbo frames explain it.
+    - The user's Proxmox cluster (Linux clients) uses NFS from the same TrueNAS without
+      trouble. That points at the macOS NFS client with this server, though no Linux
+      client was tested in the same loop.
 - Offload benchmark, 20 real frames per tool, read from the card uncached: the `cull`
   engine runs at 216 MB/s (hash, uncached write, evict, verify from disk, F_FULLFSYNC);
   `cp` runs at 264 MB/s. The gap was the verify re-read, which wasn't overlapped with the

@@ -27,6 +27,11 @@ func TestRenameTempNames(t *testing.T) {
 		".cull-rename-01020304._IGP0001.DNG", ".cull-rename-0a0b0c0d.M1.xmp",
 		"._.cull-rename-01020304._IGP0001.DNG", ".cull-redate-0a0b0c0d.M1.DNG",
 		"._IGP0001.DNG.cull-01020304.tmp", ".cull-rename-xyz.M1.DNG", ".cull-rename-01020304.", ".cull-rename-01020304..x",
+		// Final review P5c: only a frame's or its sidecar's (any case); a review cache
+		// image's temp, or anything else, isn't one.
+		".cull-rename-01020304.M2.dng", ".cull-rename-01020304.M3.XMP", ".cull-rename-01020304.M1.thumb.1234.jpg",
+		".cull-rename-01020304.notes.txt", ".cull-rename-01020304.M1.DNG.bak", ".cull-rename-01020304.xmp",
+		".cull-rename-01020304.M4.cull-0a0b0c0d.tmp",
 	} {
 		os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644)
 	}
@@ -34,6 +39,8 @@ func TestRenameTempNames(t *testing.T) {
 	want := map[string]string{
 		filepath.Join(dir, ".cull-rename-01020304._IGP0001.DNG"): "_IGP0001.DNG",
 		filepath.Join(dir, ".cull-rename-0a0b0c0d.M1.xmp"):       "M1.xmp",
+		filepath.Join(dir, ".cull-rename-01020304.M2.dng"):       "M2.dng",
+		filepath.Join(dir, ".cull-rename-01020304.M3.XMP"):       "M3.XMP",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v", got)
@@ -43,12 +50,15 @@ func TestRenameTempNames(t *testing.T) {
 			t.Errorf("%s → %q, want %q", k, got[k], v)
 		}
 	}
-	// offload's sweep never takes one, nor redate's.
+	// offload's sweep never takes one, nor redate's, nor anything with their prefixes.
 	RemoveStaleTemps(dir)
 	for k := range want {
 		if _, err := os.Stat(k); err != nil {
 			t.Errorf("swept %s", k)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".cull-rename-01020304.M4.cull-0a0b0c0d.tmp")); err != nil {
+		t.Error("swept a name with rename's prefix")
 	}
 }
 

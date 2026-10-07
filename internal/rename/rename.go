@@ -125,7 +125,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 			return r.res, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", p.Which, p.Folder, p.Finish)
 		}
 	}
-	if err := journal.PendingBatch(r.reportPath); err != nil {
+	if err := journal.PendingBatch(dir, r.reportPath); err != nil {
 		return r.res, err
 	}
 	j, err := journal.LoadRename(dir)
@@ -229,6 +229,7 @@ type frame struct {
 	card       string // with orig, its card folder and name ("100LEICA/M1103127.DNG"): camera order
 	origSize   int64  // with orig, the manifest's key for it
 	datesSet   string // the manifest's date set, "2026-10-04T12:00:00"
+	cameraTime string // the manifest's camera_time: grouping's time for a re-dated frame
 	hasSidecar bool
 	locked     string // "" or why it can't be renamed (an immutable flag)
 }
@@ -286,7 +287,7 @@ func (r *run) survey(folders []string) (*shoot, error) {
 			}
 			f := frame{rel: rel, unit: unit, size: st.Size(), mtime: st.ModTime(), locked: lockedFlag(st)}
 			if me, ok := man[unit][low]; ok {
-				f.orig, f.origSize, f.datesSet, f.card = me.Orig, me.Size, me.DatesSet, me.CardName()
+				f.orig, f.origSize, f.datesSet, f.card, f.cameraTime = me.Orig, me.Size, me.DatesSet, me.CardName(), me.CameraTime
 			}
 			if st, err := os.Lstat(xmp.Path(r.abs(rel))); err == nil && st.Mode().IsRegular() {
 				f.hasSidecar = true
@@ -409,7 +410,8 @@ func (r *run) plan() (*journal.Rename, error) {
 }
 
 // checkOrder refuses a rename that changes the order of the report's frames as
-// sequence grouping sees it (group.Order: capture time, then camera order of the
+// sequence grouping sees it (group.Order: the camera's capture time (report.Result
+// GroupFrame), then camera order of the
 // report's card name, else the current name; frames with the same capture time, as a
 // burst or a stopped clock gives, are ordered by name only when no manifest records
 // them). A new order regroups
@@ -419,15 +421,20 @@ func (r *run) plan() (*journal.Rename, error) {
 // A report written before card names were recorded lacks them; the next judge fills
 // them from the manifest, so both orders here take them from the manifest too (the
 // frames' card names), and the rename writes them into the report (the returned map,
-// by the report's path relative to the folder; journalled, see followReport).
+// by the report's path relative to the folder; journalled, see followReport). The
+// manifest's camera times are used the same way, in memory only: judge fills them.
 func (r *run) checkOrder(sh *shoot, moves []journal.RenameMove) (map[string]string, error) {
 	if r.rep == nil {
 		return nil, nil
 	}
-	cardOf := map[string]string{} // the report's (home) path → the manifest's card name
+	cardOf := map[string]string{}   // the report's (home) path → the manifest's card name
+	cameraOf := map[string]string{} // … → the manifest's camera time (judge fills it the same way)
 	for _, f := range sh.frames {
 		if f.card != "" {
 			cardOf[r.home(f.rel)] = f.card
+		}
+		if f.cameraTime != "" {
+			cameraOf[r.home(f.rel)] = f.cameraTime
 		}
 	}
 	cards := map[string]string{}
@@ -450,6 +457,9 @@ func (r *run) checkOrder(sh *shoot, moves []journal.RenameMove) (map[string]stri
 	for _, x := range r.rep.Results {
 		if c, ok := cardOf[x.File]; ok && x.CardName == "" {
 			x.CardName, cards[r.rel(x.File)] = c, c
+		}
+		if c, ok := cameraOf[x.File]; ok { // the manifest wins, as in judge
+			x.CameraTime = c
 		}
 		if x.Error != "" || x.Preview == nil {
 			continue

@@ -48,6 +48,9 @@ type FileState struct {
 	ModTime time.Time `json:"mtime"`
 	Orig    string    `json:"orig,omitempty"` // SHA-256 of the bytes before (patched files)
 	Want    string    `json:"want,omitempty"` // SHA-256 with the date patches; "" = only its times changed
+	// CameraTime is the capture time the patches replace when they're the first (the
+	// camera's, dng.Exif.CameraTime): a run finishing an interrupted swap records it.
+	CameraTime string `json:"camera_time,omitempty"`
 }
 
 // LoadRedate reads dir's redate journal; none gives nil, nil.
@@ -221,12 +224,17 @@ func RemoveRename(dir string) error {
 }
 
 // PendingBatch refuses (an error saying what to do) while a judge or ranking batch for
-// the report at reportPath is pending: its requests name the frames by path, and its
-// results land by those paths.
-func PendingBatch(reportPath string) error {
+// the report at reportPath (dir's) is pending: its requests name the frames by path,
+// and its results land by those paths. judge --batch re-attaches to it and finishes it.
+func PendingBatch(dir, reportPath string) error {
 	for _, b := range []struct{ suffix, what string }{{".batch.json", "judge"}, {".rank-batch.json", "ranking"}} {
 		if _, err := os.Stat(reportPath + b.suffix); err == nil {
-			return fmt.Errorf("a %s batch is pending (%s): finish it with cull judge --batch, or cancel it, first; its results are matched to the frames by their paths", b.what, reportPath+b.suffix)
+			cmd := "cull judge --batch"
+			if reportPath != filepath.Join(dir, "cull-report.json") {
+				cmd += " -o " + ShellQuote(reportPath)
+			}
+			return fmt.Errorf("a %s batch is pending (%s): finish it first with `%s %s` (already paid for); its results are matched to the frames by their paths",
+				b.what, reportPath+b.suffix, cmd, ShellQuote(dir))
 		}
 	}
 	return nil

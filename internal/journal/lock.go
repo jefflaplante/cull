@@ -38,7 +38,9 @@ import (
 // SMB share (smbfs), a process that unlocks and then closes drops the lock of whoever
 // took the file in between, so two writers, or a writer and a reader, would both hold
 // the folder. Measured on the user's NAS: 3–16 such overlaps per stress run with LOCK_UN
-// then close, none with close alone.
+// then close, none with close alone. For the same reason, never open a lock file this
+// process holds: smbfs drops the process's lock when any handle to that file in the
+// process closes (measured there too).
 const (
 	LockName     = ".cull.lock"
 	HolderPrefix = ".cull-holder-"
@@ -67,9 +69,9 @@ func IsLockFile(name string) bool {
 // Lock takes dir's folder lock: a writer's (exclusive) or a reader's. holder names the
 // command ("rename"); each lock file holds its holder's line, so a refused command names
 // exactly who is in the way. release lets go (a reader's holder file is removed). A lock
-// held by another command refuses (on the gate, EACCES counts as held: an SMB share's
-// stale lock), and so does a holder file a writer can't open or lock (it may be a live
-// reader's). Otherwise a volume without locks, any other flock error, or
+// held by another command refuses (on the gate, and on a reader's own holder file,
+// EACCES counts as held: an SMB share's stale or contended lock), and so does a holder
+// file a writer can't open or lock (it may be a live reader's). Otherwise a volume without locks, any other flock error, or
 // a folder the lock files can't be made in proceeds unlocked, with note saying so.
 func Lock(dir string, exclusive bool, holder string) (release func(), note string, err error) {
 	line := fmt.Sprintf("cull %s (pid %d, since %s)", holder, os.Getpid(), time.Now().Format("2006-01-02 15:04:05"))
@@ -261,13 +263,22 @@ func lockReader(dir, line string) (func(), string, error) {
 		if err := flockNB(f); err != nil {
 			f.Close()
 			os.Remove(p)
-			if !errors.Is(err, syscall.EWOULDBLOCK) {
+			if !gateHeld(err) {
 				return noLock(dir, err)
 			}
 			// A writer is trying it (and will remove it as a crashed reader's): register
-			// again, or, past the deadline, stay out of the writer's way.
+			// again, or, past the deadline, stay out of the writer's way. EACCES on this
+			// reader's own new file counts as held too, as on the gate: an SMB share
+			// returns it for contention as well as for a stale lock, and going on
+			// unlocked could overlap a writer.
 			if !time.Now().Before(deadline) {
+				if errors.Is(err, syscall.EACCES) {
+					return func() {}, "", inUse(dir, fmt.Sprintf("another cull command, or a stale share lock (this command's own lock file refuses: %v)", err))
+				}
 				return func() {}, "", inUse(dir, "a redate or rename starting")
+			}
+			if errors.Is(err, syscall.EACCES) {
+				time.Sleep(20 * time.Millisecond)
 			}
 			continue
 		}

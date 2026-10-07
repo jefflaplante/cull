@@ -239,7 +239,7 @@ func parseLocalTime(dateFlag, day, clock string) (time.Time, error) {
 
 func runVerify(cmd *cobra.Command, so *sharedOpts, folder string) error {
 	for _, p := range journal.Unfinished(folder) {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: an unfinished %s is recorded in %s: frames under hidden temps show as missing until it's finished (%s)\n", p.Which, folder, p.Finish)
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: an unfinished %s is recorded in %s: frames it was changing may show as missing or different until it's finished (%s)\n", p.Which, folder, p.Finish)
 	}
 	out := so.out.newOutput(cmd, true)
 	defer out.Close()

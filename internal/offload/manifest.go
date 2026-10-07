@@ -31,6 +31,12 @@ type Entry struct {
 	FileSHA256 string    `json:"file_sha256,omitempty"` // the file as it is now, when its dates were patched
 	DatesSet   string    `json:"dates_set,omitempty"`   // "2026-10-04T12:00:00" local: the date set (patched, or only its file times)
 	PatchedAt  time.Time `json:"patched_at,omitzero"`
+	// CameraTime is the frame's DateTimeOriginal (+SubSecTimeOriginal) as the card
+	// holds it, "2025-12-28T00:05:59" (dng.Exif.CameraTime), recorded when offload
+	// --set-date or redate first patches the frame and carried by every superseding
+	// line, never replaced: sequence grouping reads it (report.Result.CameraTime), so
+	// re-dating never regroups the shoot.
+	CameraTime string `json:"camera_time,omitempty"`
 }
 
 // CardName is the frame's name on the card with its card folder,

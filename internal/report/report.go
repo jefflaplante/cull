@@ -149,6 +149,13 @@ type Result struct {
 	// "2006-01-02T15:04:05", from the shoot folder's offload manifest. The sidecar uses
 	// it over Exif: a Content Credentials frame keeps its camera dates in the file.
 	DatesSet string `json:"dates_set,omitempty"`
+	// CameraTime is the camera's own capture time (dng.Exif.CameraTime) from before cull
+	// first rewrote the file's dates, from the offload manifest (the manifest wins), or
+	// recorded by redate. Grouping reads it over Exif's, so offload --set-date and redate
+	// never change the order or the sets: Content Credentials frames keep the camera's
+	// dates in the file, and a dead clock's per-power-on times still split sessions.
+	// "" for a frame cull never re-dated (Exif holds the camera's time).
+	CameraTime string `json:"camera_time,omitzero"`
 	// CardName is the frame's name on the card with its card folder,
 	// "100LEICA/M1103127.DNG", from the shoot folder's offload manifest; "" when no
 	// manifest records the frame. It is the frame's place in camera order (see
@@ -184,10 +191,13 @@ func (r Result) CameraName() dcf.Name {
 }
 
 // GroupFrame is the frame as sequence grouping sees it (no Score): judge and decide
-// group with it, and rename checks a new name's effect with it.
+// group with it, and rename checks a new name's effect with it. Its time is the
+// camera's: CameraTime when recorded, else Exif's.
 func (r Result) GroupFrame() group.Frame {
 	f := group.Frame{Key: r.File, Name: r.CameraName()}
-	if r.Exif != nil {
+	if t, ok := dng.ParseCameraTime(r.CameraTime); ok {
+		f.Time, f.HasTime = t, true
+	} else if r.Exif != nil {
 		f.Time, f.HasTime = r.Exif.CaptureTime()
 	}
 	if look, ok := r.LookBytes(); ok {

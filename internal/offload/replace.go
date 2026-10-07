@@ -46,7 +46,7 @@ type Replaced struct {
 //     recovery would skip and dot_clean or find -name '._*' -delete would remove.
 const RedateTempPrefix = ".cull-redate-"
 
-var redateTempRE = regexp.MustCompile(`^` + regexp.QuoteMeta(RedateTempPrefix) + `[0-9a-f]{8}\.([^.].*)$`) // redate never takes a hidden file
+var redateTempRE = regexp.MustCompile(`^` + regexp.QuoteMeta(RedateTempPrefix) + `[0-9a-f]{8}\.([^.].*(?i:\.dng))$`) // redate never takes a hidden file, only DNGs
 
 // ReplacePatched rewrites path with exactly the patches ps (dng.PatchDates' output)
 // and its times set to t, replacing the original only once the new bytes are proven:
@@ -204,7 +204,7 @@ func RemoveStaleTemps(dir string) {
 	ents, _ := os.ReadDir(dir)
 	for _, e := range ents {
 		n := e.Name()
-		if offloadTempRE.MatchString(n) && !redateTempRE.MatchString(n) && !renameTempRE.MatchString(n) && e.Type().IsRegular() && !appleDouble(n) {
+		if offloadTempRE.MatchString(n) && !strings.HasPrefix(n, RedateTempPrefix) && !strings.HasPrefix(n, RenameTempPrefix) && e.Type().IsRegular() && !appleDouble(n) {
 			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}

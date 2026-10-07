@@ -18,7 +18,9 @@ import (
 // is called, offload's sweep never takes one, and a hidden file is never judged.
 const RenameTempPrefix = ".cull-rename-"
 
-var renameTempRE = regexp.MustCompile(`^` + regexp.QuoteMeta(RenameTempPrefix) + `[0-9a-f]{8}\.([^.].*)$`)
+// renameTempRE matches a frame's or its sidecar's rename temp only (they share the
+// prefix with the review cache's image temps, swept by prefix in their own folder).
+var renameTempRE = regexp.MustCompile(`^` + regexp.QuoteMeta(RenameTempPrefix) + `[0-9a-f]{8}\.([^.].*(?i:\.(?:dng|xmp)))$`)
 
 // RenameTempName is a new temp name for name (a base name): random, so it is free.
 func RenameTempName(name string) string {

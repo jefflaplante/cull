@@ -18,6 +18,7 @@ import (
 
 	"github.com/jefflaplante/cull/internal/dng"
 	"github.com/jefflaplante/cull/internal/dng/dngtest"
+	"github.com/jefflaplante/cull/internal/journal"
 	"github.com/jefflaplante/cull/internal/ui"
 )
 
@@ -681,6 +682,16 @@ func TestSetDateNotesCopiesMadeWithout(t *testing.T) {
 			got := n.with("3 copies already there were made without --set-date", "cull redate", p.Dests[0], "--date 2026-10-04")
 			if len(got) != 1 {
 				t.Fatalf("notes %q", n.list)
+			}
+			// Final review M2: each folder shell-quoted (the shoot folder's name has a
+			// space), and the backup's command too.
+			for _, d := range p.Dests {
+				if q := journal.ShellQuote(d); q == d || !strings.Contains(got[0], "`cull redate "+q+" --date 2026-10-04`") {
+					t.Fatalf("note doesn't quote %s: %q", d, got[0])
+				}
+			}
+			if len(p.Dests) != 2 || !strings.Contains(got[0], "(the backup)") {
+				t.Fatalf("note doesn't name the backup: %q", got[0])
 			}
 			// A re-run over dated copies says nothing.
 			var n2 notes

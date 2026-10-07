@@ -2,6 +2,7 @@ package journal
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // Readers coexist; a writer is refused while any reader lives, naming it exactly, and a
@@ -313,4 +315,32 @@ func TestLockHelper(t *testing.T) {
 	}
 	io.Copy(io.Discard, os.Stdin)
 	release()
+}
+
+// Final review P6a: EACCES on a reader's own new holder file counts as held, as on the
+// gate: the reader retries until RetryFor, then is refused (it never proceeds unlocked),
+// and leaves no holder file behind.
+func TestReaderOwnHolderEACCESRefuses(t *testing.T) {
+	dir := t.TempDir()
+	restoreRetry := RetryFor
+	RetryFor = 100 * time.Millisecond
+	defer func() { RetryFor = restoreRetry }()
+	restore := flockFn
+	defer func() { flockFn = restore }()
+	flockFn = func(int, int) error { return syscall.EACCES }
+	release, note, err := Lock(dir, false, "judge")
+	release()
+	if !errors.Is(err, errInUse) || note != "" || !strings.Contains(err.Error(), "stale share lock") {
+		t.Fatalf("note %q err %v", note, err)
+	}
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), HolderPrefix) {
+			t.Fatalf("holder file left: %s", e.Name())
+		}
+	}
+	// A writer meeting EACCES on the gate is refused too (unchanged).
+	if _, _, err := Lock(dir, true, "rename"); !errors.Is(err, errInUse) {
+		t.Fatalf("writer: %v", err)
+	}
 }

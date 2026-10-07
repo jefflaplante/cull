@@ -158,3 +158,30 @@ func TestReadExifFNumberSubSecAndMissing(t *testing.T) {
 		t.Fatal("capture time without DateTimeOriginal")
 	}
 }
+
+// CameraTime round-trips to exactly CaptureTime's time (sub-seconds included), so
+// grouping by a recorded camera_time is grouping by the camera's EXIF.
+func TestCameraTimeRoundTrip(t *testing.T) {
+	for _, e := range []Exif{
+		{DateTimeOriginal: "2025:12:28 00:05:59"},
+		{DateTimeOriginal: "2025:12:28 00:05:59", SubSec: "42"},
+		{DateTimeOriginal: "2025:12:28 00:05:59", SubSec: "123456789"},
+		{DateTimeOriginal: "2025:12:28 00:05:59", SubSec: "007"},
+	} {
+		want, _ := e.CaptureTime()
+		s := e.CameraTime()
+		got, ok := ParseCameraTime(s)
+		if !ok || !got.Equal(want) || got.Location() != want.Location() {
+			t.Errorf("%+v: %q → %v %v, want %v", e, s, got, ok, want)
+		}
+	}
+	if s := (Exif{DateTimeOriginal: "    :  :     :  :  "}).CameraTime(); s != "" {
+		t.Errorf("unparseable: %q", s)
+	}
+	if _, ok := ParseCameraTime(""); ok {
+		t.Error(`"" parsed`)
+	}
+	if s := (Exif{DateTimeOriginal: "2025:12:28 00:05:59", SubSec: "42"}).CameraTime(); s != "2025-12-28T00:05:59.42" {
+		t.Errorf("format: %q", s)
+	}
+}

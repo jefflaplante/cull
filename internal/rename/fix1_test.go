@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -272,46 +271,22 @@ func TestAdvNameTooLong(t *testing.T) {
 	}
 }
 
-// IMPORTANT 2: a locked (uchg) frame, or a folder that can't be written, is refused
-// before anything moves.
-func TestRenameLockedAndUnwritable(t *testing.T) {
+// IMPORTANT 2: a folder that can't be written is refused before anything moves (a
+// locked frame: fix1_darwin_test.go).
+func TestRenameUnwritable(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "2026-10-04 trip")
 	loose(t, dir, map[string]dngtest.Fixture{"A1.DNG": frame(1, 1000), "A2.DNG": frame(2, 1100), "keep/A3.DNG": frame(3, 1200)})
-	p := filepath.Join(dir, "A2.DNG")
-	if err := chflags(p, true); err != nil {
-		t.Skipf("chflags: %v", err)
-	}
 	before := snapshot(t, dir)
-	_, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "x{n}", DryRun: true})
-	if err == nil || !strings.Contains(err.Error(), "A2.DNG") || !strings.Contains(err.Error(), "locked") {
-		t.Fatalf("locked (dry run): %v", err)
-	}
-	_, err = rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "x{n}"})
-	chflags(p, false)
-	if err == nil || !strings.Contains(err.Error(), "locked") {
-		t.Fatalf("locked: %v", err)
-	}
-	if snapshot(t, dir) != before {
-		t.Fatal("the tree changed")
-	}
 	keep := filepath.Join(dir, "keep")
 	os.Chmod(keep, 0o555)
 	defer os.Chmod(keep, 0o755)
-	_, err = rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "x{n}"})
+	_, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "x{n}"})
 	if err == nil || !strings.Contains(err.Error(), "keep") || !strings.Contains(err.Error(), "written") {
 		t.Fatalf("unwritable: %v", err)
 	}
 	if snapshot(t, dir) != before {
 		t.Fatal("the tree changed")
 	}
-}
-
-func chflags(p string, lock bool) error {
-	var flags int
-	if lock {
-		flags = 0x2 // UF_IMMUTABLE
-	}
-	return syscall.Chflags(p, flags)
 }
 
 // IMPORTANT 3: rename and redate refuse while a judge or ranking batch is pending.
@@ -321,7 +296,9 @@ func TestRenameRefusesPendingBatch(t *testing.T) {
 		state := filepath.Join(dir, "cull-report.json"+suffix)
 		os.WriteFile(state, []byte("{}"), 0o644)
 		before := snapshot(t, dir)
-		if _, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: pattern}); err == nil || !strings.Contains(err.Error(), "batch") {
+		// Final review M4: the advice is the command that finishes it (no cancel command exists).
+		want := "finish it first with `cull judge --batch " + journal.ShellQuote(dir) + "` (already paid for)"
+		if _, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: pattern}); err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "cancel") {
 			t.Fatalf("%s rename: %v", suffix, err)
 		}
 		if _, err := redate.Run(context.Background(), redate.Options{Dir: dir, Target: time.Now()}); err == nil || !strings.Contains(err.Error(), "batch") {

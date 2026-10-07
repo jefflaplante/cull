@@ -108,6 +108,10 @@ func (e *Escalation) matches(ev *eval.Evaluation) bool {
 	return e.On[ev.Sharpness.Status] || (e.On["eyes_closed"] && ev.People.Eyes == "closed")
 }
 
+// Discover lists dir's DNGs (with recursive, its subfolders' too), sorted. Sort
+// folders are skipped, and with recursive so are hidden folders (.Trashes,
+// .Spotlight-V100, .fseventsd: never a shoot's, often unreadable), so holdShoot -r
+// never locks them either.
 func Discover(dir string, recursive bool) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -115,7 +119,7 @@ func Discover(dir string, recursive bool) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			if p != dir && (!recursive || slices.Contains(placeDirs, d.Name())) {
+			if p != dir && (!recursive || slices.Contains(placeDirs, d.Name()) || strings.HasPrefix(d.Name(), ".")) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -605,6 +609,9 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 					if e.DatesSet != "" {
 						r.DatesSet = e.DatesSet
 					}
+					if e.CameraTime != "" {
+						r.CameraTime = e.CameraTime
+					}
 					r.CardName = e.CardName()
 				}
 				if kept(r, cfg.DryRun, cfg.Policy) {
@@ -646,7 +653,8 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 
 // manifested reads the offload manifest of each folder the frames are in, once per
 // run, and returns each recorded frame's current entry, by path: the capture date it
-// had set (offload --set-date, redate) and its card name (camera order). A manifest
+// had set (offload --set-date, redate), the camera's capture time from before that
+// (grouping's time) and its card name (camera order). A manifest
 // that can't be read only costs those: a warning.
 func manifested(cfg Config, files []string) map[string]offload.Entry {
 	out := map[string]offload.Entry{}

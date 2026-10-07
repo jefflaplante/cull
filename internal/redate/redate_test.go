@@ -615,9 +615,13 @@ func TestRedateContentCredentialsListed(t *testing.T) {
 		fx[fmt.Sprintf("L%d.DNG", i)] = signed(int64(i))
 	}
 	dir, data := loose(t, fx)
-	var normal, verbose []string
+	var normal, verbose, nowhere []string
 	res, err := redate.Run(context.Background(), redate.Options{Dir: dir, Target: target, UI: sinkFunc(func(e ui.Event) {
 		if n := e.Note; n != nil && strings.Contains(n.Text, "Content Credentials") {
+			if strings.Contains(n.Text, "nowhere to record") { // a loose folder, never scanned (final review M1)
+				nowhere = append(nowhere, n.Text)
+				return
+			}
 			if n.Level == ui.Verbose {
 				verbose = append(verbose, n.Text)
 			} else {
@@ -630,6 +634,9 @@ func TestRedateContentCredentialsListed(t *testing.T) {
 	}
 	if len(normal) != 1 || !strings.Contains(normal[0], "L5.DNG and 2 more") || len(verbose) != 1 || !strings.Contains(verbose[0], "L7.DNG") {
 		t.Fatalf("normal %q verbose %q", normal, verbose)
+	}
+	if len(nowhere) != 1 || !strings.Contains(nowhere[0], "7 Content Credentials frame(s)") {
+		t.Fatalf("nowhere %q", nowhere)
 	}
 	for name, b := range data {
 		p := filepath.Join(dir, name)

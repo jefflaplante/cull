@@ -36,7 +36,7 @@ type prepared struct {
 func prepareFrame(cfg Config, path string) (*prepared, error) {
 	p := &prepared{res: report.Result{File: path}}
 	if e, ok := cfg.manifested[path]; ok {
-		p.res.DatesSet, p.res.CardName = e.DatesSet, e.CardName()
+		p.res.DatesSet, p.res.CameraTime, p.res.CardName = e.DatesSet, e.CameraTime, e.CardName()
 	}
 	res := &p.res
 	if st, err := os.Stat(path); err == nil {

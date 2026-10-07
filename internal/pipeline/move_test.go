@@ -148,6 +148,30 @@ func TestDiscoverSkipsCulledFolders(t *testing.T) {
 	}
 }
 
+// Final review P5b: with recursive, hidden folders are skipped (and an unreadable one,
+// as .Trashes often is, isn't an error).
+func TestDiscoverSkipsHiddenFolders(t *testing.T) {
+	dir := t.TempDir()
+	for _, p := range []string{"A.DNG", ".Trashes/501/B.DNG", ".hidden/C.DNG", "sub/D.DNG", "sub/.x/E.DNG", ".locked/F.DNG"} {
+		os.MkdirAll(filepath.Dir(filepath.Join(dir, p)), 0o755)
+		os.WriteFile(filepath.Join(dir, p), nil, 0o644)
+	}
+	locked := filepath.Join(dir, ".locked")
+	os.Chmod(locked, 0o000)
+	defer os.Chmod(locked, 0o755)
+	got, err := Discover(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, p := range got {
+		names = append(names, filepath.Base(p))
+	}
+	if strings.Join(names, " ") != "A.DNG D.DNG" {
+		t.Fatalf("discovered %v", names)
+	}
+}
+
 func TestResumeDoesNotReprocessMovedFrames(t *testing.T) {
 	dir, b := shoot(t)
 	c := moveCfg(dir)

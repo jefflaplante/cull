@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -48,7 +49,7 @@ Limits, checked before anything moves (each refuses the rename, naming the files
     Frames the manifest records keep their card names' order whatever they're called;
     only frames it doesn't record go by their new names (an unpadded {n} sorts 10
     before 2; 8-character names ending in 4 digits go by those digits).
-  - A pending judge or ranking batch (finish or cancel it first), and a folder another
+  - A pending judge or ranking batch (finish it first: judge --batch), and a folder another
     cull command is using (the folder lock, .cull.lock).
 
 An interrupted rename is finished by running the same command again, or put back with
@@ -91,7 +92,7 @@ and Lightroom may lose track of frames already imported.`,
 			case undo && res.Renamed > 0:
 				fmt.Fprintf(w, "put back %d frame(s) under the names they had before the rename\n", res.Renamed)
 			case res.Renamed > 0:
-				fmt.Fprintf(w, "renamed %d frame(s); undo: cull rename --undo %s\n", res.Renamed, shellQuote(cfg.Dir))
+				fmt.Fprintf(w, "renamed %d frame(s); undo: %s\n", res.Renamed, undoCommand(cfg.Dir, cfg.ReportPath, so.recursive))
 			}
 			if _, finish, ok := journal.Incomplete(cfg.Dir); ok && !dryRun && err != nil {
 				fmt.Fprintf(w, "unfinished: run %s\n", finish)
@@ -104,4 +105,19 @@ and Lightroom may lose track of frames already imported.`,
 	f.BoolVar(&reorder, "reorder", false, "go ahead though the new names change the frames' order (the shoot's sets regroup)")
 	f.BoolVar(&undo, "undo", false, "put back the names the last rename changed (or finish putting them back)")
 	return cmd
+}
+
+// undoCommand is the exact command that undoes the rename just made in dir, with its
+// -r and -o: the kept journal's own (journal.Rename.Finish), else built from the flags.
+func undoCommand(dir, reportPath string, recursive bool) string {
+	j, err := journal.LoadRename(dir)
+	if err != nil || j == nil {
+		j = &journal.Rename{Recursive: recursive}
+		if reportPath != filepath.Join(dir, "cull-report.json") { // dir is absolute (sharedOpts.base)
+			j.Report = reportPath
+		}
+	}
+	u := *j
+	u.Undo = true
+	return u.Finish(dir)
 }

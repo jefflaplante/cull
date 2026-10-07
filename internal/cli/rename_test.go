@@ -123,7 +123,8 @@ func TestStatusRenameTemps(t *testing.T) {
 }
 
 // The guard text names every command that refuses; offload --verify during an
-// unfinished rename warns that frames under temps show as missing.
+// unfinished rename warns that the frames it was changing may show as missing or
+// different (final review M5: a redate's half-done frame shows as different).
 func TestUnfinishedRenameStatusAndVerify(t *testing.T) {
 	dir := renameShoot(t)
 	j := &journal.Rename{Pattern: "{n}", Started: time.Now(), Phase: 1}
@@ -133,7 +134,26 @@ func TestUnfinishedRenameStatusAndVerify(t *testing.T) {
 		t.Fatalf("status:\n%s", out)
 	}
 	out, _ = run(t, "offload", "--verify", dir)
-	if !strings.Contains(out, "frames under hidden temps show as missing") {
+	if !strings.Contains(out, "frames it was changing may show as missing or different") {
 		t.Fatalf("verify:\n%s", out)
+	}
+}
+
+// Final review M3: the undo hint is the exact command, with -r and -o.
+func TestRenameUndoHintKeepsFlags(t *testing.T) {
+	dir := renameShoot(t)
+	rep := filepath.Join(t.TempDir(), "other report.json")
+	out, err := run(t, "rename", "-r", "-o", rep, dir, "{name}_{n:2}")
+	want := "undo: cull rename --undo -r -o " + journal.ShellQuote(rep) + " " + journal.ShellQuote(dir)
+	if err != nil || !strings.Contains(out, want) {
+		t.Fatalf("%v: want %q in\n%s", err, want, out)
+	}
+	if out, err := run(t, "rename", "--undo", "-r", "-o", rep, dir); err != nil || !strings.Contains(out, "put back 2") {
+		t.Fatalf("the hinted undo: %v\n%s", err, out)
+	}
+	dir2 := renameShoot(t)
+	out, err = run(t, "rename", dir2, "{name}_{n:2}")
+	if want := "undo: cull rename --undo " + journal.ShellQuote(dir2) + "\n"; err != nil || !strings.Contains(out, want) {
+		t.Fatalf("%v: want %q in\n%s", err, want, out)
 	}
 }

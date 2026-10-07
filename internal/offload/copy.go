@@ -87,6 +87,7 @@ type written struct {
 	setDate *time.Time
 	fileSum [32]byte // the copy as named: sum with the date patches applied (sum when none)
 	patched bool     // the copy's bytes differ from the card's at exactly the date patches
+	camera  string   // with patched: the card's DateTimeOriginal (+SubSec) before the patches (dng.Exif.CameraTime)
 	dated   bool     // setDate was applied: patched, or nothing to patch, or Content Credentials
 	skipped []string // dng.PatchDates' fields left alone (an unparseable value, Content Credentials)
 	undated error    // the file's dates couldn't be read: copied as the card holds it
@@ -201,7 +202,7 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 			}
 			continue
 		}
-		ps, skipped, undated, orig, want, err := verifyDated(ctx, f.Name(), w.size, *w.setDate)
+		ps, skipped, undated, camera, orig, want, err := verifyDated(ctx, f.Name(), w.size, *w.setDate)
 		if err != nil {
 			return fmt.Errorf("verify %s: %w", filepath.Dir(f.Name()), err)
 		}
@@ -214,7 +215,7 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 		}
 		patches[i], w.fileSum = ps, want
 		if i == 0 {
-			w.skipped, w.undated = skipped, undated
+			w.skipped, w.undated, w.camera = skipped, undated, camera
 		}
 	}
 	if w.setDate != nil && w.undated == nil {
@@ -262,26 +263,32 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 // copy is good) and want (p with the patches applied). A file whose dates can't be
 // read because of its format (not a TIFF, offsets past its end) gets no patches and
 // undated says why; it is still verified. A read error is an I/O failure, returned
-// as err: the verify fails and offload's retry applies.
-func verifyDated(ctx context.Context, p string, size int64, t time.Time) (ps []dng.Patch, skipped []string, undated error, orig, want [32]byte, err error) {
+// as err: the verify fails and offload's retry applies. With patches, camera is the
+// capture time they replace: p's DateTimeOriginal (+SubSec) before them, the card's.
+func verifyDated(ctx context.Context, p string, size int64, t time.Time) (ps []dng.Patch, skipped []string, undated error, camera string, orig, want [32]byte, err error) {
 	f, err := os.Open(p)
 	if err != nil {
-		return nil, nil, nil, orig, want, err
+		return nil, nil, nil, "", orig, want, err
 	}
 	defer f.Close()
 	if err := noCache(f); err != nil {
-		return nil, nil, nil, orig, want, err
+		return nil, nil, nil, "", orig, want, err
 	}
 	ra := &ioErrAt{r: datesReaderAt(f)}
 	ps, skipped, undated = dng.PatchDates(ra, size, t)
+	if undated == nil && len(ps) > 0 {
+		if ex, err := dng.ReadExifFrom(ra, size); err == nil {
+			camera = ex.CameraTime()
+		}
+	}
 	if ra.err != nil {
-		return nil, nil, nil, orig, want, fmt.Errorf("read its metadata: %w", ra.err)
+		return nil, nil, nil, "", orig, want, fmt.Errorf("read its metadata: %w", ra.err)
 	}
 	if undated != nil {
 		ps, skipped = nil, nil
 	}
 	orig, want, err = streamPatched(ctx, f, ps, nil)
-	return ps, skipped, undated, orig, want, err
+	return ps, skipped, undated, camera, orig, want, err
 }
 
 // ioErrAt passes ReadAt through and keeps the first error that isn't the end of the

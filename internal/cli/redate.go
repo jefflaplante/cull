@@ -35,11 +35,13 @@ frame again from the card or a backup, then run redate again). Frames with Conte
 Credentials keep their signed dates; only their file times change.
 
 The offload manifest, the report and cull's sidecars follow, so judge continues the
-report without calling the model again. The report keeps the capture time it read when
-the shoot was scanned, which the sets are grouped by, so redate doesn't change the sets
-or their rankings; the corrected date goes into cull's sidecars.
+report without calling the model again. Sets are grouped by the camera's own capture
+time (the report's, or the camera_time the manifest records before the first change), so
+redate doesn't change the sets or their rankings; the corrected date goes into cull's
+sidecars. A folder with no manifest and no report has nowhere to keep it for Content
+Credentials frames (redate says so): run cull scan on it first.
 
-redate refuses while a judge or ranking batch is pending (finish or cancel it first)
+redate refuses while a judge or ranking batch is pending (finish it first: judge --batch)
 and while another cull command is using the folder (the folder lock, .cull.lock). An
 interrupted run is finished by running the same command again; until then the commands
 that read or change the folder's frames refuse it, and cull status says why. Capture One and Lightroom

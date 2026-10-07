@@ -92,6 +92,7 @@ type run struct {
 	warned                     bool                                // the catalogue warning was given
 	prev                       *journal.Redate                     // a dry run's view of the unfinished journal (read only)
 	held                       map[string]bool                     // files with a hidden temp left alone: not touched this run
+	unrecordedSigned           int                                 // Content Credentials frames with no manifest line or report entry
 }
 
 // changing gives, once, before the first file changes, the warning every command that
@@ -138,7 +139,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 			return r.res, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", p.Which, dir, p.Finish)
 		}
 	}
-	if err := journal.PendingBatch(r.reportPath); err != nil {
+	if err := journal.PendingBatch(dir, r.reportPath); err != nil {
 		return r.res, err
 	}
 	j, err := journal.LoadRedate(dir)
@@ -267,6 +268,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		}
 		r.noteSigned()
 	}
+	r.noteUnrecorded()
 	return r.res, runErr
 }
 
@@ -286,7 +288,7 @@ func (r *run) file(p string) error {
 		r.refuse(rel, err.Error())
 		return nil
 	}
-	ps, skipped, err := patchesFor(p, st.Size(), r.o.Target)
+	ps, skipped, before, err := patchesFor(p, st.Size(), r.o.Target)
 	if err != nil {
 		r.refuse(rel, "its dates can't be read: "+err.Error())
 		return nil
@@ -305,6 +307,18 @@ func (r *run) file(p string) error {
 	if recorded && e.Size != st.Size() {
 		r.refuse(rel, fmt.Sprintf("%v (%d bytes, recorded %d)", offload.ErrChanged, st.Size(), e.Size))
 		return nil
+	}
+	if signed && !recorded && (r.rep == nil || r.rep.ResultFor(p) == nil) {
+		r.unrecordedSigned++ // its corrected date can't be recorded anywhere (see noteUnrecorded)
+	}
+	// The camera's time, which grouping keeps reading: the manifest's when it records
+	// one (never replaced), else the time these patches replace, when there are any.
+	camera := ""
+	if recorded {
+		camera = e.CameraTime
+	}
+	if camera == "" && len(ps) > 0 {
+		camera = before
 	}
 	when := r.o.Target.Format(time.DateTime)
 	if len(ps) == 0 && r.isTarget(st.ModTime()) {
@@ -330,7 +344,7 @@ func (r *run) file(p string) error {
 		return nil
 	}
 
-	pre := journal.FileState{Size: st.Size(), ModTime: st.ModTime()}
+	pre := journal.FileState{Size: st.Size(), ModTime: st.ModTime(), CameraTime: camera}
 	if len(ps) == 0 {
 		// Its bytes don't change, but it is still proven first, so a damaged frame is
 		// refused and left exactly as it is, as a patched one would be: against the
@@ -365,7 +379,7 @@ func (r *run) file(p string) error {
 		r.crtime(crErr)
 		r.res.TimesOnly++
 		r.verbose("%s: file times → %s", rel, when)
-		return r.record(p, rel, pre, folder, e, recorded, want)
+		return r.record(p, rel, pre, folder, e, recorded, want, camera)
 	}
 	expect := ""
 	if recorded {
@@ -408,23 +422,24 @@ func (r *run) file(p string) error {
 	if crashAfterSwap != nil && crashAfterSwap(p) {
 		return errCrash
 	}
-	return r.record(p, rel, pre, folder, e, recorded, pre.Want)
+	return r.record(p, rel, pre, folder, e, recorded, pre.Want, camera)
 }
 
 // record does a changed file's bookkeeping: a superseding manifest line (want: the
-// patched checksum, "" when only its times changed), its report entry, its sidecar.
-func (r *run) record(p, rel string, pre journal.FileState, folder string, e offload.Entry, recorded bool, want string) error {
+// patched checksum, "" when only its times changed; camera: the camera's capture
+// time), its report entry, its sidecar.
+func (r *run) record(p, rel string, pre journal.FileState, folder string, e offload.Entry, recorded bool, want, camera string) error {
 	now, err := os.Stat(p)
 	if err != nil {
 		r.refuse(rel, "after the change: "+err.Error())
 		return nil
 	}
 	if recorded {
-		if err := r.supersede(folder, e, want); err != nil {
+		if err := r.supersede(folder, e, want, camera); err != nil {
 			return fmt.Errorf("manifest: %w", err)
 		}
 	}
-	r.follow(p, pre, now)
+	r.follow(p, pre, now, camera)
 	r.unsaved = append(r.unsaved, rel)
 	return nil
 }
@@ -436,7 +451,9 @@ func (r *run) record(p, rel string, pre journal.FileState, folder string, e offl
 // manifest's checksum.
 func (r *run) recover(p, rel string, st os.FileInfo, folder string, e offload.Entry, recorded bool) error {
 	fs, journaled := r.j.Files[rel]
-	needMan := recorded && (e.DatesSet != r.targetISO || (journaled && fs.Want != "" && e.FileSHA256 != fs.Want))
+	camera := cmp.Or(e.CameraTime, fs.CameraTime) // e's when recorded: never replaced
+	needMan := recorded && (e.DatesSet != r.targetISO || (journaled && fs.Want != "" && e.FileSHA256 != fs.Want) ||
+		(e.CameraTime == "" && camera != ""))
 	var x *report.Result
 	if r.rep != nil {
 		x = r.rep.ResultFor(p)
@@ -463,7 +480,7 @@ func (r *run) recover(p, rel string, st os.FileInfo, folder string, e offload.En
 		}
 	}
 	if needMan {
-		if err := r.supersede(folder, e, want); err != nil {
+		if err := r.supersede(folder, e, want, camera); err != nil {
 			return fmt.Errorf("manifest: %w", err)
 		}
 	}
@@ -471,16 +488,20 @@ func (r *run) recover(p, rel string, st os.FileInfo, folder string, e offload.En
 	if follows {
 		pre = fs
 	}
-	r.follow(p, pre, st)
+	r.follow(p, pre, st, camera)
 	r.unsaved = append(r.unsaved, rel)
 	return nil
 }
 
 // supersede appends e's superseding manifest line: the card's fields and checksum
-// unchanged, plus the date set and, for a patched file, its checksum now.
-func (r *run) supersede(folder string, e offload.Entry, want string) error {
+// unchanged, plus the date set and, for a patched file, its checksum now. The camera's
+// capture time is recorded once, the first time (camera), and carried after that.
+func (r *run) supersede(folder string, e offload.Entry, want, camera string) error {
 	ne := e
 	ne.DatesSet = r.targetISO
+	if ne.CameraTime == "" {
+		ne.CameraTime = camera
+	}
 	if want != "" {
 		ne.FileSHA256, ne.PatchedAt = want, time.Now().UTC()
 	}
@@ -500,8 +521,9 @@ func (r *run) supersede(folder string, e offload.Entry, want string) error {
 // The entry's Exif is left as the camera recorded it and as the frame was judged:
 // sequence grouping reads capture times from it, so rewriting it would regroup the
 // shoot's sets on the next judge or decide (and judge would pay to rank them again).
-// The corrected date lives in DatesSet, which the sidecar uses.
-func (r *run) follow(p string, pre journal.FileState, now os.FileInfo) {
+// The corrected date lives in DatesSet, which the sidecar uses, and the camera's time
+// in CameraTime (camera, recorded once), which grouping reads over Exif's.
+func (r *run) follow(p string, pre journal.FileState, now os.FileInfo, camera string) {
 	if r.rep == nil {
 		return
 	}
@@ -516,6 +538,9 @@ func (r *run) follow(p string, pre journal.FileState, now os.FileInfo) {
 		return
 	}
 	x.DatesSet = r.targetISO
+	if x.CameraTime == "" {
+		x.CameraTime = camera
+	}
 	r.dirty = true
 	at := x.File
 	if x.MovedTo != "" {
@@ -597,13 +622,23 @@ func (r *run) xattrs(rel string, errs []error) {
 	}
 }
 
-func patchesFor(p string, size int64, t time.Time) ([]dng.Patch, []string, error) {
+// patchesFor gives p's date patches to t and, when there are any, the capture time
+// they replace (dng.Exif.CameraTime of p as it is).
+func patchesFor(p string, size int64, t time.Time) ([]dng.Patch, []string, string, error) {
 	f, err := os.Open(p)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	defer f.Close()
-	return dng.PatchDates(f, size, t)
+	ps, skipped, err := dng.PatchDates(f, size, t)
+	if err != nil || len(ps) == 0 {
+		return ps, skipped, "", err
+	}
+	ex, err := dng.ReadExifFrom(f, size)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return ps, skipped, ex.CameraTime(), nil
 }
 
 // Folders lists dir, its sort folders (offload.MovedDirs), and with recursive every
@@ -884,6 +919,22 @@ func (r *run) crtime(err error) {
 		r.warn("couldn't set creation times (%v); modification times are set", err)
 	}
 	r.res.CrtimeFailed++
+}
+
+// noteUnrecorded says, once, how many Content Credentials frames had nowhere to record
+// their corrected date: they keep the camera's dates inside the file, and without an
+// offload manifest line or a report entry their sidecars can't carry the new one.
+// Scanning first gives them report entries; redate run again then records them.
+func (r *run) noteUnrecorded() {
+	if r.unrecordedSigned == 0 {
+		return
+	}
+	verb := "had"
+	if r.o.DryRun {
+		verb = "would have"
+	}
+	r.warn("%d Content Credentials frame(s) %s nowhere to record the corrected date (no offload manifest line or report entry; their files keep the camera's dates): run `cull scan %s` first, then this redate again, so the report and their sidecars carry it",
+		r.unrecordedSigned, verb, journal.ShellQuote(r.dir))
 }
 
 // noteSigned names the Content Credentials frames in one note: five, and the rest at

@@ -352,3 +352,29 @@ func TestRedateTempsNames(t *testing.T) {
 		}
 	}
 }
+
+// Final review P5c: a redate temp is a DNG's (any case), never another file's that
+// shares the prefix.
+func TestRedateTempsOnlyDNG(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{
+		".cull-redate-01020304.A.DNG", ".cull-redate-01020304.B.dng",
+		".cull-redate-01020304.C.xmp", ".cull-redate-01020304.D.DNG.bak", ".cull-redate-01020304.notes.txt",
+		".cull-redate-01020304.dng",
+	} {
+		os.WriteFile(filepath.Join(dir, n), nil, 0o644)
+	}
+	got := RedateTemps(dir)
+	want := map[string]string{
+		filepath.Join(dir, ".cull-redate-01020304.A.DNG"): filepath.Join(dir, "A.DNG"),
+		filepath.Join(dir, ".cull-redate-01020304.B.dng"): filepath.Join(dir, "B.dng"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("redate temps %v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s → %q, want %q", k, got[k], v)
+		}
+	}
+}

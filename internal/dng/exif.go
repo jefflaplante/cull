@@ -163,6 +163,31 @@ func (e Exif) CaptureTime() (time.Time, bool) {
 	return t, true
 }
 
+// cameraTimeLayout writes a camera time: the camera's wall clock, sub-seconds only
+// when recorded ("2025-12-28T00:05:59", "2025-12-28T00:05:59.42").
+const cameraTimeLayout = "2006-01-02T15:04:05.999999999"
+
+// CameraTime is e's capture time (CaptureTime) as the offload manifest and the report
+// record it before cull first rewrites a frame's dates (camera_time): "" when there is
+// none. ParseCameraTime gives back exactly the time CaptureTime gave, so grouping by it
+// is grouping by the camera's own recorded time.
+func (e Exif) CameraTime() string {
+	t, ok := e.CaptureTime()
+	if !ok {
+		return ""
+	}
+	return t.Format(cameraTimeLayout)
+}
+
+// ParseCameraTime reads a CameraTime back; "" or anything else is no time.
+func ParseCameraTime(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02T15:04:05", s) // a fractional second is accepted after the seconds
+	return t, err == nil
+}
+
 // Summary is the one-line shooting context for the model, e.g.
 // "1/125 s, ~f/4.8 (camera estimate), ISO 400, 35 mm, Summicron-M 1:2/35 ASPH.".
 func (e Exif) Summary() string {

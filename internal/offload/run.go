@@ -308,7 +308,8 @@ func (r *runner) settle(i int, f File, w *written, err error) bool {
 
 // record writes f's manifest line in each destination and counts it. sha256 is
 // always the card's hash; a copy whose dates were patched adds file_sha256 (the copy
-// as named) and patched_at, and any copy --set-date dated (patched, or only its file
+// as named), patched_at and camera_time (the card's capture time, which sequence
+// grouping keeps reading), and any copy --set-date dated (patched, or only its file
 // times: a Content Credentials frame, or nothing to patch) records dates_set.
 func (r *runner) record(f File, w *written) {
 	res := r.res
@@ -318,7 +319,7 @@ func (r *runner) record(f File, w *written) {
 	if w.dated {
 		e.DatesSet = w.setDate.Format("2006-01-02T15:04:05")
 		if w.patched {
-			e.FileSHA256, e.PatchedAt = hexOf(w.fileSum[:]), e.At
+			e.FileSHA256, e.PatchedAt, e.CameraTime = hexOf(w.fileSum[:]), e.At, w.camera
 		}
 	}
 	r.noteDates(f, w)
@@ -395,9 +396,18 @@ func (r *runner) noteUndated() {
 	if c := r.p.setDate.Format(time.TimeOnly); c != "12:00:00" {
 		at = " --time " + c
 	}
+	// Every destination holds the same copies: the backup needs the same fix.
+	var cmds []string
+	for i, d := range r.p.Dests {
+		c := fmt.Sprintf("`cull redate %s --date %s%s`", journal.ShellQuote(d), r.p.setDate.Format(time.DateOnly), at)
+		if i > 0 {
+			c += " (the backup)"
+		}
+		cmds = append(cmds, c)
+	}
 	r.emit(ui.Event{Note: &ui.Note{Level: ui.Normal, Text: fmt.Sprintf(
-		"%d copies already there were made without --set-date; fix their dates with `cull redate %q --date %s%s`",
-		n, r.p.Dests[0], r.p.setDate.Format(time.DateOnly), at)}})
+		"%d copies already there were made without --set-date; fix their dates with %s",
+		n, strings.Join(cmds, " and "))}})
 }
 
 // unreadableDates reports a file whose capture dates can't be read because of its

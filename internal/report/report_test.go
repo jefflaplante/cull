@@ -206,3 +206,28 @@ func TestRenamePaths(t *testing.T) {
 		t.Fatalf("none: %d", n)
 	}
 }
+
+// Save syncs the new report before it takes the report's name, so a crash right after
+// can't leave the name on an empty file.
+func TestSaveSyncsBeforeRename(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "cull-report.json")
+	var synced []string
+	restore := syncFile
+	syncFile = func(f *os.File) error {
+		if _, err := os.Stat(p); err == nil {
+			t.Error("synced after the rename")
+		}
+		synced = append(synced, f.Name())
+		return f.Sync()
+	}
+	defer func() { syncFile = restore }()
+	if err := (&Report{SchemaVersion: SchemaVersion}).Save(p); err != nil {
+		t.Fatal(err)
+	}
+	if len(synced) != 1 || synced[0] != p+".tmp" {
+		t.Fatalf("synced %v", synced)
+	}
+	if _, err := Load(p); err != nil {
+		t.Fatal(err)
+	}
+}

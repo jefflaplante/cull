@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jefflaplante/cull/internal/dng"
@@ -276,11 +277,29 @@ func (r *Report) Save(path string) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	// The new report is on the disk before it takes the name: a crash right after the
+	// rename can't leave the report's name on an empty file. (fsync, not F_FULLFSYNC:
+	// cheap; commands that need the drive's cache flushed too flush it themselves.)
+	if err := syncFile(f); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
 }
+
+// syncFile is Save's fsync of the new report; tests watch it.
+var syncFile = func(f *os.File) error { return syscall.Fsync(int(f.Fd())) } // plain fsync (f.Sync is F_FULLFSYNC on macOS)
 
 // ResultFor is the result describing the frame at path: the one moved there
 // (MovedTo), else the one whose home it is, unless that one is recorded as moved to a

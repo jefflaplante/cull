@@ -117,7 +117,7 @@ func swapLabels() map[string]*labels.Entry {
 // none, though its new name had one.
 func TestRenameSwap(t *testing.T) {
 	dir, data, where, b := swapShoot(t)
-	res := runRename(t, rename.Options{Dir: dir, Pattern: "S{n}"})
+	res := runRename(t, rename.Options{Dir: dir, Pattern: "S{n}", Reorder: true})
 	if res.Renamed != 4 {
 		t.Fatalf("result %+v", res)
 	}
@@ -236,7 +236,7 @@ func TestRenameStopsAnywhere(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				dir, data, where, b := swapShoot(t)
 				restore := rename.SetCrash(func(step string, i int) bool { return step == stop.step && i == stop.i })
-				_, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "S{n}"})
+				_, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "S{n}", Reorder: true})
 				restore()
 				if !errors.Is(err, rename.ErrCrash) {
 					t.Fatalf("err %v", err)
@@ -252,7 +252,7 @@ func TestRenameStopsAnywhere(t *testing.T) {
 					}
 					return
 				}
-				runRename(t, rename.Options{Dir: dir, Pattern: "S{n}"})
+				runRename(t, rename.Options{Dir: dir, Pattern: "S{n}", Reorder: true})
 				follows(t, dir, data, where, swapped, swapLabels(), b)
 			})
 		}
@@ -269,7 +269,7 @@ func TestRenameUndoStopped(t *testing.T) {
 	for _, step := range []string{"phase1", "phase2", "report", "manifest"} {
 		t.Run(step, func(t *testing.T) {
 			dir, data, where, b := swapShoot(t)
-			runRename(t, rename.Options{Dir: dir, Pattern: "S{n}"})
+			runRename(t, rename.Options{Dir: dir, Pattern: "S{n}", Reorder: true})
 			stopAt := 0
 			if step == "phase1" || step == "phase2" {
 				stopAt = 1
@@ -283,7 +283,7 @@ func TestRenameUndoStopped(t *testing.T) {
 			if _, finish, ok := journal.Incomplete(dir); !ok || !strings.Contains(finish, "--undo") {
 				t.Fatalf("unfinished undo: %q %v", finish, ok)
 			}
-			if _, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "S{n}"}); err == nil || !strings.Contains(err.Error(), "--undo") {
+			if _, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "S{n}", Reorder: true}); err == nil || !strings.Contains(err.Error(), "--undo") {
 				t.Fatalf("a rename during an unfinished undo: %v", err)
 			}
 			runRename(t, rename.Options{Dir: dir, Undo: true})

@@ -284,7 +284,7 @@ func follows(t *testing.T, dir string, data map[string][]byte, from, to map[stri
 		old := from[name]
 		if old != rel && !contains(to, old) {
 			for _, gone := range []string{old, sidecarOf(old)} {
-				if _, err := os.Lstat(filepath.Join(dir, gone)); !os.IsNotExist(err) {
+				if gone != sidecarOf(rel) && exactly(filepath.Join(dir, gone)) {
 					t.Errorf("%s: %s still there", name, gone)
 				}
 			}
@@ -351,6 +351,18 @@ func follows(t *testing.T, dir string, data map[string][]byte, from, to map[stri
 	}
 }
 
+// exactly reports whether a file is listed under exactly that name (on a
+// case-insensitive volume, Lstat finds "m1.dng" under "m1.DNG").
+func exactly(p string) bool {
+	ents, _ := os.ReadDir(filepath.Dir(p))
+	for _, e := range ents {
+		if e.Name() == filepath.Base(p) {
+			return true
+		}
+	}
+	return false
+}
+
 func contains(m map[string]string, v string) bool {
 	for _, x := range m {
 		if x == v {
@@ -386,6 +398,9 @@ func snapshot(t *testing.T, dir string) string {
 			return err
 		}
 		rel, _ := filepath.Rel(dir, p)
+		if d.Name() == ".cull.lock" { // the folder lock: no frame, temp or record
+			return nil
+		}
 		if d.IsDir() {
 			lines = append(lines, rel+"/")
 			return nil

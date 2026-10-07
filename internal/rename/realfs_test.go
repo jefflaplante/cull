@@ -60,7 +60,7 @@ func TestRealFSInterruptedRename(t *testing.T) {
 				os.WriteFile(filepath.Join(dir, strings.TrimSuffix(n, ".DNG")+".xmp"), []byte("<x:xmpmeta/>"+n), 0o644)
 			}
 			restore := rename.SetCrash(func(step string, i int) bool { return step == stop && (i == 1 || stop == "manifest") })
-			_, err = rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "S{n}"})
+			_, err = rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "S{n}", Reorder: true})
 			restore()
 			if !errors.Is(err, rename.ErrCrash) {
 				t.Fatalf("err %v", err)
@@ -76,7 +76,7 @@ func TestRealFSInterruptedRename(t *testing.T) {
 					t.Fatalf("a companion taken for a temp: %s", tmp)
 				}
 			}
-			runRename(t, rename.Options{Dir: dir, Pattern: "S{n}"})
+			runRename(t, rename.Options{Dir: dir, Pattern: "S{n}", Reorder: true})
 			check := func(where map[string]string) {
 				t.Helper()
 				for orig, n := range where {

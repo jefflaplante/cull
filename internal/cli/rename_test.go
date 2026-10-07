@@ -61,8 +61,11 @@ func TestRenameArgs(t *testing.T) {
 			t.Errorf("%v: no error\n%s", args, out)
 		}
 	}
-	if !notInDotfile["undo"] {
-		t.Fatal("--undo may be set in the dotfile")
+	if !notInDotfile["undo"] || !notInDotfile["reorder"] {
+		t.Fatal("--undo or --reorder may be set in the dotfile")
+	}
+	if out, _ := run(t, "rename", "--help"); !strings.Contains(out, "--reorder") || !strings.Contains(out, "Capture One's settings") {
+		t.Fatalf("help:\n%s", out)
 	}
 }
 

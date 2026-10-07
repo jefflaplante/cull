@@ -96,19 +96,31 @@ Lightroom may lose track of frames already imported.`,
 	return cmd
 }
 
-// refuseUnfinished stops a command that relies on the report's keys, or moves the
-// files, while a redate or rename of dir is unfinished: its keys may not match the
-// files yet.
-// With recursive, a folder below dir (a shoot folder judge -r reaches) counts too.
-func refuseUnfinished(dir string, recursive bool) error {
-	folder, which, finish, ok := dir, "", "", false
+// holdShoot takes dir's folder lock, shared, for a command that relies on the frames
+// keeping their names and bytes (judge, decide, review, restore) for its whole run, and
+// refuses while a redate or rename of dir is unfinished: its keys may not match the
+// files yet. With recursive, folders below dir (shoot folders judge -r reaches) are
+// checked too. release ends the hold; call it when the command is done.
+func holdShoot(cmd *cobra.Command, dir string, recursive bool) (release func(), err error) {
+	release, note, err := journal.Lock(dir, false, cmd.Name())
+	if err != nil {
+		return func() {}, err
+	}
+	if note != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "note: "+note)
+	}
+	pending := journal.Unfinished(dir)
 	if recursive {
-		folder, which, finish, ok = journal.IncompleteBelow(dir)
-	} else {
-		which, finish, ok = journal.Incomplete(dir)
+		pending = journal.IncompleteBelow(dir)
 	}
-	if ok {
-		return fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", which, folder, finish)
+	if len(pending) > 0 {
+		release()
+		p := pending[0]
+		msg := fmt.Sprintf("an unfinished %s is recorded in %s: finish it first with %s", p.Which, p.Folder, p.Finish)
+		for _, q := range pending[1:] {
+			msg += fmt.Sprintf("; and an unfinished %s in %s: %s", q.Which, q.Folder, q.Finish)
+		}
+		return func() {}, errors.New(msg)
 	}
-	return nil
+	return release, nil
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jefflaplante/cull/internal/dng"
+	"github.com/jefflaplante/cull/internal/journal"
 	"github.com/jefflaplante/cull/internal/ui"
 )
 
@@ -52,6 +53,25 @@ type Result struct {
 func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 	start := time.Now()
 	r := &runner{ctx: ctx, p: p, res: &Result{Plan: p}, sink: sink}
+	// A shoot folder that exists already is held, shared, for the whole copy: redate
+	// and rename (which hold it exclusively) never run under it. A new one has nothing
+	// for them to change yet.
+	for _, d := range p.Dests {
+		if st, err := os.Stat(d); err != nil || !st.IsDir() {
+			continue
+		}
+		release, note, err := journal.Lock(d, false, "offload")
+		if err != nil {
+			return r.res, err
+		}
+		defer release()
+		if note != "" && sink != nil {
+			sink.Emit(ui.Event{Note: &ui.Note{Sev: ui.Warn, Text: note}})
+		}
+		if ps := journal.Unfinished(d); len(ps) > 0 {
+			return r.res, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s, then offload", ps[0].Which, d, ps[0].Finish)
+		}
+	}
 	for _, d := range p.Dests {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return r.res, err

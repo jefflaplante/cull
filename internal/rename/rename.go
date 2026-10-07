@@ -24,10 +24,12 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jefflaplante/cull/internal/dng"
+	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/journal"
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/offload"
@@ -36,6 +38,7 @@ import (
 	"github.com/jefflaplante/cull/internal/review"
 	"github.com/jefflaplante/cull/internal/ui"
 	"github.com/jefflaplante/cull/internal/xmp"
+	"golang.org/x/sys/unix"
 )
 
 // Options are one rename run.
@@ -43,6 +46,7 @@ type Options struct {
 	Dir, ReportPath, Pattern string // ReportPath "" = <Dir>/cull-report.json
 	Recursive                bool   // subfolders too (each must not be a shoot folder of its own)
 	DryRun, Undo             bool
+	Reorder                  bool // go ahead when the new names change the frames' order (sets regroup)
 	UI                       ui.Sink
 }
 
@@ -101,18 +105,33 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	if slices.Contains(offload.MovedDirs, filepath.Base(dir)) {
 		return r.res, fmt.Errorf("%s is a sort folder: run cull rename on its shoot folder, %s (its sorted frames are renamed where they are)", dir, filepath.Dir(dir))
 	}
-	if which, finish, ok := journal.Incomplete(dir); ok && which != "rename" {
-		return r.res, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", which, dir, finish)
-	}
-	if o.Recursive {
-		if folder, which, finish, ok := journal.IncompleteBelow(dir); ok && folder != dir {
-			return r.res, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", which, folder, finish)
+	if !o.DryRun {
+		release, note, err := journal.Lock(dir, true, "rename")
+		if err != nil {
+			return r.res, err
 		}
+		defer release()
+		if note != "" {
+			r.warn("%s", note)
+		}
+	}
+	pending := journal.Unfinished(dir)
+	if o.Recursive {
+		pending = journal.IncompleteBelow(dir)
+	}
+	for _, p := range pending {
+		if p.Which != "rename" || p.Folder != dir {
+			return r.res, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", p.Which, p.Folder, p.Finish)
+		}
+	}
+	if err := journal.PendingBatch(r.reportPath); err != nil {
+		return r.res, err
 	}
 	j, err := journal.LoadRename(dir)
 	if err != nil {
-		return r.res, fmt.Errorf("%w: move it aside if no rename is running", err)
+		return r.res, fmt.Errorf("%v: frames may be under hidden .cull-rename- temps that only it records; cull status %s lists them; restore the journal from a backup rather than delete it", err, journal.ShellQuote(dir))
 	}
+	r.otherReports()
 	unfinished := j != nil && !j.Complete
 	if !o.Undo && !unfinished {
 		if err := offload.ValidatePattern(o.Pattern); err != nil {
@@ -206,66 +225,106 @@ type frame struct {
 	size       int64
 	mtime      time.Time
 	orig       string // the manifest's camera name; "" unrecorded
+	origSize   int64  // with orig, the manifest's key for it
 	datesSet   string // the manifest's date set, "2026-10-04T12:00:00"
 	hasSidecar bool
+	locked     string // "" or why it can't be renamed (an immutable flag)
 }
 
 func (f frame) base() string { return filepath.Base(f.rel) }
 
-// survey lists the frames in folders, and every name in them by shoot folder (lower
-// case → relative paths), for the clash checks.
-func (r *run) survey(folders []string) ([]frame, map[string]map[string][]string, error) {
+// shoot is what survey found: the frames, every name in the shoot's folders, and the
+// names its manifest records for frames no longer there.
+type shoot struct {
+	frames []frame
+	names  map[string]map[string][]string // shoot folder → lower-case name → relative paths
+	ghosts map[string]map[string]string   // shoot folder → lower-case name → manifest name, its frame missing
+	dirs   map[string][]string            // folder (relative) → names in it
+}
+
+// survey lists the frames in folders, and every name in them, for the checks.
+func (r *run) survey(folders []string) (*shoot, error) {
 	man := map[string]map[string]offload.Entry{}
-	occupied := map[string]map[string][]string{}
-	var frames []frame
+	sh := &shoot{names: map[string]map[string][]string{}, ghosts: map[string]map[string]string{}, dirs: map[string][]string{}}
 	for _, d := range folders {
 		unit := redate.ShootOf(r.dir, d)
 		if _, ok := man[unit]; !ok {
 			es, err := offload.CurrentManifest(unit)
 			if err != nil {
-				return nil, nil, fmt.Errorf("%s: %w", filepath.Join(unit, offload.ManifestName), err)
+				return nil, fmt.Errorf("%s: %w", filepath.Join(unit, offload.ManifestName), err)
 			}
 			m := map[string]offload.Entry{}
 			for _, e := range es {
 				m[strings.ToLower(e.Name)] = e
 			}
-			man[unit], occupied[unit] = m, map[string][]string{}
+			man[unit], sh.names[unit] = m, map[string][]string{}
 		}
 		ents, err := os.ReadDir(d)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for _, e := range ents {
 			rel := r.rel(filepath.Join(d, e.Name()))
 			low := strings.ToLower(e.Name())
-			occupied[unit][low] = append(occupied[unit][low], rel)
+			sh.names[unit][low] = append(sh.names[unit][low], rel)
+			sh.dirs[r.rel(d)] = append(sh.dirs[r.rel(d)], e.Name())
 			if !e.Type().IsRegular() || strings.HasPrefix(e.Name(), ".") || !strings.EqualFold(filepath.Ext(e.Name()), ".dng") {
 				continue
 			}
-			st, err := e.Info()
+			st, err := os.Lstat(filepath.Join(d, e.Name()))
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
-			f := frame{rel: rel, unit: unit, size: st.Size(), mtime: st.ModTime()}
+			f := frame{rel: rel, unit: unit, size: st.Size(), mtime: st.ModTime(), locked: lockedFlag(st)}
 			if me, ok := man[unit][low]; ok {
-				f.orig, f.datesSet = me.Orig, me.DatesSet
+				f.orig, f.origSize, f.datesSet = me.Orig, me.Size, me.DatesSet
 			}
 			if st, err := os.Lstat(xmp.Path(r.abs(rel))); err == nil && st.Mode().IsRegular() {
 				f.hasSidecar = true
+				if why := lockedFlag(st); why != "" && f.locked == "" {
+					f.locked = "its sidecar " + why
+				}
 			}
-			frames = append(frames, f)
+			sh.frames = append(sh.frames, f)
 		}
 	}
 	// Names must be unique in a shoot (labels and the report's home paths rely on it).
 	seen := map[string]string{}
-	for _, f := range frames {
+	for _, f := range sh.frames {
 		k := f.unit + "\x00" + strings.ToLower(f.base())
 		if other, ok := seen[k]; ok {
-			return nil, nil, fmt.Errorf("%s and %s have the same name in one shoot: rename relies on unique names; move one aside", other, f.rel)
+			return nil, fmt.Errorf("%s and %s have the same name in one shoot: rename relies on unique names; move one aside", other, f.rel)
 		}
 		seen[k] = f.rel
 	}
-	return frames, occupied, nil
+	// A manifest name whose frame is gone (deleted, say) stays taken: an offload re-run
+	// or --verify would take a new frame of that name for it.
+	for unit, m := range man {
+		sh.ghosts[unit] = map[string]string{}
+		for low, e := range m {
+			if _, ok := seen[unit+"\x00"+low]; !ok {
+				sh.ghosts[unit][low] = e.Name
+			}
+		}
+	}
+	return sh, nil
+}
+
+// refuseOrphans refuses a new rename while hidden rename temps no unfinished rename
+// records are in the folders: one may be a frame's only copy.
+func (r *run) refuseOrphans(folders []string) error {
+	var found []string
+	for _, d := range folders {
+		for tmp := range offload.RenameTemps(d) {
+			found = append(found, tmp)
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	sort.Strings(found)
+	return fmt.Errorf("hidden rename temps that no unfinished rename records are in the shoot: %s; one may be a frame's only copy: cull status %s says what to do with each; nothing was renamed",
+		strings.Join(found, ", "), journal.ShellQuote(r.dir))
 }
 
 var datedFolder = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})(?: (.+))?$`)
@@ -277,11 +336,14 @@ func (r *run) plan() (*journal.Rename, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.orphanTemps(folders)
-	frames, occupied, err := r.survey(folders)
+	if err := r.refuseOrphans(folders); err != nil {
+		return nil, err
+	}
+	sh, err := r.survey(folders)
 	if err != nil {
 		return nil, err
 	}
+	frames := sh.frames
 	key := func(f frame) string { return strings.ToLower(cmp.Or(f.orig, f.base())) }
 	sort.SliceStable(frames, func(a, b int) bool {
 		if ka, kb := key(frames[a]), key(frames[b]); ka != kb {
@@ -311,11 +373,126 @@ func (r *run) plan() (*journal.Rename, error) {
 		}
 		newBase[f.rel] = stem + strings.ToUpper(filepath.Ext(f.base()))
 	}
-	moves, err := r.check(frames, occupied, newBase)
+	moves, err := r.check(sh, newBase)
 	if err != nil || len(moves) == 0 {
 		return nil, err
 	}
+	if err := r.checkOrder(moves); err != nil {
+		return nil, err
+	}
 	return &journal.Rename{Pattern: r.o.Pattern, Recursive: r.o.Recursive, Report: r.reportField, Started: time.Now(), Moves: moves, Phase: 1}, nil
+}
+
+// checkOrder refuses a rename that changes the order of the report's frames as
+// sequence grouping sees it (capture time, then path: frames with the same capture
+// time, as a burst or a stopped clock gives, are ordered by name). A new order regroups
+// the shoot's sets, and judge would rank the changed sets again. Reorder goes ahead,
+// saying how many sets change.
+func (r *run) checkOrder(moves []journal.RenameMove) error {
+	if r.rep == nil {
+		return nil
+	}
+	to := map[string]string{} // the report's (home) path → the new one
+	for _, m := range moves {
+		t := r.triples(m)
+		h := t[0]
+		if len(t) > 2 {
+			h = t[2]
+		}
+		to[h[0]] = h[2]
+	}
+	var before, after []group.Frame
+	for _, x := range r.rep.Results {
+		if x.Error != "" || x.Preview == nil {
+			continue
+		}
+		f := group.Frame{Key: x.File}
+		if x.Exif != nil {
+			f.Time, f.HasTime = x.Exif.CaptureTime()
+		}
+		if look, ok := x.LookBytes(); ok {
+			f.Look = look
+		}
+		before = append(before, f)
+		if n, ok := to[x.File]; ok {
+			f.Key = n
+		}
+		after = append(after, f)
+	}
+	if slices.Equal(seqOrder(before), seqOrder(after)) {
+		return nil
+	}
+	changed := -1
+	if r.rep.Seq != nil && r.rep.Seq.GapSeconds > 0 {
+		changed = setsChanged(group.Sequences(before, r.rep.Seq.Options()), group.Sequences(after, r.rep.Seq.Options()))
+	}
+	if r.o.Reorder {
+		if changed >= 0 {
+			r.warn("the new names put frames with the same capture time in another order: %d set(s) change, and judge ranks them again", changed)
+		} else {
+			r.warn("the new names put frames with the same capture time in another order")
+		}
+		return nil
+	}
+	cause := "the new names sort frames with the same capture time in another order than their names do now"
+	if strings.Contains(r.o.Pattern, "{n}") && len(before) >= 10 {
+		cause = fmt.Sprintf("{n} is unpadded, so 10 sorts before 2: use {n:%d}", max(4, len(strconv.Itoa(len(before)))))
+	}
+	sets := ""
+	if changed >= 0 {
+		sets = fmt.Sprintf(" (%d set(s) would change)", changed)
+	}
+	return fmt.Errorf("this rename would change the order of the report's frames, which regroups the shoot's sets%s and makes judge rank them again: %s; or pass --reorder to go ahead; nothing was renamed", sets, cause)
+}
+
+// seqOrder is the order group.Sequences puts frames in: by capture time when every
+// frame has one, then by key (path).
+func seqOrder(fs []group.Frame) []int {
+	allTimed := true
+	for _, f := range fs {
+		allTimed = allTimed && f.HasTime
+	}
+	order := make([]int, len(fs))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		fa, fb := fs[order[a]], fs[order[b]]
+		if allTimed && !fa.Time.Equal(fb.Time) {
+			return fa.Time.Before(fb.Time)
+		}
+		return fa.Key < fb.Key
+	})
+	return order
+}
+
+// setsChanged counts the sets in a that b doesn't have, and those in b that a doesn't.
+func setsChanged(a, b [][]int) int {
+	key := func(s []int) string {
+		c := slices.Clone(s)
+		slices.Sort(c)
+		return fmt.Sprint(c)
+	}
+	in := func(sets [][]int) map[string]bool {
+		m := map[string]bool{}
+		for _, s := range sets {
+			m[key(s)] = true
+		}
+		return m
+	}
+	ia, ib := in(a), in(b)
+	n := 0
+	for k := range ia {
+		if !ib[k] {
+			n++
+		}
+	}
+	for k := range ib {
+		if !ia[k] {
+			n++
+		}
+	}
+	return n
 }
 
 // captureDate is f's capture date as YYYYMMDD: the date offload --set-date or redate
@@ -343,17 +520,27 @@ func allDigits(s string) bool {
 	return s != ""
 }
 
-// check turns the new names (by frame, relative path → base name) into moves, refusing
-// before anything changes when two frames of a shoot would share a name, or a new name
-// (or its sidecar's) is held by anything but a frame or sidecar that moves away.
-func (r *run) check(frames []frame, occupied map[string]map[string][]string, newBase map[string]string) ([]journal.RenameMove, error) {
+// check turns the new names (by frame, relative path → base name) into moves. It
+// refuses, before anything changes and listing every problem, when:
+//   - two frames of a shoot would share a name;
+//   - a new name, its temp's or its sidecar's, can't be a file name here (over 255
+//     bytes, "/", ":", NUL, a leading ".");
+//   - a frame or its sidecar is locked, or a folder can't be written;
+//   - a moving frame has companions that wouldn't follow it (a camera JPG, a
+//     "<name>.xmp", Capture One's settings): only "<stem>.xmp" moves with it;
+//   - any file in the shoot (or a manifest name whose frame is gone) holds a new stem.
+func (r *run) check(sh *shoot, newBase map[string]string) ([]journal.RenameMove, error) {
+	var problems []string
+	bad := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 	final := map[string]string{} // unit + lower-case final name → frame
 	vacate := map[string]bool{}  // lower-case relative paths moving away
-	for _, f := range frames {
+	isFrame := map[string]bool{} // lower-case relative paths of frames
+	for _, f := range sh.frames {
+		isFrame[strings.ToLower(f.rel)] = true
 		nb := cmp.Or(newBase[f.rel], f.base())
 		k := f.unit + "\x00" + strings.ToLower(nb)
 		if other, ok := final[k]; ok {
-			return nil, fmt.Errorf("%s and %s would both be named %s: nothing was renamed", other, f.rel, nb)
+			bad("%s and %s would both be named %s", other, f.rel, nb)
 		}
 		final[k] = f.rel
 		if nb != f.base() {
@@ -364,21 +551,54 @@ func (r *run) check(frames []frame, occupied map[string]map[string][]string, new
 		}
 	}
 	var moves []journal.RenameMove
-	for _, f := range frames {
+	folders := map[string]bool{}
+	for _, f := range sh.frames {
 		nb := cmp.Or(newBase[f.rel], f.base())
 		if nb == f.base() {
 			continue
 		}
-		for _, want := range []string{nb, strings.TrimSuffix(nb, filepath.Ext(nb)) + ".xmp"} {
-			for _, at := range occupied[f.unit][strings.ToLower(want)] {
-				if !vacate[strings.ToLower(at)] {
-					return nil, fmt.Errorf("%s (the new name of %s, or its sidecar's) already exists and isn't a frame being renamed: move it aside or pick another pattern; nothing was renamed", at, f.rel)
+		d := filepath.Dir(f.rel)
+		folders[d] = true
+		m := journal.RenameMove{Old: f.rel, Tmp: filepath.Join(d, offload.RenameTempName(f.base())), New: filepath.Join(d, nb),
+			Size: f.size, ModTime: f.mtime, Orig: f.orig, OrigSize: f.origSize}
+		newStem := strings.TrimSuffix(nb, filepath.Ext(nb))
+		for _, n := range []struct{ what, name string }{
+			{"the new name", nb}, {"its hidden temp", filepath.Base(m.Tmp)},
+			{"its sidecar's new name", newStem + ".xmp"}, {"its sidecar's hidden temp", filepath.Base(xmp.Path(m.Tmp))},
+		} {
+			if why := nameProblem(n.name, strings.Contains(n.what, "temp")); why != "" {
+				bad("%s: %s %q %s", f.rel, n.what, n.name, why)
+			}
+		}
+		if f.locked != "" {
+			bad("%s: %s: unlock it (Finder: Get Info, Locked) or leave it out", f.rel, f.locked)
+		}
+		// Companions that wouldn't follow it.
+		stem := strings.ToLower(strings.TrimSuffix(f.base(), filepath.Ext(f.base())))
+		for _, n := range sh.dirs[d] {
+			low := strings.ToLower(n)
+			if strings.HasPrefix(low, stem+".") && !strings.HasPrefix(n, "._") && low != strings.ToLower(f.base()) &&
+				low != stem+".xmp" && !isFrame[strings.ToLower(filepath.Join(d, n))] {
+				bad("%s: %s would keep the old name (rename moves only the frame and its .xmp sidecar): move it aside, or rename it with its frame yourself", f.rel, filepath.Join(d, n))
+			}
+		}
+		if c1 := captureOneSettings(r.abs(d), f.base()); c1 != "" {
+			bad("%s: Capture One's settings %s would keep the old name and lose the frame's edits: rename it in Capture One instead, or move the settings aside", f.rel, r.rel(c1))
+		}
+		// Anything in the shoot named for the new stem.
+		for low, ats := range sh.names[f.unit] {
+			if !strings.HasPrefix(low, strings.ToLower(newStem)+".") {
+				continue
+			}
+			for _, at := range ats {
+				if !vacate[strings.ToLower(at)] && !strings.HasPrefix(filepath.Base(at), "._") && strings.ToLower(at) != strings.ToLower(f.rel) {
+					bad("%s: %s already exists, with the stem of its new name %s: move it aside or pick another pattern", f.rel, at, nb)
 				}
 			}
 		}
-		d := filepath.Dir(f.rel)
-		m := journal.RenameMove{Old: f.rel, Tmp: filepath.Join(d, offload.RenameTempName(f.base())), New: filepath.Join(d, nb),
-			Size: f.size, ModTime: f.mtime, Orig: f.orig}
+		if g, ok := sh.ghosts[f.unit][strings.ToLower(nb)]; ok {
+			bad("%s: its new name %s is the name the offload manifest records for a frame no longer in the shoot (deleted?): pick another pattern", f.rel, g)
+		}
 		if f.hasSidecar {
 			m.SidecarOld, m.SidecarTmp, m.SidecarNew = r.rel(xmp.Path(r.abs(m.Old))), r.rel(xmp.Path(r.abs(m.Tmp))), r.rel(xmp.Path(r.abs(m.New)))
 		}
@@ -388,8 +608,47 @@ func (r *run) check(frames []frame, occupied map[string]map[string][]string, new
 		}
 		moves = append(moves, m)
 	}
+	for d := range folders {
+		if err := unix.Access(r.abs(d), unix.W_OK); err != nil {
+			bad("%s can't be written (%v)", r.abs(d), err)
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return nil, fmt.Errorf("nothing was renamed:\n  %s", strings.Join(problems, "\n  "))
+	}
 	sort.Slice(moves, func(a, b int) bool { return moves[a].Old < moves[b].Old })
 	return moves, nil
+}
+
+// nameProblem says why name can't be a file name here ("" if it can); a frame's or a
+// sidecar's name must not be hidden either (a temp's is, on purpose).
+func nameProblem(name string, temp bool) string {
+	switch {
+	case len(name) > 255:
+		return fmt.Sprintf("is %d bytes; a file name holds at most 255", len(name))
+	case strings.ContainsAny(name, "/:\x00"):
+		return `holds "/", ":" or NUL`
+	case !temp && strings.HasPrefix(name, "."):
+		return "starts with \".\": hidden, never taken for a frame"
+	}
+	return ""
+}
+
+// captureOneSettings is Capture One's settings file for the frame name in folder d
+// (CaptureOne/Settings*/<name>.cos), or "".
+func captureOneSettings(d, name string) string {
+	ents, _ := os.ReadDir(filepath.Join(d, "CaptureOne"))
+	for _, e := range ents {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "Settings") {
+			continue
+		}
+		p := filepath.Join(d, "CaptureOne", e.Name(), name+".cos")
+		if _, err := os.Lstat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }
 
 // undoPlan reverses a completed rename: each frame it named goes back to its name
@@ -399,12 +658,15 @@ func (r *run) undoPlan(fwd *journal.Rename) (*journal.Rename, error) {
 	if err != nil {
 		return nil, err
 	}
-	frames, occupied, err := r.survey(folders)
+	if err := r.refuseOrphans(folders); err != nil {
+		return nil, err
+	}
+	sh, err := r.survey(folders)
 	if err != nil {
 		return nil, err
 	}
 	at := map[string]frame{} // unit + lower-case name → frame
-	for _, f := range frames {
+	for _, f := range sh.frames {
 		at[f.unit+"\x00"+strings.ToLower(f.base())] = f
 	}
 	newBase := map[string]string{}
@@ -416,7 +678,7 @@ func (r *run) undoPlan(fwd *journal.Rename) (*journal.Rename, error) {
 		}
 		newBase[f.rel] = filepath.Base(m.Old)
 	}
-	moves, err := r.check(frames, occupied, newBase)
+	moves, err := r.check(sh, newBase)
 	if err != nil || len(moves) == 0 {
 		return nil, err
 	}
@@ -431,7 +693,7 @@ func (r *run) undoUnfinished(fwd *journal.Rename) *journal.Rename {
 	u := &journal.Rename{Pattern: fwd.Pattern, Undo: true, Recursive: fwd.Recursive, Report: fwd.Report, Started: time.Now(), Phase: 1}
 	for _, m := range fwd.Moves {
 		um := journal.RenameMove{Old: m.New, Tmp: m.Tmp, New: m.Old, SidecarOld: m.SidecarNew, SidecarTmp: m.SidecarTmp, SidecarNew: m.SidecarOld,
-			Size: m.Size, ModTime: m.ModTime, Orig: m.Orig, Label: m.Label}
+			Size: m.Size, ModTime: m.ModTime, Orig: m.Orig, OrigSize: m.OrigSize, Label: m.Label}
 		if fwd.Phase <= 1 {
 			// Its old name or its temp holds it (nothing else can, in phase 1): what is
 			// there is the frame, as it is now.
@@ -869,9 +1131,10 @@ func (r *run) followManifests() error {
 		}
 		grew := false
 		for _, m := range byUnit[u] {
-			oldB, newB := filepath.Base(m.Old), filepath.Base(m.New)
+			newB := filepath.Base(m.New)
 			for _, e := range es {
-				if !strings.EqualFold(e.Orig, m.Orig) || (!strings.EqualFold(e.Name, oldB) && !strings.EqualFold(e.Name, newB)) {
+				// The manifest's own key: the current line per (camera name, size).
+				if !strings.EqualFold(e.Orig, m.Orig) || e.Size != m.OrigSize {
 					continue
 				}
 				if e.Name != newB {
@@ -906,6 +1169,14 @@ func (r *run) followCache() {
 	}
 	if _, err := os.Stat(assets); err != nil {
 		return
+	}
+	// Temps a crash left here, part way through this step: cached images only.
+	if ents, err := os.ReadDir(assets); err == nil {
+		for _, e := range ents {
+			if strings.HasPrefix(e.Name(), offload.RenameTempPrefix) && e.Type().IsRegular() {
+				os.Remove(filepath.Join(assets, e.Name()))
+			}
+		}
 	}
 	type pair struct{ tmp, to string }
 	var pairs []pair
@@ -949,16 +1220,6 @@ func (r *run) followCache() {
 	}
 }
 
-// orphanTemps warns about rename temps no unfinished rename records: one may be a
-// frame's only copy (cull status lists them with what to do).
-func (r *run) orphanTemps(folders []string) {
-	for _, d := range folders {
-		for tmp, name := range offload.RenameTemps(d) {
-			r.warn("hidden temp %s isn't part of an unfinished rename: it may be the only copy of %s (cull status says what to do)", tmp, name)
-		}
-	}
-}
-
 // flush carries path (a file or folder) to the media: F_FULLFSYNC, fsync on a share.
 func (r *run) flush(path string) error {
 	r.traced("flush " + path)
@@ -977,6 +1238,22 @@ func (r *run) move(from, to string) error {
 func (r *run) traced(ev string) {
 	if trace != nil {
 		trace(ev)
+	}
+}
+
+// otherReports warns about other reports in the folder: their keys don't follow.
+func (r *run) otherReports() {
+	ents, _ := os.ReadDir(r.dir)
+	var others []string
+	for _, e := range ents {
+		n := e.Name()
+		if strings.HasPrefix(n, "cull-report") && strings.HasSuffix(n, ".json") && !strings.HasSuffix(n, "batch.json") &&
+			filepath.Join(r.dir, n) != r.reportPath {
+			others = append(others, n)
+		}
+	}
+	if len(others) > 0 {
+		r.warn("only %s follows the rename; %s in the folder keep(s) the old names (judge on it would judge the frames again)", filepath.Base(r.reportPath), strings.Join(others, ", "))
 	}
 }
 

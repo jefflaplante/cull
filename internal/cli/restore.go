@@ -25,9 +25,11 @@ is listed. To keep some frames where they are, move the others back by hand inst
 			if err != nil {
 				return err
 			}
-			if err := refuseUnfinished(cfg.Dir, false); err != nil {
+			release, err := holdShoot(cmd, cfg.Dir, false)
+			if err != nil {
 				return err
 			}
+			defer release()
 			out := so.out.newOutput(cmd, true)
 			n, err := pipeline.Restore(cfg.ReportPath, cfg.Dir, ui.LineWriter(out.UI, ui.Quiet, ui.Warn), out.UI)
 			out.Close()

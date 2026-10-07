@@ -87,9 +87,11 @@ Capture One or Lightroom: they lose track of files that move; use apply-c1 inste
 			if err != nil {
 				return err
 			}
-			if err := refuseUnfinished(cfg.Dir, false); err != nil {
+			release, err := holdShoot(cmd, cfg.Dir, false)
+			if err != nil {
 				return err
 			}
+			defer release()
 			rep, err := report.Load(cfg.ReportPath)
 			if err != nil {
 				return fmt.Errorf("no report: %w (run scan or judge first, or pass -o)", err)

@@ -173,7 +173,8 @@ type RenameMove struct {
 	ModTime    time.Time `json:"mtime"`
 	// Orig is the camera name the offload manifest records for the frame (with Size, its
 	// manifest key); "" for a frame no manifest records.
-	Orig string `json:"orig,omitempty"`
+	Orig     string `json:"orig,omitempty"`
+	OrigSize int64  `json:"orig_size,omitempty"` // the manifest entry's size: with Orig, its key
 	// Label is the frame's entry in the labels log when the journal was written: the
 	// new name gets it (nil: none, so a label left under the new name is cleared).
 	Label *labels.Entry `json:"label,omitempty"`
@@ -214,6 +215,18 @@ func RemoveRename(dir string) error {
 	return syncDir(dir)
 }
 
+// PendingBatch refuses (an error saying what to do) while a judge or ranking batch for
+// the report at reportPath is pending: its requests name the frames by path, and its
+// results land by those paths.
+func PendingBatch(reportPath string) error {
+	for _, b := range []struct{ suffix, what string }{{".batch.json", "judge"}, {".rank-batch.json", "ranking"}} {
+		if _, err := os.Stat(reportPath + b.suffix); err == nil {
+			return fmt.Errorf("a %s batch is pending (%s): finish it with cull judge --batch, or cancel it, first; its results are matched to the frames by their paths", b.what, reportPath+b.suffix)
+		}
+	}
+	return nil
+}
+
 // Finish is the command that finishes this rename of dir (and, for a forward rename,
 // the one that reverses it instead).
 func (j *Rename) Finish(dir string) string {
@@ -235,23 +248,43 @@ func (j *Rename) Finish(dir string) string {
 // or "rename") and the command that finishes it. A journal that can't be read counts
 // as unfinished: refusing is the safe side.
 func Incomplete(dir string) (which, finish string, ok bool) {
-	if j, err := LoadRedate(dir); err != nil {
-		return "redate", fmt.Sprintf("cull redate %s --date <the date of the unfinished run> (%s can't be read: %v)", ShellQuote(dir), RedateName, err), true
-	} else if j != nil && !j.Complete {
-		return "redate", j.Finish(dir), true
-	}
-	switch r, err := LoadRename(dir); {
-	case err != nil:
-		return "rename", fmt.Sprintf("cull rename --undo %s (%s can't be read: %v)", ShellQuote(dir), RenameName, err), true
-	case r != nil && !r.Complete:
-		return "rename", r.Finish(dir), true
+	if ps := Unfinished(dir); len(ps) > 0 {
+		return ps[0].Which, ps[0].Finish, true
 	}
 	return "", "", false
 }
 
-// IncompleteBelow is Incomplete for dir and every folder below it (hidden ones
-// skipped): the first unfinished journal found, and the folder it is in.
-func IncompleteBelow(dir string) (folder, which, finish string, ok bool) {
+// Pending is an unfinished journal: its folder, which ("redate", "rename") and the
+// command that finishes it.
+type Pending struct{ Folder, Which, Finish string }
+
+// Unfinished lists every unfinished journal in dir: a redate's and a rename's.
+func Unfinished(dir string) []Pending {
+	var out []Pending
+	if j, err := LoadRedate(dir); err != nil {
+		out = append(out, Pending{dir, "redate", fmt.Sprintf("cull redate %s --date <the date of the unfinished run> (%s can't be read: %v)", ShellQuote(dir), RedateName, err)})
+	} else if j != nil && !j.Complete {
+		out = append(out, Pending{dir, "redate", j.Finish(dir)})
+	}
+	switch r, err := LoadRename(dir); {
+	case err != nil:
+		out = append(out, Pending{dir, "rename", renameUnreadable(dir, err)})
+	case r != nil && !r.Complete:
+		out = append(out, Pending{dir, "rename", r.Finish(dir)})
+	}
+	return out
+}
+
+// renameUnreadable is what to do about a rename journal that can't be read: frames may
+// be under hidden temps it alone records, so it must be mended, never removed.
+func renameUnreadable(dir string, err error) string {
+	return fmt.Sprintf("cull status %s, which lists the hidden .cull-rename- temps (%s can't be read: %v; restore it from a backup rather than delete it: frames may be under those temps)", ShellQuote(dir), RenameName, err)
+}
+
+// IncompleteBelow lists the unfinished journals of every kind in dir and every folder
+// below it (hidden ones skipped).
+func IncompleteBelow(dir string) []Pending {
+	var out []Pending
 	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() {
 			return nil
@@ -259,13 +292,10 @@ func IncompleteBelow(dir string) (folder, which, finish string, ok bool) {
 		if p != dir && strings.HasPrefix(d.Name(), ".") {
 			return filepath.SkipDir
 		}
-		if which, finish, ok = Incomplete(p); ok {
-			folder = p
-			return filepath.SkipAll
-		}
+		out = append(out, Unfinished(p)...)
 		return nil
 	})
-	return folder, which, finish, ok
+	return out
 }
 
 // safeShell are the characters a shell argument can hold unquoted.

@@ -14,6 +14,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -449,7 +450,7 @@ func snapshot(t *testing.T, dir string) string {
 	t.Helper()
 	var lines []string
 	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil || d.IsDir() || d.Name() == journal.LockName { // the folder lock: no frame or record
 			return err
 		}
 		st, _ := d.Info()
@@ -508,6 +509,7 @@ func TestRedateUnrecordedFolder(t *testing.T) {
 		}
 	}
 	ents, _ := os.ReadDir(dir)
+	ents = slices.DeleteFunc(ents, func(e os.DirEntry) bool { return e.Name() == journal.LockName })
 	if len(ents) != 3 {
 		var names []string
 		for _, e := range ents {

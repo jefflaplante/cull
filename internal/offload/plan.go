@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/jefflaplante/cull/internal/dng"
+	"github.com/jefflaplante/cull/internal/journal"
 	"github.com/jefflaplante/cull/internal/ui"
 )
 
@@ -159,6 +160,13 @@ func planEvent(o Options, files []File, n int) (*Plan, error) {
 	p.Dests = []string{filepath.Join(o.Dest, p.Folder)}
 	if o.Backup != "" {
 		p.Dests = append(p.Dests, filepath.Join(o.Backup, p.Folder))
+	}
+	// A shoot folder mid-redate or mid-rename has frames under hidden temps and records
+	// that don't match the files yet: copying into it now would copy them again.
+	for _, d := range p.Dests {
+		if ps := journal.Unfinished(d); len(ps) > 0 {
+			return nil, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s, then offload", ps[0].Which, d, ps[0].Finish)
+		}
 	}
 	var err error
 	if o.Rename != "" {
@@ -524,6 +532,7 @@ func fileSum(p string) ([32]byte, error) {
 func (p *Plan) cameraNames(o Options) error {
 	verified := make([]map[string]int64, len(p.Dests)) // per destination: manifest name → size
 	dated := make([]map[string]Entry, len(p.Dests))    // per destination: lower-case name → current entry with dates_set
+	byOrig := make([]map[string]Entry, len(p.Dests))   // per destination: card name + size → current entry
 	for i, d := range p.Dests {
 		man, err := readManifest(d)
 		if err != nil {
@@ -533,11 +542,12 @@ func (p *Plan) cameraNames(o Options) error {
 		for _, e := range man {
 			verified[i][e.Name] = e.Size
 		}
-		dated[i] = map[string]Entry{}
+		dated[i], byOrig[i] = map[string]Entry{}, map[string]Entry{}
 		for _, e := range current(man) {
 			if e.DatesSet != "" {
 				dated[i][strings.ToLower(e.Name)] = e
 			}
+			byOrig[i][strings.ToLower(e.Orig)+"\x00"+strconv.FormatInt(e.Size, 10)] = e
 		}
 	}
 	byName := map[string]string{}
@@ -555,6 +565,17 @@ func (p *Plan) cameraNames(o Options) error {
 			return fmt.Errorf("%s is on two sources (%s and %s): use --rename to keep both", f.Name, other, f.Src)
 		}
 		byName[key] = f.Src
+		// A file the manifest records (card name, size and mtime) is looked for under the
+		// name it records: cull rename may have renamed the copy since, even to another
+		// frame's camera name.
+		for i := range p.Dests {
+			e, ok := byOrig[i][key+"\x00"+strconv.FormatInt(f.Size, 10)]
+			if dt := e.ModTime.Sub(f.ModTime); ok && dt <= mtimeWindow && dt >= -mtimeWindow {
+				f.Name = e.Name
+				break
+			}
+		}
+		key = strings.ToLower(f.Name)
 		datedThere := false // a copy already there is a dated one
 		for i, d := range p.Dests {
 			at, st, ok := existing(d, f.Name)

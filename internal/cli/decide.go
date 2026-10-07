@@ -52,9 +52,11 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 			if err != nil {
 				return err
 			}
-			if err := refuseUnfinished(cfg.Dir, false); err != nil {
+			release, err := holdShoot(cmd, cfg.Dir, false)
+			if err != nil {
 				return err
 			}
+			defer release()
 			write = sideReportSidecars(cmd, cfg, write)
 			var saved *eval.Policy
 			var savedSeq *report.Sequences

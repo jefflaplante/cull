@@ -11,7 +11,7 @@ import (
 )
 
 func newRenameCmd(so *sharedOpts) *cobra.Command {
-	var dryRun, undo bool
+	var dryRun, undo, reorder bool
 	cmd := &cobra.Command{
 		Use:   "rename <folder> <pattern> | rename --undo <folder>",
 		Short: "Rename a shoot folder's frames by a pattern (the report, labels and manifest follow)",
@@ -34,10 +34,21 @@ hidden temp names, then to their new names (so names can swap), journalled in
 cull-rename.json. The report, your labels log, the offload manifest and the review
 sheet's cache follow, so judge continues the report without calling the model again.
 
+Limits, checked before anything moves (each refuses the rename, naming the files):
+  - Only the frame and its <stem>.xmp sidecar move. Other files named for the frame
+    (a camera JPG, a <name>.xmp, Capture One's settings in
+    CaptureOne/Settings*/<name>.cos) would keep the old name and lose their frame.
+  - Names over 255 bytes, locked frames and folders that can't be written.
+  - A rename that changes the order of frames with the same capture time (an
+    unpadded {n} sorts 10 before 2) regroups the shoot's sets, and judge would rank
+    them again: --reorder goes ahead anyway.
+  - A pending judge or ranking batch (finish or cancel it first), and a folder another
+    cull command is using (the folder lock, .cull.lock).
+
 An interrupted rename is finished by running the same command again, or put back with
---undo; until then judge, decide, review, restore and redate refuse. --undo also puts
-back the last finished rename. Capture One and Lightroom may lose track of frames
-already imported.`,
+--undo; until then judge, decide, review, restore, redate and offload refuse. --undo
+also puts back the last finished rename. Capture One and Lightroom may lose track of
+frames already imported.`,
 		Example: `  cull rename ~/Pictures/"2026-10-04 Smith wedding" "{date}_{name}_{n:4}" --dry-run
   cull rename ~/Pictures/"2026-10-04 Smith wedding" "{date}_{name}_{n:4}"
   cull rename --undo ~/Pictures/"2026-10-04 Smith wedding"`,
@@ -65,7 +76,7 @@ already imported.`,
 			out := so.out.newOutput(cmd, true)
 			defer out.Close()
 			res, err := rename.Run(cmd.Context(), rename.Options{Dir: cfg.Dir, ReportPath: cfg.ReportPath, Pattern: pattern,
-				Recursive: so.recursive, DryRun: dryRun, Undo: undo, UI: out.UI})
+				Recursive: so.recursive, DryRun: dryRun, Undo: undo, Reorder: reorder, UI: out.UI})
 			out.Close()
 			w := cmd.ErrOrStderr()
 			switch {
@@ -84,6 +95,7 @@ already imported.`,
 	}
 	f := cmd.Flags()
 	f.BoolVar(&dryRun, "dry-run", false, "print old → new, per frame; write nothing")
+	f.BoolVar(&reorder, "reorder", false, "go ahead though the new names change the frames' order (the shoot's sets regroup)")
 	f.BoolVar(&undo, "undo", false, "put back the names the last rename changed (or finish putting them back)")
 	return cmd
 }

@@ -123,8 +123,23 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	if slices.Contains(offload.MovedDirs, filepath.Base(dir)) {
 		return r.res, fmt.Errorf("%s is a sort folder: run cull redate on its shoot folder, %s", dir, filepath.Dir(dir))
 	}
-	if which, finish, ok := journal.Incomplete(dir); ok && which != "redate" {
-		return r.res, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", which, dir, finish)
+	if !o.DryRun {
+		release, note, err := journal.Lock(dir, true, "redate")
+		if err != nil {
+			return r.res, err
+		}
+		defer release()
+		if note != "" {
+			r.warn("%s", note)
+		}
+	}
+	for _, p := range journal.Unfinished(dir) {
+		if p.Which != "redate" {
+			return r.res, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", p.Which, dir, p.Finish)
+		}
+	}
+	if err := journal.PendingBatch(r.reportPath); err != nil {
+		return r.res, err
 	}
 	j, err := journal.LoadRedate(dir)
 	if err != nil {

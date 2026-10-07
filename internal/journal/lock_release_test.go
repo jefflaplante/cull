@@ -473,3 +473,42 @@ func gateFree(t *testing.T, dir string) {
 		t.Fatalf("the gate is still held: %v", err)
 	}
 }
+
+// A gate that refuses with EACCES (what an SMB share returns for a stale lock nobody
+// owns) counts as held: retried for RetryFor, then reader and writer alike are refused,
+// told how to clear a stale lock, and leave no holder file. Other gate errors still
+// proceed with a note (TestLockOtherErrorsProceed).
+func TestLockGateEACCESRefuses(t *testing.T) {
+	old := RetryFor
+	RetryFor = 100 * time.Millisecond
+	defer func() { RetryFor = old }()
+	for _, exclusive := range []bool{true, false} {
+		dir := t.TempDir()
+		restore := flockFn
+		var calls int
+		flockFn = func(fd, how int) error {
+			calls++
+			if !exclusive && calls == 1 { // the reader's own holder file
+				return syscall.Flock(fd, how)
+			}
+			return syscall.EACCES
+		}
+		release, note, err := Lock(dir, exclusive, "rename")
+		flockFn = restore
+		if err == nil {
+			release()
+			t.Fatalf("exclusive %v: proceeded past a gate refusing with EACCES (note %q)", exclusive, note)
+		}
+		want := "if no cull command is running, the share holds a stale lock: remount it, or remove " + filepath.Join(dir, LockName)
+		if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "is in use by") {
+			t.Fatalf("exclusive %v: %v", exclusive, err)
+		}
+		if calls < 3 {
+			t.Fatalf("exclusive %v: the gate was tried %d times, not retried", exclusive, calls)
+		}
+		if n := holderFiles(t, dir); len(n) != 0 {
+			t.Fatalf("exclusive %v: holder files left %v", exclusive, n)
+		}
+		t.Logf("exclusive %v: %v", exclusive, err)
+	}
+}

@@ -67,8 +67,9 @@ func IsLockFile(name string) bool {
 // Lock takes dir's folder lock: a writer's (exclusive) or a reader's. holder names the
 // command ("rename"); each lock file holds its holder's line, so a refused command names
 // exactly who is in the way. release lets go (a reader's holder file is removed). A lock
-// held by another command refuses, and so does a holder file a writer can't open or lock
-// (it may be a live reader's). Otherwise a volume without locks, any other flock error, or
+// held by another command refuses (on the gate, EACCES counts as held: an SMB share's
+// stale lock), and so does a holder file a writer can't open or lock (it may be a live
+// reader's). Otherwise a volume without locks, any other flock error, or
 // a folder the lock files can't be made in proceeds unlocked, with note saying so.
 func Lock(dir string, exclusive bool, holder string) (release func(), note string, err error) {
 	line := fmt.Sprintf("cull %s (pid %d, since %s)", holder, os.Getpid(), time.Now().Format("2006-01-02 15:04:05"))
@@ -95,30 +96,42 @@ func flockNB(f *os.File) error {
 // unlockFile lets go of f's flock by closing f, never with LOCK_UN first: see above.
 func unlockFile(f *os.File) { f.Close() }
 
+// gateHeld reports a gate flock error that means "held": EWOULDBLOCK, or EACCES, which
+// an SMB share returns for a lock that no process owns any more (seen on the user's NAS:
+// the file can't be removed either, "Resource busy", until the share lets go of it).
+func gateHeld(err error) bool {
+	return errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EACCES)
+}
+
 // gate takes the gate exclusively, retrying for RetryFor while someone holds it.
 func gate(dir string) (*os.File, error) {
-	f, err := os.OpenFile(filepath.Join(dir, LockName), os.O_RDWR|os.O_CREATE, 0o644)
+	p := filepath.Join(dir, LockName)
+	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
 		return nil, err
 	}
 	deadline := time.Now().Add(RetryFor)
 	for {
 		err = flockNB(f)
-		if !errors.Is(err, syscall.EWOULDBLOCK) || !time.Now().Before(deadline) {
+		if !gateHeld(err) || !time.Now().Before(deadline) {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if err != nil {
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			who := readLine(f)
-			f.Close()
-			return nil, inUse(dir, who)
-		}
+	switch {
+	case err == nil:
+		return f, nil
+	case errors.Is(err, syscall.EWOULDBLOCK):
+		who := readLine(f)
 		f.Close()
-		return nil, err
+		return nil, inUse(dir, who)
+	case errors.Is(err, syscall.EACCES):
+		who := readLine(f)
+		f.Close()
+		return nil, &staleGateError{inUseError{dir, who}, p, err}
 	}
-	return f, nil
+	f.Close()
+	return nil, err
 }
 
 var errInUse = errors.New("in use")
@@ -136,6 +149,22 @@ func (e *inUseError) Error() string {
 func (e *inUseError) Unwrap() error { return errInUse }
 
 func inUse(dir, who string) error { return &inUseError{dir, who} }
+
+// staleGateError: the gate refuses a lock with EACCES. Held, as far as anyone can tell,
+// but on an SMB share it can also be a stale lock that no command owns.
+type staleGateError struct {
+	inUseError
+	path string
+	err  error
+}
+
+func (e *staleGateError) Error() string {
+	who := e.who
+	if who == "" {
+		who = "another cull command"
+	}
+	return fmt.Sprintf("%s is in use by %s (its lock refuses: %v): wait for it to finish (or stop it); if no cull command is running, the share holds a stale lock: remount it, or remove %s", e.dir, who, e.err, e.path)
+}
 
 // uncheckedError: a holder file a writer can't open or lock (other than "held") may
 // belong to a live reader, so the writer refuses rather than guess.

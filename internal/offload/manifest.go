@@ -88,3 +88,20 @@ func appendManifest(folder string, e Entry) error {
 	}
 	return f.Close()
 }
+
+// DatesSet reads folder's manifest and returns, by file name, the capture date set on
+// each file whose current entry records one ("2026-10-04T12:00:00", local): offload
+// --set-date and redate. A folder without a manifest gives an empty map.
+func DatesSet(folder string) (map[string]string, error) {
+	man, err := readManifest(folder)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, e := range current(man) {
+		if e.DatesSet != "" {
+			out[e.Name] = e.DatesSet
+		}
+	}
+	return out, nil
+}

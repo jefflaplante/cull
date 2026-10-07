@@ -155,8 +155,12 @@ func setFileTimes(path string, t time.Time) (crtimeErr, err error) {
 	if err := os.Chtimes(path, t, t); err != nil {
 		return nil, err
 	}
-	return setCreationTime(path, t), nil
+	return setCreationTimeFn(path, t), nil
 }
+
+// setCreationTimeFn is setFileTimes' creation-time call; tests swap it to act out a
+// filesystem that keeps none.
+var setCreationTimeFn = setCreationTime
 
 // current returns, for each (orig, size), the last manifest entry: later lines
 // supersede earlier ones (redate and rename append superseding lines). Entries keep

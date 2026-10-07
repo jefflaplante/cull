@@ -40,6 +40,11 @@ type Options struct {
 	Split    bool
 	SplitGap time.Duration
 	SplitAt  []string // file names (camera order) that each start a new event; for any clock
+	// SetDate fixes every copy's capture dates (EXIF, embedded XMP, file times) to this
+	// local time, when SetDateSet; the card is never changed. It dates the shoot folder
+	// too: a different Date is refused.
+	SetDate    time.Time
+	SetDateSet bool
 
 	freeSpace func(path string) (uint64, error) // test hook; nil = statfs
 }
@@ -72,7 +77,8 @@ type Plan struct {
 	Bytes  int64  // bytes to copy
 	Dated  string // where the folder date came from
 
-	h hooks // test seams for Run
+	setDate *time.Time // Options.SetDate when set: stage B patches each copy's dates to it
+	h       hooks      // test seams for Run
 }
 
 // mtimeWindow is the quick check's tolerance: exFAT/FAT timestamps are coarse (FAT
@@ -101,6 +107,15 @@ func MakePlans(o Options) ([]*Plan, error) {
 	}
 	if o.Split && len(o.SplitAt) > 0 {
 		return nil, errors.New("--split finds the events by capture time and --split-at names them yourself: pick one")
+	}
+	if o.SetDateSet {
+		day := o.SetDate.Format(time.DateOnly)
+		if o.Date != "" && o.Date != day {
+			return nil, fmt.Errorf("--set-date %s dates the shoot folder: --date %s disagrees (drop --date)", day, o.Date)
+		}
+		if y := o.SetDate.Year(); y < 1 || y > 9999 {
+			return nil, fmt.Errorf("--set-date %s: the year must have 4 digits", day)
+		}
 	}
 	files, err := scan(o.Sources, o.UI)
 	if err != nil {
@@ -131,6 +146,10 @@ func MakePlans(o Options) ([]*Plan, error) {
 // planEvent plans one event's files into its shoot folder; n > 0 numbers the folder.
 func planEvent(o Options, files []File, n int) (*Plan, error) {
 	p := &Plan{Files: files, Event: n}
+	if o.SetDateSet {
+		t := o.SetDate
+		p.setDate = &t
+	}
 	if err := p.date(o); err != nil {
 		return nil, err
 	}
@@ -345,7 +364,10 @@ func lessByName(a, b File) bool {
 
 func (p *Plan) date(o Options) error {
 	day := o.Date
-	if day != "" {
+	if o.SetDateSet {
+		day = o.SetDate.Format(time.DateOnly)
+		p.Dated = "--set-date"
+	} else if day != "" {
 		if _, err := time.Parse("2006-01-02", day); err != nil {
 			return fmt.Errorf("--date %q: want YYYY-MM-DD", day)
 		}
@@ -405,6 +427,66 @@ func same(f File, path string, st os.FileInfo, checksum bool) (bool, error) {
 	return a == b, err
 }
 
+// recordedSame is same for a copy whose capture dates were set (offload --set-date,
+// redate): its bytes and mtime differ from the card's on purpose, so the card file is
+// matched against the manifest entry e instead. e applies when it records dates_set
+// for this card file (orig, size and mtime, within the window); then the copy is f
+// when its size is the card's, and with checksum when the card hashes to e's sha256
+// and the copy, read from the disk, to e's file_sha256 (sha256 when only its file
+// times were set). applies false: e says nothing about f, and same decides.
+func recordedSame(f File, e Entry, path string, st os.FileInfo, checksum bool) (applies, eq bool, err error) {
+	dt := e.ModTime.Sub(f.ModTime)
+	if e.DatesSet == "" || !strings.EqualFold(e.Orig, filepath.Base(f.Src)) || e.Size != f.Size ||
+		dt > mtimeWindow || dt < -mtimeWindow {
+		return false, false, nil
+	}
+	if !st.Mode().IsRegular() || st.Size() != f.Size {
+		return true, false, nil
+	}
+	if !checksum {
+		return true, true, nil
+	}
+	a, err := fileSum(f.Src)
+	if err != nil {
+		return true, false, err
+	}
+	if hexOf(a[:]) != e.SHA256 {
+		return true, false, nil
+	}
+	b, err := hashFromDisk(context.Background(), path)
+	return true, err == nil && hexOf(b[:]) == e.fileSHA(), err
+}
+
+// sameDated is same for a copy --set-date made that no manifest records: a crash
+// between naming it and appending its manifest line. Its size is the card's and its
+// mtime the date being set; with checksum, it must hash, read from the disk, to the
+// card's bytes with that date's patches applied. Without checksum it is only alike,
+// and cameraNames marks it unverified, as any copy the manifest doesn't vouch for.
+func sameDated(f File, path string, st os.FileInfo, checksum bool, t time.Time) (bool, error) {
+	if !st.Mode().IsRegular() || st.Size() != f.Size {
+		return false, nil
+	}
+	if !checksum {
+		d := st.ModTime().Sub(t)
+		return d <= mtimeWindow && d >= -mtimeWindow, nil
+	}
+	in, err := os.Open(f.Src)
+	if err != nil {
+		return false, err
+	}
+	defer in.Close()
+	ps, _, err := dng.PatchDates(in, f.Size, t)
+	if err != nil {
+		return false, nil // no dates to set: same already compared it with the card
+	}
+	_, want, err := streamPatched(context.Background(), in, ps, nil)
+	if err != nil {
+		return false, err
+	}
+	got, err := hashFromDisk(context.Background(), path)
+	return err == nil && got == want, err
+}
+
 func fileSum(p string) ([32]byte, error) {
 	var s [32]byte
 	f, err := os.Open(p)
@@ -424,6 +506,7 @@ func fileSum(p string) ([32]byte, error) {
 // is the same file on every destination, and refused when it differs on any.
 func (p *Plan) cameraNames(o Options) error {
 	verified := make([]map[string]int64, len(p.Dests)) // per destination: manifest name → size
+	dated := make([]map[string]Entry, len(p.Dests))    // per destination: lower-case name → current entry with dates_set
 	for i, d := range p.Dests {
 		man, err := readManifest(d)
 		if err != nil {
@@ -432,6 +515,12 @@ func (p *Plan) cameraNames(o Options) error {
 		verified[i] = map[string]int64{}
 		for _, e := range man {
 			verified[i][e.Name] = e.Size
+		}
+		dated[i] = map[string]Entry{}
+		for _, e := range current(man) {
+			if e.DatesSet != "" {
+				dated[i][strings.ToLower(e.Name)] = e
+			}
 		}
 	}
 	byName := map[string]string{}
@@ -455,7 +544,20 @@ func (p *Plan) cameraNames(o Options) error {
 				f.To = append(f.To, d)
 				continue
 			}
-			eq, err := same(*f, at, st, o.Checksum)
+			// A copy whose dates were set no longer matches the card by mtime or hash:
+			// its manifest entry vouches for it instead.
+			applies, eq, err := false, false, error(nil)
+			if e, ok := dated[i][key]; ok {
+				applies, eq, err = recordedSame(*f, e, at, st, o.Checksum)
+			}
+			if !applies && err == nil {
+				eq, err = same(*f, at, st, o.Checksum)
+				// Only a name no manifest line records: one that does, and doesn't match
+				// above, is another file.
+				if _, recorded := verified[i][f.Name]; !eq && err == nil && p.setDate != nil && !recorded {
+					eq, err = sameDated(*f, at, st, o.Checksum, *p.setDate)
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -585,10 +687,14 @@ func (p *Plan) renamed(o Options) error {
 				}
 				eq := false
 				if o.Checksum {
-					var err error
-					if eq, err = same(*f, at, st, true); err != nil {
+					applies, ok, err := recordedSame(*f, *rec, at, st, true)
+					if !applies && err == nil {
+						ok, err = same(*f, at, st, true)
+					}
+					if err != nil {
 						return err
 					}
+					eq = ok
 				}
 				if !eq {
 					f.Unverified = true

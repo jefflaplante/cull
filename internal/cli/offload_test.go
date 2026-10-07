@@ -231,3 +231,54 @@ func TestOffloadSplitIntoEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestOffloadSetDate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cardDir, dest := fakeCard(t, "M1.DNG"), t.TempDir()
+	out, err := run(t, "offload", "--set-date", "2026-10-04", "--time", "09:30:00", "--name", "Test", "--no-scan", cardDir, dest)
+	if err != nil || !strings.Contains(out, "safe to format") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	st, err := os.Stat(filepath.Join(dest, "2026-10-04 Test", "M1.DNG"))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if want := time.Date(2026, 10, 4, 9, 30, 0, 0, time.Local); !st.ModTime().Equal(want) {
+		t.Fatalf("mtime %v, want %v", st.ModTime(), want)
+	}
+}
+
+func TestOffloadSetDateFlagErrors(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cardDir := fakeCard(t, "M1.DNG")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--set-date", "2026-10-04", "--date", "2026-10-03"}, "--set-date"},
+		{[]string{"--time", "09:30:00"}, "--time"},
+		{[]string{"--set-date", "2026-13-04"}, "--set-date"},
+		{[]string{"--set-date", "2026-10-04", "--time", "9:30"}, "--time"},
+	} {
+		dest := t.TempDir()
+		out, err := run(t, append(append([]string{"offload", "--no-scan"}, c.args...), cardDir, dest)...)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%v: err %v\n%s", c.args, err, out)
+		}
+		if d := shootDirs(t, dest); len(d) != 0 {
+			t.Errorf("%v: wrote %v", c.args, d)
+		}
+	}
+	// The same date twice is fine.
+	if out, err := run(t, "offload", "--dry-run", "--set-date", "2026-10-04", "--date", "2026-10-04", cardDir, t.TempDir()); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+func TestSetDateNotInDotfile(t *testing.T) {
+	for _, k := range []string{"set-date", "time"} {
+		if !notInDotfile[k] {
+			t.Errorf("%s settable from the dotfile", k)
+		}
+	}
+}

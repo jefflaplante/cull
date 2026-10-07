@@ -20,6 +20,7 @@ var notInDotfile = map[string]bool{
 	"dry-run": true, "estimate": true, "prepare": true, "clear-cache": true,
 	"overwrite-xmp": true, "rerank": true, "report": true, "help": true, "version": true,
 	"quiet": true, "verbose": true, "debug": true, "log-level": true,
+	"set-date": true, "time": true, // offload: a date fix is per card, never a standing default
 }
 
 // applyDotfile sets flag defaults from the user's dotfile (config.SettingsPath) on

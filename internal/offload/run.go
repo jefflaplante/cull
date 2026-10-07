@@ -26,6 +26,7 @@ type Result struct {
 	Unverified int      // skipped files never checked against the card (see File.Unverified)
 	Failed     []string // "<name>: <error>"
 	Bytes      int64
+	Dated      int // copies whose capture dates were set (--set-date): patched, or only their file times
 	Elapsed    time.Duration
 	SyncErrs   []string // destinations whose final F_FULLFSYNC failed
 	FsyncOnly  []string // destinations flushed with fsync: F_FULLFSYNC isn't supported there (FsyncOnlyNote)
@@ -67,6 +68,7 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 	} else {
 		r.pipeline()
 	}
+	r.noteSigned()
 	res := r.res
 	// Only now, with no file in either stage, is each destination's drive cache flushed,
 	// once: fsync stops at the drive. That can take a few seconds after a big copy, so
@@ -97,6 +99,9 @@ type runner struct {
 	p    *Plan
 	res  *Result
 	sink ui.Sink
+
+	signed     []string        // Content Credentials frames copied with their dates unchanged (--set-date)
+	crtimeNote map[string]bool // destinations already noted for a creation-time failure
 }
 
 func (r *runner) emit(e ui.Event) {
@@ -132,8 +137,8 @@ func (r *runner) serial() {
 		if r.ctx.Err() != nil {
 			return
 		}
-		sum, err := r.copyWithRetries(f)
-		if !r.settle(i, f, sum, err) {
+		w, err := r.copyWithRetries(f)
+		if !r.settle(i, f, w, err) {
 			return
 		}
 	}
@@ -193,8 +198,8 @@ func (r *runner) pipeline() {
 		if err != nil {
 			// The pipelined read was try 0; the retries are serial, re-reading the card,
 			// as copyWithRetries does. Nothing else is in flight meanwhile.
-			sum, err := r.retryFailed(f, err)
-			if !r.settle(i, f, sum, err) {
+			w, err := r.retryFailed(f, err)
+			if !r.settle(i, f, w, err) {
 				return
 			}
 			continue
@@ -203,6 +208,7 @@ func (r *runner) pipeline() {
 			w.discard() // read, but Ctrl-C came before its stage B began: no new work starts
 			return
 		}
+		w.setDate = r.p.setDate
 		b = &inB{i: i, f: f, w: w, done: make(chan struct{})}
 		go func(b *inB) {
 			defer close(b.done)
@@ -218,20 +224,20 @@ func (r *runner) pipeline() {
 // retried serially from the card (the pipelined attempt was try 0), while the next
 // file, if already read, waits with its temps unsynced and unnamed.
 func (r *runner) settleStageB(b *inB) bool {
-	sum, err := b.w.sum, b.err
+	w, err := b.w, b.err
 	if err != nil {
-		sum, err = r.retryFailed(b.f, err)
+		w, err = r.retryFailed(b.f, err)
 	}
-	return r.settle(b.i, b.f, sum, err)
+	return r.settle(b.i, b.f, w, err)
 }
 
 // settle records file i's outcome; false means stop the run (cancelled, or the
 // destination is full). A file that copied and verified is recorded even if ctx was
 // cancelled meanwhile: it has its final name, so the manifest must say it verified.
-func (r *runner) settle(i int, f File, sum [32]byte, err error) bool {
+func (r *runner) settle(i int, f File, w *written, err error) bool {
 	res := r.res
 	if err == nil {
-		r.record(f, sum)
+		r.record(f, w)
 		return r.ctx.Err() == nil
 	}
 	if errors.Is(err, context.Canceled) || r.ctx.Err() != nil {
@@ -252,11 +258,22 @@ func (r *runner) settle(i int, f File, sum [32]byte, err error) bool {
 	return true
 }
 
-// record writes f's manifest line in each destination and counts it.
-func (r *runner) record(f File, sum [32]byte) {
+// record writes f's manifest line in each destination and counts it. sha256 is
+// always the card's hash; a copy whose dates were patched adds file_sha256 (the copy
+// as named) and patched_at, and any copy --set-date dated (patched, or only its file
+// times: a Content Credentials frame, or nothing to patch) records dates_set.
+func (r *runner) record(f File, w *written) {
 	res := r.res
+	sum := w.sum
 	e := Entry{Src: f.Src, Orig: filepath.Base(f.Src), Name: f.Name, Size: f.Size, ModTime: f.ModTime,
 		SHA256: hexOf(sum[:]), At: time.Now().UTC()}
+	if w.dated {
+		e.DatesSet = w.setDate.Format("2006-01-02T15:04:05")
+		if w.patched {
+			e.FileSHA256, e.PatchedAt = hexOf(w.fileSum[:]), e.At
+		}
+	}
+	r.noteDates(f, w)
 	for _, d := range f.To {
 		if err := appendManifest(d, e); err != nil {
 			res.Failed = append(res.Failed, f.Name+": manifest: "+err.Error())
@@ -267,41 +284,85 @@ func (r *runner) record(f File, sum [32]byte) {
 		res.Unverified++
 	}
 	res.Copied++
+	if w.dated {
+		res.Dated++
+	}
 	res.Bytes += f.Size
 	r.emit(ui.Event{Stage: &ui.Stage{Name: "offload", Add: f.Size}})
 	r.emit(ui.Event{Note: &ui.Note{Level: ui.Verbose, Text: fmt.Sprintf("%s → %s (sha256 %s…)", filepath.Base(f.Src), f.Name, hexOf(sum[:4]))}})
 }
 
-func (r *runner) copyWithRetries(f File) ([32]byte, error) {
-	sum, err := copyFile(r.ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, r.p.h)
+func (r *runner) copyWithRetries(f File) (*written, error) {
+	w, err := copyDated(r.ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, r.p.setDate, r.p.h)
 	if err == nil {
-		return sum, nil
+		return w, nil
 	}
 	return r.retryFailed(f, err)
 }
 
+// noteDates tells, once per file, what --set-date left alone in it: date values it
+// couldn't rewrite at the same length, or the whole file when its metadata can't be
+// read. Content Credentials frames are gathered for one note at the end of the run
+// (noteSigned); a creation time that can't be set is noted once per destination.
+func (r *runner) noteDates(f File, w *written) {
+	if w.setDate == nil {
+		return
+	}
+	switch {
+	case w.undated != nil:
+		r.warn("%s: dates not fixed, its metadata can't be read (%v); copied exactly as the card holds it", f.Name, w.undated)
+	case w.c2pa():
+		r.signed = append(r.signed, f.Name)
+	case len(w.skipped) > 0:
+		r.warn("%s: left unchanged (the rest of its dates are set): %s", f.Name, strings.Join(w.skipped, "; "))
+	}
+	for i, err := range w.crtime {
+		if d := f.To[i]; err != nil && !r.crtimeNote[d] {
+			if r.crtimeNote == nil {
+				r.crtimeNote = map[string]bool{}
+			}
+			r.crtimeNote[d] = true
+			r.warn("couldn't set creation times in %s (%v); modification times are set", d, err)
+		}
+	}
+}
+
+// noteSigned names, in one note per run, the Content Credentials frames --set-date
+// copied with their dates unchanged.
+func (r *runner) noteSigned() {
+	if len(r.signed) == 0 {
+		return
+	}
+	names := strings.Join(r.signed, ", ")
+	if n := len(r.signed); n > 5 {
+		names = fmt.Sprintf("%s and %d more", strings.Join(r.signed[:5], ", "), n-5)
+	}
+	r.emit(ui.Event{Note: &ui.Note{Level: ui.Normal, Text: names +
+		": Content Credentials — dates left unchanged so the signature stays valid (file times set; the sidecar carries the date)"}})
+}
+
 // retryFailed carries on after try 0 of f failed with err: it copies f again with
-// copyFile, from the card, up to len(retryDelays) more times. Before each retry it
+// copyDated (the plan's --set-date included), from the card, up to len(retryDelays) more times. Before each retry it
 // evicts the card file from the page cache, so the retry reads the card, not RAM.
 // Nothing else is in flight then, so the eviction can't slow a card read.
-func (r *runner) retryFailed(f File, err error) ([32]byte, error) {
+func (r *runner) retryFailed(f File, err error) (*written, error) {
 	ctx, h := r.ctx, r.p.h
-	var sum [32]byte
+	var w *written
 	for try := 0; ; try++ {
 		// Retried: card reads and verify mismatches (a flaky reader, a reseated card).
 		// Not retried: a full disk or a name taken since planning won't change, and
 		// each retry would read the whole file off the card again.
 		if err == nil || ctx.Err() != nil || try == len(retryDelays) || destinationFull(err) || errors.Is(err, fs.ErrExist) {
-			return sum, err
+			return w, err
 		}
 		r.warn("%s: %v; retrying in %s", f.Name, err, retryDelays[try])
 		select {
 		case <-time.After(retryDelays[try]):
 		case <-ctx.Done():
-			return sum, ctx.Err()
+			return nil, ctx.Err()
 		}
 		r.evictSource(f)
-		sum, err = copyFile(ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, h)
+		w, err = copyDated(ctx, f.Src, f.Name, f.To, f.Size, f.ModTime, r.p.setDate, h)
 	}
 }
 

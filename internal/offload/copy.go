@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/jefflaplante/cull/internal/dng"
 )
 
 const (
@@ -25,7 +27,9 @@ type hooks struct {
 	open         func(string) (io.ReadCloser, error)
 	afterWrite   func(tmp string)
 	beforeVerify func(tmp string)
-	write        func(f *os.File, p []byte) (int, error)
+	// afterPatch runs after a temp's date patches are written and synced, before its proof.
+	afterPatch func(tmp string)
+	write      func(f *os.File, p []byte) (int, error)
 	// evictSource drops a card file from the page cache before each retry of it
 	// (default evictPasses), returning how many of its pages stayed cached.
 	evictSource func(src string) (resident, pages int, err error)
@@ -46,11 +50,25 @@ type chunk struct {
 // hash; nothing existing is ever replaced. On any failure every temp file is removed.
 // It is the two stages Run overlaps, one after the other: retries use it.
 func copyFile(ctx context.Context, src, name string, dirs []string, size int64, mtime time.Time, h hooks) (sum [32]byte, err error) {
-	w, err := writeStage(ctx, src, name, dirs, size, mtime, h)
+	w, err := copyDated(ctx, src, name, dirs, size, mtime, nil, h)
 	if err != nil {
 		return sum, err
 	}
-	return w.sum, finishStage(ctx, w, h)
+	return w.sum, nil
+}
+
+// copyDated is copyFile, with setDate (nil = none) applied in stage B, returning the
+// finished file for the manifest.
+func copyDated(ctx context.Context, src, name string, dirs []string, size int64, mtime time.Time, setDate *time.Time, h hooks) (*written, error) {
+	w, err := writeStage(ctx, src, name, dirs, size, mtime, h)
+	if err != nil {
+		return nil, err
+	}
+	w.setDate = setDate
+	if err := finishStage(ctx, w, h); err != nil {
+		return nil, err
+	}
+	return w, nil
 }
 
 // written is a file after stage A: its card read is done and hashed, and its bytes sit
@@ -63,6 +81,21 @@ type written struct {
 	size  int64
 	mtime time.Time
 	sum   [32]byte // the card's bytes, hashed during the one read; never recomputed from a copy
+
+	// With setDate (offload --set-date), stage B fixes each copy's capture dates to it.
+	// What it did, for the manifest and the run's notes:
+	setDate *time.Time
+	fileSum [32]byte // the copy as named: sum with the date patches applied (sum when none)
+	patched bool     // the copy's bytes differ from the card's at exactly the date patches
+	dated   bool     // setDate was applied: patched, or nothing to patch, or Content Credentials
+	skipped []string // dng.PatchDates' fields left alone (an unparseable value, Content Credentials)
+	undated error    // the file's dates couldn't be read: copied as the card holds it
+	crtime  []error  // per temp: setting its creation time failed (best effort)
+}
+
+// c2pa reports a Content Credentials frame, copied unpatched so its signature holds.
+func (w *written) c2pa() bool {
+	return len(w.skipped) == 1 && w.skipped[0] == dng.ContentCredentialsSkip
 }
 
 // discard closes and removes w's temp files: what every failure or abandonment of a
@@ -116,6 +149,14 @@ func writeStage(ctx context.Context, src, name string, dirs []string, size int64
 // stage A took from the card, and only then link it to its final name (never replacing
 // anything). It doesn't touch the card, so Run overlaps it with the next file's stage
 // A. On failure every temp is removed.
+//
+// With w.setDate, the verify read also computes the patches that set the copy's
+// capture dates (dng.PatchDates, from the temp just proven to be the card's bytes)
+// and, in the same pass, want: the hash of those bytes with the patches applied. The
+// patches are then written into the temp and synced, and the temp is evicted and
+// re-read from the device: its hash must equal want. Only then are its times set and
+// is it named. A Content Credentials frame gets no patches (its signature covers the
+// dates) but still its file times.
 func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 	defer func() {
 		if err != nil {
@@ -129,8 +170,10 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 		if err := f.Close(); err != nil {
 			return fmt.Errorf("close %s: %w", f.Name(), err)
 		}
-		if err := os.Chtimes(f.Name(), w.mtime, w.mtime); err != nil {
-			return err
+		if w.setDate == nil {
+			if err := os.Chtimes(f.Name(), w.mtime, w.mtime); err != nil {
+				return err
+			}
 		}
 		if err := os.Chmod(f.Name(), 0o644); err != nil {
 			return err
@@ -139,19 +182,67 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 			h.afterWrite(f.Name())
 		}
 	}
-	for _, f := range w.temps {
+	patches := make([][]dng.Patch, len(w.temps))
+	w.fileSum = w.sum
+	for i, f := range w.temps {
 		if err := dropCache(f.Name()); err != nil {
 			return err
 		}
 		if h.beforeVerify != nil {
 			h.beforeVerify(f.Name())
 		}
-		got, err := hashUncached(ctx, f.Name())
+		if w.setDate == nil {
+			got, err := hashUncached(ctx, f.Name())
+			if err != nil {
+				return fmt.Errorf("verify %s: %w", filepath.Dir(f.Name()), err)
+			}
+			if got != w.sum {
+				return fmt.Errorf("verify %s: the copy in %s differs from the card", w.name, filepath.Dir(f.Name()))
+			}
+			continue
+		}
+		ps, skipped, undated, orig, want, err := verifyDated(ctx, f.Name(), w.size, *w.setDate)
 		if err != nil {
 			return fmt.Errorf("verify %s: %w", filepath.Dir(f.Name()), err)
 		}
-		if got != w.sum {
+		if orig != w.sum {
 			return fmt.Errorf("verify %s: the copy in %s differs from the card", w.name, filepath.Dir(f.Name()))
+		}
+		// Every temp holds the card's bytes, so every one gets the same patches.
+		if i > 0 && (want != w.fileSum || (undated == nil) != (w.undated == nil)) {
+			return fmt.Errorf("verify %s: the date patches for the copy in %s differ from the first copy's", w.name, filepath.Dir(f.Name()))
+		}
+		patches[i], w.fileSum = ps, want
+		if i == 0 {
+			w.skipped, w.undated = skipped, undated
+		}
+	}
+	if w.setDate != nil && w.undated == nil {
+		w.crtime = make([]error, len(w.temps))
+		for i, f := range w.temps {
+			if len(patches[i]) > 0 {
+				if err := applyPatches(f.Name(), patches[i]); err != nil {
+					return err
+				}
+				if h.afterPatch != nil {
+					h.afterPatch(f.Name())
+				}
+				if err := proveFrom(ctx, f.Name(), w.fileSum); err != nil {
+					return fmt.Errorf("%s: %w", w.name, err)
+				}
+			}
+			crErr, err := setFileTimes(f.Name(), *w.setDate)
+			if err != nil {
+				return err
+			}
+			w.crtime[i] = crErr
+		}
+		w.patched, w.dated = len(patches[0]) > 0, true
+	} else if w.setDate != nil { // undated: its card mtime, as without --set-date
+		for _, f := range w.temps {
+			if err := os.Chtimes(f.Name(), w.mtime, w.mtime); err != nil {
+				return err
+			}
 		}
 	}
 	for i, f := range w.temps {
@@ -163,6 +254,28 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 		syncDir(w.dirs[i])
 	}
 	return nil
+}
+
+// verifyDated is stage B's verify read with --set-date: it computes the patches that
+// set p's capture dates to t (dng.PatchDates reads only the metadata, by ReadAt), then
+// reads p once from the device, returning orig (p as read: the card's hash if the
+// copy is good) and want (p with the patches applied). A file whose dates can't be read
+// (not a TIFF) gets no patches and undated says why; it is still verified.
+func verifyDated(ctx context.Context, p string, size int64, t time.Time) (ps []dng.Patch, skipped []string, undated error, orig, want [32]byte, err error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, nil, nil, orig, want, err
+	}
+	defer f.Close()
+	if err := noCache(f); err != nil {
+		return nil, nil, nil, orig, want, err
+	}
+	ps, skipped, undated = dng.PatchDates(f, size, t)
+	if undated != nil {
+		ps, skipped = nil, nil
+	}
+	orig, want, err = streamPatched(ctx, f, ps, nil)
+	return ps, skipped, undated, orig, want, err
 }
 
 // syncTemp is stage B's fsync of each temp copy; tests swap it to inject the errors a

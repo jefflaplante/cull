@@ -19,6 +19,7 @@ import (
 func newOffloadCmd(so *sharedOpts) *cobra.Command {
 	var o offload.Options
 	var dryRun, noScan, verify bool
+	var setDate, setTime string
 	cmd := &cobra.Command{
 		Use:   "offload <card>... <dest>",
 		Short: "Copy DNGs off camera cards into a shoot folder, verified against the card",
@@ -32,12 +33,20 @@ before it gets its real name. Nothing existing is ever replaced. With --backup, 
 same single read of the card also fills a second folder, verified separately. A
 re-run copies only what is missing (cull-offload.jsonl records what was verified).
 
+--set-date fixes the capture dates of every copy, never the card's (for a camera whose
+clock stopped): once a copy is verified, its EXIF and embedded XMP dates are rewritten
+in place at the same length, and it is read back from the disk and must hash to the
+card's bytes with exactly those fields changed before it gets its name. Its file times
+are set too. The manifest keeps both checksums. Frames with Content Credentials keep
+their signed dates; only their file times change.
+
 "safe to format" is printed only when every file is verified on every destination
 and each drive's own write cache was flushed. Then the folder is scanned (free);
 judge it next.`,
 		Example: `  cull offload /Volumes/LEICA\ M ~/Pictures --name "Smith wedding" --backup /Volumes/Backup/Pictures
   cull offload --dry-run /Volumes/LEICA\ M ~/Pictures --name "Smith wedding"
   cull offload --rename "{date}_{name}_{n:4}" /Volumes/CARD2 ~/Pictures --name "Smith wedding" --date 2026-10-02
+  cull offload --set-date 2026-10-02 /Volumes/LEICA\ M ~/Pictures --name "Smith wedding"
   cull offload --verify ~/Pictures/"2026-10-02 Smith wedding"`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if verify {
@@ -53,6 +62,9 @@ judge it next.`,
 				return runVerify(cmd, so, args[0])
 			}
 			o.Sources, o.Dest = args[:len(args)-1], args[len(args)-1]
+			if err := parseSetDate(&o, setDate, setTime, cmd.Flags().Changed("time")); err != nil {
+				return err
+			}
 			tags, err := so.tags.tags() // checked before copying, not after
 			if err != nil {
 				return err
@@ -110,6 +122,10 @@ judge it next.`,
 				}
 				fmt.Fprintf(w, "\n%scopied %d, skipped %d (already there), failed %d: %.1f GB in %s (%.0f MB/s, verified)\n",
 					label, res.Copied, res.Skipped, len(res.Failed), float64(res.Bytes)/1e9, res.Elapsed.Round(1e9), mbps)
+				if res.Dated > 0 {
+					fmt.Fprintf(w, "%scapture dates set to %s on %d copies (each proven against the card); the card is unchanged\n",
+						label, o.SetDate.Format("2006-01-02 15:04:05"), res.Dated)
+				}
 				for _, d := range res.FsyncOnly {
 					fmt.Fprintln(w, offload.FsyncOnlyNote(d))
 				}
@@ -172,10 +188,34 @@ judge it next.`,
 	f.BoolVar(&o.Split, "split", false, "one shoot folder per event, numbered: a capture-time gap over --split-gap, or a new day, starts the next")
 	f.DurationVar(&o.SplitGap, "split-gap", offload.DefaultSplitGap, "with --split, the capture-time gap that starts a new event")
 	f.StringSliceVar(&o.SplitAt, "split-at", nil, "start a new event at each of these files (camera order), e.g. M1103402,M1103777; for a card whose clock can't be trusted")
+	f.StringVar(&setDate, "set-date", "", "fix every copy's capture date (EXIF, embedded XMP, file times) to this date, YYYY-MM-DD; the card is never changed")
+	f.StringVar(&setTime, "time", "12:00:00", "with --set-date, the time of day set, HH:MM:SS (local time)")
 	so.tags.register(f)
 	f.BoolVar(&verify, "verify", false, "re-check a shoot folder's copies against the checksums recorded when they were made")
 	setSection(f, secTuning, "checksum")
 	return cmd
+}
+
+// parseSetDate sets o.SetDate from --set-date and --time (local time). --time alone
+// is refused: it has no date to go with.
+func parseSetDate(o *offload.Options, day, clock string, timeTyped bool) error {
+	if day == "" {
+		if timeTyped {
+			return errors.New("--time needs --set-date")
+		}
+		return nil
+	}
+	d, err := time.ParseInLocation(time.DateOnly, day, time.Local)
+	if err != nil || d.Format(time.DateOnly) != day {
+		return fmt.Errorf("--set-date %q: want YYYY-MM-DD", day)
+	}
+	c, err := time.ParseInLocation(time.TimeOnly, clock, time.Local)
+	if err != nil || c.Format(time.TimeOnly) != clock {
+		return fmt.Errorf("--time %q: want HH:MM:SS", clock)
+	}
+	o.SetDate = time.Date(d.Year(), d.Month(), d.Day(), c.Hour(), c.Minute(), c.Second(), 0, time.Local)
+	o.SetDateSet = true
+	return nil
 }
 
 func runVerify(cmd *cobra.Command, so *sharedOpts, folder string) error {

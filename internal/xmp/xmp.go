@@ -31,6 +31,7 @@ type Sidecar struct {
 	Hierarchy  []string // lr:hierarchicalSubject: "parent|child" paths (Capture One and Lightroom nest them)
 	ExposureEV *float64 // crs:Exposure2012
 	Crop       *Box     // crs:Crop*, normalized, in the raw's stored (unrotated) orientation
+	DateTaken  string   // "2006-01-02T15:04:05", the camera's local time; empty omits the date properties
 }
 
 type Box struct{ Left, Top, Right, Bottom float64 }
@@ -121,6 +122,15 @@ func Render(s Sidecar) []byte {
 	if s.Label != "" {
 		attrs = append(attrs, fmt.Sprintf(`xmp:Label="%s"`, esc(s.Label)))
 	}
+	ns := ""
+	if s.DateTaken != "" {
+		d := esc(s.DateTaken)
+		attrs = append(attrs,
+			fmt.Sprintf(`exif:DateTimeOriginal="%s"`, d),
+			fmt.Sprintf(`xmp:CreateDate="%s"`, d),
+			fmt.Sprintf(`photoshop:DateCreated="%s"`, d))
+		ns = "\n    xmlns:exif=\"http://ns.adobe.com/exif/1.0/\"\n    xmlns:photoshop=\"http://ns.adobe.com/photoshop/1.0/\""
+	}
 	if s.ExposureEV != nil || s.Crop != nil {
 		attrs = append(attrs, `crs:HasSettings="True"`)
 	}
@@ -162,12 +172,12 @@ func Render(s Sidecar) []byte {
     xmlns:xmp="http://ns.adobe.com/xap/1.0/"
     xmlns:dc="http://purl.org/dc/elements/1.1/"
     xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
-    xmlns:lr="http://ns.adobe.com/lightroom/1.0/"
+    xmlns:lr="http://ns.adobe.com/lightroom/1.0/"%s
     %s%s
  </rdf:RDF>
 </x:xmpmeta>
 <?xpacket end="w"?>
-`, strings.Join(attrs, "\n    "), body))
+`, ns, strings.Join(attrs, "\n    "), body))
 }
 
 // FromDisplay converts a normalized crop in displayed (EXIF-oriented) coordinates to

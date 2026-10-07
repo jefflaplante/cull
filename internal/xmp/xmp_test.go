@@ -117,3 +117,27 @@ func TestRenderHierarchy(t *testing.T) {
 		t.Fatal("hierarchy bag written without paths")
 	}
 }
+
+func TestRenderDateTaken(t *testing.T) {
+	out := string(Render(Sidecar{DateTaken: "2025-12-28T00:05:59"}))
+	for _, want := range []string{
+		`exif:DateTimeOriginal="2025-12-28T00:05:59"`,
+		`xmp:CreateDate="2025-12-28T00:05:59"`,
+		`photoshop:DateCreated="2025-12-28T00:05:59"`,
+		`xmlns:exif="http://ns.adobe.com/exif/1.0/"`,
+		`xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in\n%s", want, out)
+		}
+	}
+	if err := xml.Unmarshal([]byte(out[strings.Index(out, "<x:xmpmeta"):strings.Index(out, "<?xpacket end")]), new(any)); err != nil {
+		t.Errorf("not well-formed: %v", err)
+	}
+	plain := string(Render(Sidecar{Rating: 3}))
+	for _, no := range []string{"DateTimeOriginal", "CreateDate", "DateCreated", "exif", "photoshop"} {
+		if strings.Contains(plain, no) {
+			t.Errorf("unexpected %s without DateTaken", no)
+		}
+	}
+}

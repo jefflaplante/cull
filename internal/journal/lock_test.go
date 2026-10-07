@@ -252,7 +252,7 @@ func TestLockAcrossProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer removeProbe(t, dir)
 	for _, c := range []struct {
 		held        string
 		exclusive   bool

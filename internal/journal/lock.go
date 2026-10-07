@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,12 @@ import (
 // takes the gate before it looks, so of a reader and a writer at most one proceeds:
 // whichever comes second sees the first. The gate is never removed (a removed lock file
 // would let a later writer lock another file of the same name).
+//
+// Every flock is let go by closing its file (unlockFile), never by LOCK_UN first: on an
+// SMB share (smbfs), a process that unlocks and then closes drops the lock of whoever
+// took the file in between, so two writers, or a writer and a reader, would both hold
+// the folder. Measured on the user's NAS: 3–16 such overlaps per stress run with LOCK_UN
+// then close, none with close alone.
 const (
 	LockName     = ".cull.lock"
 	HolderPrefix = ".cull-holder-"
@@ -59,8 +66,9 @@ func IsLockFile(name string) bool {
 
 // Lock takes dir's folder lock: a writer's (exclusive) or a reader's. holder names the
 // command ("rename"); each lock file holds its holder's line, so a refused command names
-// exactly who is in the way. release lets go (a reader's holder file is removed). Only a
-// lock held by another command refuses: a volume without locks, any other flock error, or
+// exactly who is in the way. release lets go (a reader's holder file is removed). A lock
+// held by another command refuses, and so does a holder file a writer can't open or lock
+// (it may be a live reader's). Otherwise a volume without locks, any other flock error, or
 // a folder the lock files can't be made in proceeds unlocked, with note saying so.
 func Lock(dir string, exclusive bool, holder string) (release func(), note string, err error) {
 	line := fmt.Sprintf("cull %s (pid %d, since %s)", holder, os.Getpid(), time.Now().Format("2006-01-02 15:04:05"))
@@ -83,6 +91,9 @@ func flockNB(f *os.File) error {
 		}
 	}
 }
+
+// unlockFile lets go of f's flock by closing f, never with LOCK_UN first: see above.
+func unlockFile(f *os.File) { f.Close() }
 
 // gate takes the gate exclusively, retrying for RetryFor while someone holds it.
 func gate(dir string) (*os.File, error) {
@@ -126,6 +137,19 @@ func (e *inUseError) Unwrap() error { return errInUse }
 
 func inUse(dir, who string) error { return &inUseError{dir, who} }
 
+// uncheckedError: a holder file a writer can't open or lock (other than "held") may
+// belong to a live reader, so the writer refuses rather than guess.
+type uncheckedError struct {
+	dir, name string
+	err       error
+}
+
+func (e *uncheckedError) Error() string {
+	return fmt.Sprintf("%s may be in use by another cull command: its holder file %s can't be checked (%v); if no cull command uses this folder, remove that file, then run this again", e.dir, e.name, e.err)
+}
+
+func (e *uncheckedError) Unwrap() error { return errInUse }
+
 func readLine(f *os.File) string {
 	b, _ := io.ReadAll(io.NewSectionReader(f, 0, 300))
 	return strings.TrimSpace(string(b))
@@ -149,10 +173,7 @@ func lockWriter(dir, line string) (func(), string, error) {
 		return noLock(dir, err)
 	}
 	writeLine(g, line)
-	release := func() {
-		flockFn(int(g.Fd()), syscall.LOCK_UN)
-		g.Close()
-	}
+	release := func() { unlockFile(g) }
 	hook("writer scan")
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -165,21 +186,30 @@ func lockWriter(dir, line string) (func(), string, error) {
 		}
 		hook("writer check")
 		p := filepath.Join(dir, e.Name())
-		h, err := os.OpenFile(p, os.O_RDWR, 0)
-		if err != nil {
+		// Read-only: flock needs no write access, and a holder file made by another user
+		// (or left read-only) must still be checked, not skipped.
+		h, err := os.Open(p)
+		if errors.Is(err, fs.ErrNotExist) {
 			continue // removed meanwhile: its reader finished
 		}
+		if err != nil {
+			release()
+			return func() {}, "", &uncheckedError{dir, e.Name(), err}
+		}
 		switch err := flockNB(h); {
+		case err == nil: // a crashed reader's: nobody holds it
+			os.Remove(p)
+			unlockFile(h)
 		case errors.Is(err, syscall.EWOULDBLOCK):
 			who := readLine(h)
 			h.Close()
 			release()
 			return func() {}, "", inUse(dir, who)
-		case err == nil: // a crashed reader's: nobody holds it
-			os.Remove(p)
-			flockFn(int(h.Fd()), syscall.LOCK_UN)
+		default: // can't tell: take it for a live reader's
+			h.Close()
+			release()
+			return func() {}, "", &uncheckedError{dir, e.Name(), err}
 		}
-		h.Close()
 	}
 	return release, "", nil
 }
@@ -221,7 +251,7 @@ func lockReader(dir, line string) (func(), string, error) {
 				break
 			}
 		}
-		f.Close()
+		unlockFile(f)
 		if !time.Now().Before(deadline) {
 			return func() {}, "", inUse(dir, "a redate or rename starting")
 		}
@@ -231,8 +261,7 @@ func lockReader(dir, line string) (func(), string, error) {
 	release := func() {
 		registered(p, false)
 		os.Remove(p)
-		flockFn(int(h.Fd()), syscall.LOCK_UN)
-		h.Close()
+		unlockFile(h)
 	}
 	hook("reader probe")
 	g, err := gate(dir)
@@ -243,8 +272,7 @@ func lockReader(dir, line string) (func(), string, error) {
 	case err != nil:
 		return release, fmt.Sprintf("%s: folder lock unavailable (%v); make sure no redate or rename runs on this folder meanwhile", dir, err), nil
 	}
-	flockFn(int(g.Fd()), syscall.LOCK_UN)
-	g.Close()
+	unlockFile(g)
 	return release, "", nil
 }
 

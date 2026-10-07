@@ -99,23 +99,40 @@ func TestRRBackupRerun(t *testing.T) {
 	})
 }
 
-// Every dry run and --estimate takes no lock and leaves no .cull.lock.
+// Every dry run and --estimate takes no lock: each succeeds (an unknown flag would fail
+// it), makes no lock file, and still succeeds while a rename holds the folder (a run
+// that took a reader's lock would be refused). decide has no dry run, so it isn't here.
 func TestDryRunsTakeNoLock(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "2026-10-04 trip")
 	loose(t, dir, map[string]dngtest.Fixture{"A1.DNG": frame(1, 1000)})
-	if _, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "x{n}", DryRun: true}); err != nil {
+	runAll := func(when string) {
+		t.Helper()
+		if _, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "x{n}", DryRun: true}); err != nil {
+			t.Fatalf("%s: rename.Run dry run: %v", when, err)
+		}
+		for _, args := range [][]string{
+			{"rename", "--dry-run", dir, "x{n}"},
+			{"redate", "--dry-run", "--date", "2026-10-04", dir},
+			{"judge", "--estimate", "--backend", "anthropic", "--model", "claude-sonnet-5-5", dir},
+		} {
+			if out, err := cullCmd(args...); err != nil {
+				t.Errorf("%s: %v: %v\n%.300s", when, args[:2], err, out)
+			}
+		}
+	}
+	runAll("unlocked")
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if journal.IsLockFile(e.Name()) {
+			t.Fatalf("a dry run made a lock file: %s", e.Name())
+		}
+	}
+	release, _, err := journal.Lock(dir, true, "rename")
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{
-		{"redate", "--dry-run", "--date", "2026-10-04", dir},
-		{"judge", "--estimate", "--backend", "anthropic", "--model", "claude-sonnet-5-5", dir},
-		{"decide", "--dry-run", dir},
-	} {
-		cullCmd(args...)
-	}
-	if _, err := os.Stat(filepath.Join(dir, journal.LockName)); !os.IsNotExist(err) {
-		t.Fatalf("a dry run made the lock file: %v", err)
-	}
+	defer release()
+	runAll("under a rename's lock")
 }
 
 // The refusal names exactly the command in the way: each reader names itself.

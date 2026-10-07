@@ -3,6 +3,7 @@ package dng_test
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -320,4 +321,166 @@ func TestPatchDatesDateTimeOriginalInIFD0(t *testing.T) {
 		t.Fatalf("err %v skipped %v patches %v", err, skipped, whats(ps))
 	}
 	checkPatches(t, b, ps)
+}
+
+func TestContentCredentials(t *testing.T) {
+	with := dngtest.Build(t, dngtest.Fixture{DTO: "2025:12:28 00:05:59", C2PA: []byte("jumb c2pa manifest stand-in")})
+	without := dngtest.Build(t, dngtest.Fixture{DTO: "2025:12:28 00:05:59"})
+	if ok, err := dng.ContentCredentials(bytes.NewReader(with), int64(len(with))); !ok || err != nil {
+		t.Errorf("with C2PA: %v %v", ok, err)
+	}
+	if ok, err := dng.ContentCredentials(bytes.NewReader(without), int64(len(without))); ok || err != nil {
+		t.Errorf("without C2PA: %v %v", ok, err)
+	}
+	junk := []byte("not a tiff")
+	if _, err := dng.ContentCredentials(bytes.NewReader(junk), int64(len(junk))); err == nil {
+		t.Error("non-TIFF: want an error")
+	}
+}
+
+// A frame with signed Content Credentials is never byte-patched: its manifest
+// repeats the dates and its hash binding covers them.
+func TestPatchDatesLeavesContentCredentialsFrames(t *testing.T) {
+	b := dngtest.Build(t, dngtest.Fixture{DateTime: "2025:12:28 00:05:59", DTO: "2025:12:28 00:05:59", DTD: "2025:12:28 00:05:59",
+		SubSec: "530", XMP: `<rdf:Description xmp:CreateDate="2025-12-28T00:05:59"/>`, C2PA: bytes.Repeat([]byte{0x6A}, 300)})
+	ps, skipped, err := dng.PatchDates(bytes.NewReader(b), int64(len(b)), target)
+	if err != nil || len(ps) != 0 || len(skipped) != 1 || skipped[0] != "C2PA Content Credentials: left unchanged so its signature stays valid (it carries its own signed capture dates)" {
+		t.Fatalf("err %v patches %v skipped %q", err, whats(ps), skipped)
+	}
+}
+
+// Attribute-looking text outside a start tag (element text, comments) is not a
+// property: never patched. Text in element content is reported; comments are ignored.
+func TestPatchDatesXMPAttributesOnlyInStartTags(t *testing.T) {
+	xmp := `<rdf:Description><dc:description><rdf:Alt><rdf:li xml:lang="x-default">see xmp:CreateDate="2025-12-28T00:05:59"</rdf:li></rdf:Alt></dc:description>` +
+		`<!-- xmp:ModifyDate="2025-12-28T00:05:59" <exif:DateTimeOriginal>2025-12-28</exif:DateTimeOriginal> -->` +
+		`</rdf:Description>`
+	b := dngtest.Build(t, dngtest.Fixture{XMP: xmp})
+	ps, skipped, err := dng.PatchDates(bytes.NewReader(b), int64(len(b)), target)
+	if err != nil || len(ps) != 0 {
+		t.Fatalf("err %v patches %v", err, whats(ps))
+	}
+	if strings.Join(skipped, "|") != "XMP xmp:CreateDate: not in a form cull rewrites, left unchanged" {
+		t.Errorf("skipped %q", skipped)
+	}
+}
+
+// Date properties cull doesn't rewrite are reported, never silently missed: another
+// prefix (xap:), or a value wrapped in rdf:Seq.
+func TestPatchDatesReportsUnmatchedDateNames(t *testing.T) {
+	xmp := `<rdf:Description xap:CreateDate="2025-12-28T00:05:59" xmp:ModifyDate="2025-12-28T00:05:59">` +
+		`<photoshop:DateCreated><rdf:Seq><rdf:li>2025-12-28</rdf:li></rdf:Seq></photoshop:DateCreated>` +
+		`</rdf:Description>`
+	b := dngtest.Build(t, dngtest.Fixture{XMP: xmp})
+	ps, skipped, err := dng.PatchDates(bytes.NewReader(b), int64(len(b)), target)
+	if err != nil || len(ps) != 1 || ps[0].What != "XMP xmp:ModifyDate" {
+		t.Fatalf("err %v patches %v", err, whats(ps))
+	}
+	checkPatches(t, b, ps)
+	want := "XMP xap:CreateDate: not in a form cull rewrites, left unchanged|" +
+		"XMP photoshop:DateCreated: not in a form cull rewrites, left unchanged"
+	if strings.Join(skipped, "|") != want {
+		t.Errorf("skipped %q", skipped)
+	}
+}
+
+func TestPatchDatesReportsNonUTF8Packet(t *testing.T) {
+	utf16 := func(s string) string {
+		out := []byte{0xFF, 0xFE}
+		for _, c := range []byte(s) {
+			out = append(out, c, 0)
+		}
+		return string(out)
+	}
+	for name, xmp := range map[string]string{
+		"utf-16 BOM": utf16(`<rdf:Description xmp:CreateDate="2025-12-28T00:05:59"/>`),
+		"NUL inside": "<rdf:Description xmp:CreateDate=\"2025-12-28T00:05:59\"/>\x00<x/>",
+	} {
+		b := dngtest.Build(t, dngtest.Fixture{XMP: xmp})
+		ps, skipped, err := dng.PatchDates(bytes.NewReader(b), int64(len(b)), target)
+		if err != nil || len(ps) != 0 || len(skipped) != 1 || skipped[0] != "XMP: packet is not UTF-8, left unchanged" {
+			t.Errorf("%s: err %v patches %v skipped %q", name, err, whats(ps), skipped)
+		}
+	}
+	// Trailing NULs are padding, not a sign of UTF-16.
+	b := dngtest.Build(t, dngtest.Fixture{XMP: "<rdf:Description xmp:CreateDate=\"2025-12-28T00:05:59\"/>\x00\x00"})
+	if ps, skipped, err := dng.PatchDates(bytes.NewReader(b), int64(len(b)), target); err != nil || len(ps) != 1 || len(skipped) != 0 {
+		t.Errorf("NUL padding: err %v patches %v skipped %q", err, whats(ps), skipped)
+	}
+}
+
+// eofAtEnd returns io.EOF with a full read that ends exactly at the end of the
+// data, as the io.ReaderAt contract allows.
+type eofAtEnd struct{ b []byte }
+
+func (r eofAtEnd) ReadAt(p []byte, off int64) (int, error) {
+	n, err := bytes.NewReader(r.b).ReadAt(p, off)
+	if err == nil && off+int64(n) == int64(len(r.b)) {
+		err = io.EOF
+	}
+	return n, err
+}
+
+func TestPatchDatesAcceptsEOFWithFullRead(t *testing.T) {
+	xmp := `<rdf:Description xmp:CreateDate="2025-12-28T00:05:59"/>`
+	b := dngtest.Build(t, dngtest.Fixture{XMP: xmp})
+	b = b[:bytes.Index(b, []byte(xmp))+len(xmp)] // the packet is the file's last bytes
+	ps, skipped, err := dng.PatchDates(eofAtEnd{b}, int64(len(b)), target)
+	if err != nil || len(ps) != 1 || len(skipped) != 0 {
+		t.Fatalf("err %v patches %v skipped %q", err, whats(ps), skipped)
+	}
+}
+
+func TestPatchDatesSubSecDigitizedAndOutOfLine(t *testing.T) {
+	b := dngtest.Build(t, dngtest.Fixture{SubSec: "53012", SubSecDTD: "7"})
+	ps, skipped, err := dng.PatchDates(bytes.NewReader(b), int64(len(b)), target)
+	if err != nil || len(skipped) != 0 || len(ps) != 2 {
+		t.Fatalf("err %v patches %v skipped %q", err, whats(ps), skipped)
+	}
+	got := checkPatches(t, b, ps)
+	for _, p := range ps {
+		switch p.What {
+		case "EXIF SubSecTime": // 6 bytes, out of line
+			if string(p.New) != "00000\x00" || p.Off != int64(bytes.Index(b, []byte("53012"))) {
+				t.Errorf("SubSecTime %+v", p)
+			}
+		case "EXIF SubSecTimeDigitized": // inline
+			if string(p.New) != "0\x00" {
+				t.Errorf("SubSecTimeDigitized %+v", p)
+			}
+		default:
+			t.Errorf("unexpected %s", p.What)
+		}
+	}
+	if !bytes.Contains(got, []byte("00000\x00")) {
+		t.Error("out-of-line sub-seconds not zeroed")
+	}
+}
+
+// exifIFD returns the Exif IFD's offset in a little-endian fixture whose IFD0 is
+// NewSubfileType followed by the Exif pointer.
+func exifIFD(b []byte) uint32 {
+	ifd0 := binary.LittleEndian.Uint32(b[4:8])
+	return binary.LittleEndian.Uint32(b[ifd0+2+12+8:])
+}
+
+func TestPatchDatesValuePastEOF(t *testing.T) {
+	b := dngtest.Build(t, dngtest.Fixture{DTO: "2025:12:28 00:05:59", DTD: "2025:12:28 00:05:59"})
+	binary.LittleEndian.PutUint32(b[exifIFD(b)+2+8:], uint32(len(b))-5) // DTO's value runs past EOF
+	ps, skipped, err := dng.PatchDates(bytes.NewReader(b), int64(len(b)), target)
+	if err != nil || len(ps) != 1 || ps[0].What != "EXIF DateTimeDigitized" ||
+		strings.Join(skipped, "|") != "EXIF DateTimeOriginal: value outside the file" {
+		t.Fatalf("err %v patches %v skipped %q", err, whats(ps), skipped)
+	}
+}
+
+func TestPatchDatesUnreadableExifPointer(t *testing.T) {
+	for _, ptr := range []uint32{0, 1 << 30} {
+		b := dngtest.Build(t, dngtest.Fixture{DTO: "2025:12:28 00:05:59"})
+		ifd0 := binary.LittleEndian.Uint32(b[4:8])
+		binary.LittleEndian.PutUint32(b[ifd0+2+12+8:], ptr)
+		if ps, _, err := dng.PatchDates(bytes.NewReader(b), int64(len(b)), target); err == nil || len(ps) != 0 {
+			t.Errorf("pointer %d: err %v patches %d", ptr, err, len(ps))
+		}
+	}
 }

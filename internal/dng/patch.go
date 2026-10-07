@@ -15,6 +15,7 @@ const (
 	tagDateTimeDigitized = 0x9004
 	tagSubSecTime        = 0x9290
 	tagSubSecDigitized   = 0x9292
+	tagC2PA              = 0xCD41 // C2PA Content Credentials manifest (JUMBF), UNDEFINED
 
 	typeUndefined = 7
 
@@ -51,6 +52,15 @@ var xmpPropRes = func() map[string][2]*regexp.Regexp {
 	return m
 }()
 
+// xmpDateName finds any prefixed occurrence of the six properties' local names,
+// so a form PatchDates doesn't rewrite (another prefix, an rdf:Seq-wrapped value)
+// is reported rather than silently missed.
+var xmpDateName = regexp.MustCompile(`([A-Za-z_][\w.-]*):(?:CreateDate|ModifyDate|MetadataDate|DateTimeOriginal|DateTimeDigitized|DateCreated)\b`)
+
+// ContentCredentialsSkip is PatchDates' one skipped entry for a frame that carries
+// C2PA Content Credentials.
+const ContentCredentialsSkip = "C2PA Content Credentials: left unchanged so its signature stays valid (it carries its own signed capture dates)"
+
 var (
 	// isoDate: YYYY-MM-DD, then optionally THH:MM, :SS, .f+, and Z or ±HH:MM (only
 	// after a time). Groups: 1 date, 2 HH:MM, 3 SS, 4 fraction digits.
@@ -73,6 +83,11 @@ var (
 // and an XMP value that isn't ISO 8601, are reported in skipped as
 // "<What>: unparseable" and left alone. skipped is ordered by file offset.
 // Time-zone fields (OffsetTime*) and every other byte are never touched.
+//
+// A frame with C2PA Content Credentials (IFD0 tag 0xCD41) is never patched: its
+// signed manifest repeats the capture dates and its hash binding covers the date
+// fields, so any patch would break the signature. PatchDates returns no patches
+// and the single skipped entry ContentCredentialsSkip for it.
 func PatchDates(r io.ReaderAt, size int64, t time.Time) (patches []Patch, skipped []string, err error) {
 	if y := t.Year(); y < 1 || y > 9999 {
 		return nil, nil, fmt.Errorf("date %s: the year must have 4 digits to keep every field's length", t.Format(time.DateOnly))
@@ -85,6 +100,9 @@ func PatchDates(r io.ReaderAt, size int64, t time.Time) (patches []Patch, skippe
 	if err != nil {
 		return nil, nil, err
 	}
+	if _, ok := ifd0[tagC2PA]; ok {
+		return nil, []string{ContentCredentialsSkip}, nil
+	}
 	p := &patcher{t: tr, size: size, exifDate: []byte(t.Format("2006:01:02 15:04:05")), when: t}
 	p.ascii(ifd0, tagDateTime, "IFD0 DateTime")
 	p.dates(ifd0, "IFD0")
@@ -96,7 +114,7 @@ func PatchDates(r io.ReaderAt, size int64, t time.Time) (patches []Patch, skippe
 		}
 		ex, _, err := tr.readIFD(off)
 		if err != nil {
-			return nil, nil, fmt.Errorf("Exif IFD: %w", err)
+			return nil, nil, fmt.Errorf("exif IFD: %w", err)
 		}
 		p.dates(ex, "EXIF")
 	}
@@ -147,7 +165,8 @@ func (p *patcher) value(e ifdEntry, n int64, what string) (int64, bool) {
 
 func (p *patcher) read(off, n int64) ([]byte, bool) {
 	b := make([]byte, n)
-	if _, err := p.t.r.ReadAt(b, off); err != nil {
+	// io.ReaderAt may return io.EOF with a full read that ends at the end of the input.
+	if got, err := p.t.r.ReadAt(b, off); err != nil && !(err == io.EOF && got == len(b)) {
 		if p.err == nil {
 			p.err = fmt.Errorf("read at %d: %w", off, err)
 		}
@@ -242,9 +261,22 @@ func (p *patcher) xmp(entries map[uint16]ifdEntry) {
 	if !ok {
 		return
 	}
+	if body := bytes.TrimRight(pkt, "\x00"); bytes.HasPrefix(body, []byte{0xFE, 0xFF}) ||
+		bytes.HasPrefix(body, []byte{0xFF, 0xFE}) || bytes.IndexByte(body, 0) >= 0 {
+		p.skips = append(p.skips, skip{base, "XMP: packet is not UTF-8, left unchanged"})
+		return
+	}
+	// Matching runs on a copy with comments blanked out (same offsets); values are
+	// taken from the packet itself, which equals the copy outside comments.
+	masked := maskXMLComments(pkt)
+	var consumed [][2]int // spans matched as a property, rewritten or reported
 	for _, prop := range xmpDateProps {
-		for _, re := range xmpPropRes[prop] {
-			for _, m := range re.FindAllSubmatchIndex(pkt, -1) {
+		for form, re := range xmpPropRes[prop] {
+			for _, m := range re.FindAllSubmatchIndex(masked, -1) {
+				if form == 0 && !inStartTag(masked, m[0]) {
+					continue // attribute-looking text in element content
+				}
+				consumed = append(consumed, [2]int{m[0], m[1]})
 				vs, ve := m[2], m[3]
 				if vs < 0 { // the attribute's single-quoted alternative
 					vs, ve = m[4], m[5]
@@ -269,6 +301,59 @@ func (p *patcher) xmp(entries map[uint16]ifdEntry) {
 			}
 		}
 	}
+	// Report every other occurrence of a date name once.
+	reported := map[string]bool{}
+	for _, m := range xmpDateName.FindAllIndex(masked, -1) {
+		in := false
+		for _, c := range consumed {
+			if m[0] >= c[0] && m[0] < c[1] {
+				in = true
+				break
+			}
+		}
+		name := string(masked[m[0]:m[1]])
+		if in || reported[name] {
+			continue
+		}
+		reported[name] = true
+		p.skips = append(p.skips, skip{base + int64(m[0]), "XMP " + name + ": not in a form cull rewrites, left unchanged"})
+	}
+}
+
+// maskXMLComments returns a copy of b with every <!-- ... --> (an unterminated
+// one to the end) replaced by spaces, so offsets are unchanged.
+func maskXMLComments(b []byte) []byte {
+	out := append([]byte(nil), b...)
+	for i := 0; ; {
+		s := bytes.Index(out[i:], []byte("<!--"))
+		if s < 0 {
+			return out
+		}
+		s += i
+		e := bytes.Index(out[s+4:], []byte("-->"))
+		end := len(out)
+		if e >= 0 {
+			end = s + 4 + e + 3
+		}
+		for j := s; j < end; j++ {
+			out[j] = ' '
+		}
+		i = end
+	}
+}
+
+// inStartTag reports whether position i lies inside a start tag: after a '<' that
+// opens an element (not "</", "<!" or "<?") with no '>' between them.
+func inStartTag(b []byte, i int) bool {
+	lt := bytes.LastIndexByte(b[:i], '<')
+	if lt < 0 || bytes.LastIndexByte(b[:i], '>') > lt || lt+1 >= len(b) {
+		return false
+	}
+	switch b[lt+1] {
+	case '/', '!', '?':
+		return false
+	}
+	return true
 }
 
 func isXMLSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
@@ -336,4 +421,20 @@ func (p *patcher) finish() ([]Patch, []string, error) {
 		skipped = append(skipped, s.msg)
 	}
 	return out, skipped, nil
+}
+
+// ContentCredentials reports whether the DNG read from r (size bytes) carries a
+// C2PA Content Credentials manifest (IFD0 tag 0xCD41). Such a frame's signed
+// manifest covers its capture dates, so cull never patches it.
+func ContentCredentials(r io.ReaderAt, size int64) (bool, error) {
+	tr, ifd0Off, err := newTIFFReader(r, size)
+	if err != nil {
+		return false, err
+	}
+	ifd0, _, err := tr.readIFD(ifd0Off)
+	if err != nil {
+		return false, err
+	}
+	_, ok := ifd0[tagC2PA]
+	return ok, nil
 }

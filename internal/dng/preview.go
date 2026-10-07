@@ -239,7 +239,7 @@ func (t *tiffReader) readIFD(off uint32) (map[uint16]ifdEntry, uint32, error) {
 		e := ifdEntry{tag: t.bo.Uint16(b[0:2]), typ: t.bo.Uint16(b[2:4]), count: t.bo.Uint32(b[4:8]),
 			valueAt: int64(off) + 2 + int64(i)*12 + 8}
 		copy(e.value[:], b[8:12])
-		entries[e.tag] = e
+		entries[e.tag] = e // a duplicate tag keeps only the last (malformed TIFF; not handled)
 	}
 	return entries, t.bo.Uint32(buf[n*12:]), nil
 }

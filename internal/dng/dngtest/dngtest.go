@@ -7,9 +7,10 @@
 //
 //	header (8 bytes)
 //	filler (16)
-//	IFD0: NewSubfileType 0, [DateTime], [XMLPacket], [ExifIFD pointer]
+//	IFD0: NewSubfileType 0, [DateTime], [XMLPacket], [ExifIFD pointer], [C2PA 0xCD41]
 //	filler (16)
-//	[Exif IFD: DateTimeOriginal, DateTimeDigitized, OffsetTime, SubSecTime, SubSecTimeOriginal]
+//	[Exif IFD: DateTimeOriginal, DateTimeDigitized, OffsetTime, SubSecTime, SubSecTimeOriginal,
+//	  SubSecTimeDigitized]
 //	filler (16)
 //	out-of-line values, in entry order, each followed by filler (8, plus 1 to keep
 //	  the next value on an even offset when needed)
@@ -29,16 +30,17 @@ import (
 
 // Fixture describes one synthetic DNG. Every string field is optional: "" omits
 // that tag. The Exif IFD (and IFD0's pointer to it) is written only when at least
-// one of DTO, DTD, OffsetTime, SubSec or SubSecOrig is set, so a fixture with none
+// one of DTO, DTD, OffsetTime, SubSec, SubSecOrig or SubSecDTD is set, so a fixture with none
 // of them has no Exif IFD at all.
 type Fixture struct {
 	// DateTime is IFD0's 0x0132; DTO and DTD are the Exif IFD's 0x9003 and 0x9004.
 	// They are meant to be 19-character "YYYY:MM:DD HH:MM:SS" values but are
 	// written as given (plus a NUL), so a test can store a malformed one.
 	DateTime, DTO, DTD string
-	// SubSec is 0x9290 SubSecTime, SubSecOrig 0x9291 SubSecTimeOriginal (ASCII,
-	// NUL-terminated; up to 3 characters fit inline in the entry).
-	SubSec, SubSecOrig string
+	// SubSec is 0x9290 SubSecTime, SubSecOrig 0x9291 SubSecTimeOriginal and
+	// SubSecDTD 0x9292 SubSecTimeDigitized (ASCII, NUL-terminated; up to 3
+	// characters fit inline in the entry, longer values go out of line).
+	SubSec, SubSecOrig, SubSecDTD string
 	// XMP is the full packet stored in IFD0's 0x02BC XMLPacket (type BYTE, no NUL).
 	XMP string
 	// BigEndian writes an "MM" file; the default is little-endian "II".
@@ -46,6 +48,9 @@ type Fixture struct {
 	// OffsetTime is the Exif IFD's 0x9010 (e.g. "+01:00"). Date fixing must leave
 	// it alone.
 	OffsetTime string
+	// C2PA, when non-nil, is stored as IFD0's 0xCD41 (UNDEFINED), the tag that
+	// holds a C2PA Content Credentials manifest (the M11-P's L… frames have one).
+	C2PA []byte
 	// Payload stands in for raw image data: it is written after the values, so two
 	// fixtures with the same dates can still differ in content (and hash).
 	Payload []byte
@@ -61,10 +66,13 @@ const (
 	tagOffsetTime     = 0x9010
 	tagSubSec         = 0x9290
 	tagSubSecOrig     = 0x9291
+	tagSubSecDTD      = 0x9292
+	tagC2PA           = 0xCD41
 
 	typeByte  = 1
 	typeASCII = 2
 	typeLong  = 4
+	typeUndef = 7
 )
 
 var fillerPattern = [4]byte{0xA5, 0x5A, 0xC3, 0x3C}
@@ -117,6 +125,9 @@ func Build(tb testing.TB, f Fixture) []byte {
 	if f.SubSecOrig != "" {
 		exif = append(exif, ascii(tagSubSecOrig, f.SubSecOrig))
 	}
+	if f.SubSecDTD != "" {
+		exif = append(exif, ascii(tagSubSecDTD, f.SubSecDTD))
+	}
 
 	ifd0 := []entry{{tag: tagNewSubfileType, typ: typeLong, count: 1, raw: make([]byte, 4)}}
 	if f.DateTime != "" {
@@ -129,6 +140,9 @@ func Build(tb testing.TB, f Fixture) []byte {
 	if len(exif) > 0 {
 		exifPtr = len(ifd0)
 		ifd0 = append(ifd0, entry{tag: tagExifIFD, typ: typeLong, count: 1, raw: make([]byte, 4)})
+	}
+	if f.C2PA != nil {
+		ifd0 = append(ifd0, entry{tag: tagC2PA, typ: typeUndef, count: uint32(len(f.C2PA)), raw: f.C2PA})
 	}
 
 	ifdSize := func(es []entry) uint32 { return 2 + uint32(len(es))*12 + 4 }

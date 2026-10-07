@@ -108,6 +108,16 @@ func (j *Redate) Finish(dir string) string {
 	return cmd
 }
 
+// FileRecord is the journal's record of the file at rel (relative to the folder); a nil
+// journal has none.
+func (j *Redate) FileRecord(rel string) (FileState, bool) {
+	if j == nil {
+		return FileState{}, false
+	}
+	rec, ok := j.Files[rel]
+	return rec, ok
+}
+
 // rename is the part of the rename journal (Task 6) Incomplete reads.
 type rename struct {
 	Pattern  string `json:"pattern"`

@@ -60,14 +60,28 @@ Lightroom may lose track of frames already imported.`,
 				fmt.Fprintf(w, "patched %d (each proven), file times only %d, already set %d, refused %d, values left alone %d\n",
 					res.Patched, res.TimesOnly, res.AlreadySet, res.Refused, len(res.Skipped))
 			}
-			if err != nil {
-				if _, finish, ok := journal.Incomplete(cfg.Dir); ok && !dryRun {
+			if res.Interrupted > 0 {
+				fmt.Fprintf(w, "%d replacement(s) interrupted: run redate again to restore them\n", res.Interrupted)
+			}
+			if _, finish, ok := journal.Incomplete(cfg.Dir); ok && !dryRun {
+				if len(res.Orphans) > 0 {
+					fmt.Fprintf(w, "unfinished: settle the hidden temp file(s) above, then run %s to finish it\n", finish)
+				} else {
 					fmt.Fprintf(w, "unfinished: run %s to finish it\n", finish)
 				}
+			}
+			if err != nil {
 				return err
 			}
 			if len(res.Orphans) > 0 {
-				return fmt.Errorf("%d hidden temp file(s) need you (see the warnings above); cull status lists them", len(res.Orphans))
+				status := "cull status " + shellQuote(cfg.Dir)
+				if so.recursive {
+					status = "cull status -r " + shellQuote(cfg.Dir)
+				}
+				return fmt.Errorf("%d hidden temp file(s) need you (see the warnings above); %s lists them", len(res.Orphans), status)
+			}
+			if res.Interrupted > 0 {
+				return fmt.Errorf("%d replacement(s) interrupted", res.Interrupted)
 			}
 			if res.Refused > 0 {
 				return fmt.Errorf("%d file(s) refused, left as they are", res.Refused)

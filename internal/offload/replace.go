@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,6 +33,8 @@ type Replaced struct {
 	// TempKept: the swap failed after the original's name was gone (a rename-over that
 	// deletes first), so the proven temp was kept: it may be the only copy.
 	TempKept bool
+	Temp     string // the kept temp's path, with TempKept
+	Proven   bool   // the temp re-read from the disk as want
 }
 
 // RedateTempExt ends ReplacePatched's temps (".<name>.cull-<rand>.redate"): distinct from
@@ -88,12 +91,15 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 		if _, err := os.Lstat(path); err == nil {
 			os.Remove(tmp.Name())
 		} else { // never the only copy
-			r.TempKept = true
+			r.TempKept, r.Temp = true, tmp.Name()
 		}
 	}()
 	r.Orig, r.Want, err = streamPatched(ctx, in, ps, tmp)
 	if err != nil {
 		return r, fmt.Errorf("read %s: %w", path, err)
+	}
+	if afterStream != nil {
+		afterStream(path)
 	}
 	if expect != "" && hexOf(r.Orig[:]) != expect {
 		return r, ErrChanged
@@ -122,6 +128,7 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 	if err := proveFrom(ctx, tmp.Name(), r.Want); err != nil {
 		return r, err
 	}
+	r.Proven = true
 	// Narrow the window: the original must still be the file just read.
 	if now, err := os.Lstat(path); err != nil || now.Size() != st.Size() || !now.ModTime().Equal(st.ModTime()) || !os.SameFile(now, st) {
 		return r, fmt.Errorf("%s changed while it was being fixed; not replaced", path)
@@ -143,7 +150,7 @@ func RedateTemps(dir string) map[string]string {
 	out := map[string]string{}
 	ents, _ := os.ReadDir(dir)
 	for _, e := range ents {
-		if sm := redateTempRE.FindStringSubmatch(e.Name()); sm != nil && e.Type().IsRegular() {
+		if sm := redateTempRE.FindStringSubmatch(e.Name()); sm != nil && e.Type().IsRegular() && !appleDouble(e.Name()) {
 			out[filepath.Join(dir, e.Name())] = filepath.Join(dir, sm[1])
 		}
 	}
@@ -192,7 +199,7 @@ func ProveFrom(ctx context.Context, path string, want [32]byte) error {
 func RemoveStaleTemps(dir string) {
 	ents, _ := os.ReadDir(dir)
 	for _, e := range ents {
-		if offloadTempRE.MatchString(e.Name()) && e.Type().IsRegular() {
+		if offloadTempRE.MatchString(e.Name()) && e.Type().IsRegular() && !appleDouble(e.Name()) {
 			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
@@ -210,3 +217,18 @@ func SetRenameHook(f func(old, new string) error) (restore func()) {
 	renameFn = f
 	return func() { renameFn = os.Rename }
 }
+
+// afterStream is a test seam: called with path once the original has been read into
+// the temp (SetAfterStreamHook).
+var afterStream func(path string)
+
+// SetAfterStreamHook is a test seam: f runs once the original has been read into the
+// temp, before anything is checked or journalled. restore removes it.
+func SetAfterStreamHook(f func(path string)) (restore func()) {
+	afterStream = f
+	return func() { afterStream = nil }
+}
+
+// appleDouble reports macOS's "._" companion of a file on exFAT/FAT (its extended
+// attributes): never a temp itself. The filesystem removes it with its file.
+func appleDouble(name string) bool { return strings.HasPrefix(name, "._") }

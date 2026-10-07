@@ -63,7 +63,7 @@ func TestRenameErrorAfterTargetGone(t *testing.T) {
 	})
 	res, n, _ := runNotes(t, dir)
 	restore()
-	if res.Refused != 1 || !strings.Contains(n.all(), "M1.DNG: replacement interrupted") || strings.Contains(n.all(), "M1.DNG: not changed") {
+	if res.Interrupted != 1 || res.Refused != 0 || !strings.Contains(n.all(), "M1.DNG: replacement interrupted") || strings.Contains(n.all(), "M1.DNG: not changed") {
 		t.Fatalf("run 1: %+v\n%s", res, n.all())
 	}
 	if _, _, ok := journal.Incomplete(dir); !ok {

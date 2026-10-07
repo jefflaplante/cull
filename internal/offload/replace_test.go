@@ -241,3 +241,32 @@ func TestReplacePatchedTempKept(t *testing.T) {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
+
+// macOS's AppleDouble companions ("._" + name) on exFAT/FAT are never temps.
+func TestTempsSkipAppleDouble(t *testing.T) {
+	dir := t.TempDir()
+	ad1, ad2 := filepath.Join(dir, "._.A.DNG.cull-01020304.redate"), filepath.Join(dir, "._.A.DNG.cull-01020304.tmp")
+	os.WriteFile(ad1, nil, 0o644)
+	os.WriteFile(ad2, nil, 0o644)
+	if got := RedateTemps(dir); len(got) != 0 {
+		t.Fatalf("%v", got)
+	}
+	RemoveStaleTemps(dir)
+	if _, err := os.Stat(ad2); err != nil {
+		t.Fatal("companion removed")
+	}
+}
+
+// The original vanishing while it is read leaves the temp kept but unproven.
+func TestReplacePatchedVanishesWhileRead(t *testing.T) {
+	path, _, ps := replaceFixture(t)
+	restore := SetAfterStreamHook(func(p string) { os.Remove(p) })
+	defer restore()
+	r, err := ReplacePatched(context.Background(), path, ps, strings.Repeat("0", 64), setTarget, func(_, _ [32]byte) error {
+		t.Fatal("beforeSwap called")
+		return nil
+	})
+	if err == nil || !r.TempKept || r.Proven || r.Temp == "" {
+		t.Fatalf("%+v %v", r, err)
+	}
+}

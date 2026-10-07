@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -67,18 +68,27 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 		dir = "-o " + shellQuote(cfg.ReportPath) + " " + dir // suggested commands keep the same report
 	}
 	which, finish, unfinished := journal.Incomplete(cfg.Dir)
-	// A hidden redate temp whose frame is missing may be that frame's only copy: the
-	// user puts it back (or deletes it if it isn't the frame) before anything else.
+	// Hidden redate temps: one whose frame is missing may be that frame's only copy.
+	// redate restores it by itself when its journal records the frame (it proves the
+	// temp first); otherwise the user puts it back, or deletes it if it isn't the frame.
+	// One beside its frame is settled by the next redate (removed, or kept and said why).
+	jr, _ := journal.LoadRedate(cfg.Dir)
 	orphanNext, missing := "", []string(nil)
-	for _, d := range append([]string{cfg.Dir}, placeDirsIn(cfg.Dir)...) {
+	for _, d := range tempFolders(cfg.Dir, cfg.Recursive) {
 		for tmp, target := range offload.RedateTemps(d) {
+			rel, _ := filepath.Rel(cfg.Dir, target)
 			if _, err := os.Lstat(target); err == nil {
-				continue // beside its frame: the next redate settles it
+				missing = append(missing, fmt.Sprintf("  hidden temp %s beside %s: the next redate removes it if %s is what it recorded, else keeps both and says why\n", tmp, rel, rel))
+				continue
+			}
+			if rec, ok := jr.FileRecord(rel); ok && rec.Want != "" && unfinished && which == "redate" {
+				missing = append(missing, fmt.Sprintf("  missing: %s; the next redate restores it from its hidden temp %s (proving it first)\n", rel, tmp))
+				continue
 			}
 			if orphanNext == "" {
 				orphanNext = "mv " + shellQuote(tmp) + " " + shellQuote(target) + "   (if it is the frame; if it isn't, delete it)"
 			}
-			missing = append(missing, fmt.Sprintf("  missing: %s; the hidden temp %s may be its only copy\n", filepath.Base(target), tmp))
+			missing = append(missing, fmt.Sprintf("  missing: %s; the hidden temp %s may be its only copy\n", rel, tmp))
 		}
 	}
 	pending := func() {
@@ -92,8 +102,8 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 	}
 	if rep == nil {
 		fmt.Fprintf(w, "%s: %d DNGs; no report at %s\n", cfg.Dir, len(files), cfg.ReportPath)
+		pending()
 		if orphanNext != "" || unfinished {
-			pending()
 			fmt.Fprintf(w, "next: %s\n", cmp.Or(orphanNext, finish))
 			return
 		}
@@ -237,11 +247,26 @@ func shellQuote(s string) string { return journal.ShellQuote(s) }
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// placeDirsIn are dir's sort folders, where frames (and redate temps) may also be.
-func placeDirsIn(dir string) []string {
-	var out []string
-	for _, d := range offload.MovedDirs {
-		out = append(out, filepath.Join(dir, d))
+// tempFolders are the folders redate may leave temps in: dir, its sort folders, and
+// with recursive every folder below (hidden ones skipped).
+func tempFolders(dir string, recursive bool) []string {
+	if !recursive {
+		out := []string{dir}
+		for _, d := range offload.MovedDirs {
+			out = append(out, filepath.Join(dir, d))
+		}
+		return out
 	}
+	var out []string
+	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		if p != dir && strings.HasPrefix(d.Name(), ".") {
+			return filepath.SkipDir
+		}
+		out = append(out, p)
+		return nil
+	})
 	return out
 }

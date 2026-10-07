@@ -53,6 +53,9 @@ type Result struct {
 	// Orphans are hidden redate temps left alone that may be a frame's only copy (their
 	// file is missing, or isn't what the journal recorded): the user decides.
 	Orphans []string
+	// Interrupted counts swaps that failed after the original's name was gone: the
+	// proven temp holds the frame, and the next run restores it.
+	Interrupted int
 	// CrtimeFailed counts files whose creation time couldn't be set (best effort).
 	CrtimeFailed int
 }
@@ -87,6 +90,8 @@ type run struct {
 	manDirty                   map[string]bool                     // shoot folders whose manifest grew since the last checkpoint
 	xattrNoted                 map[string]bool                     // extended-attribute failures noted, by kind
 	warned                     bool                                // the catalogue warning was given
+	prev                       *journal.Redate                     // a dry run's view of the unfinished journal (read only)
+	held                       map[string]bool                     // files with a hidden temp left alone: not touched this run
 }
 
 // changing gives, once, before the first file changes, the warning every command that
@@ -175,7 +180,11 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		r.man[folder] = m
 	}
 
-	if !o.DryRun {
+	if o.DryRun {
+		if j != nil && !j.Complete { // read only: what a re-run would restore
+			r.prev = j
+		}
+	} else {
 		if j == nil || j.Complete {
 			j = &journal.Redate{Target: r.targetISO, Started: time.Now(), Recursive: o.Recursive, Report: reportField}
 		}
@@ -249,6 +258,10 @@ func Run(ctx context.Context, o Options) (Result, error) {
 // file fixes one DNG. An error stops the run; a refusal is counted and returns nil.
 func (r *run) file(p string) error {
 	rel, _ := filepath.Rel(r.dir, p)
+	if r.held[rel] { // its temp was left alone, and its journal record stays with it
+		r.verbose("%s: left alone with the hidden temp beside it (see above)", rel)
+		return nil
+	}
 	st, err := os.Lstat(p)
 	if err != nil {
 		r.refuse(rel, err.Error())
@@ -353,10 +366,12 @@ func (r *run) file(p string) error {
 	switch {
 	case journalErr != nil:
 		return journalErr
-	case err != nil && rp.TempKept: // the original's name went before the swap failed
-		r.res.Refused++
-		r.res.Refusals = append(r.res.Refusals, rel+": replacement interrupted ("+err.Error()+"): run redate again to restore it")
+	case err != nil && rp.TempKept && rp.Proven: // the original's name went before the swap finished
+		r.res.Interrupted++
 		r.warn("%s: replacement interrupted — run redate again to restore it from its proven temp (%v)", rel, err)
+		return nil
+	case err != nil && rp.TempKept: // the original vanished before the temp was proven
+		r.orphan(rp.Temp, p, fmt.Sprintf("%s vanished while it was being fixed (%v); the hidden temp is an unproven, possibly partial copy", rel, err))
 		return nil
 	case errors.Is(err, offload.ErrChanged):
 		r.refuse(rel, err.Error())
@@ -633,35 +648,33 @@ func listDNGs(folders []string) ([]string, error) {
 //
 // A dry run changes nothing.
 func (r *run) settleTemps(d string) error {
+	jr := r.j
+	if jr == nil {
+		jr = r.prev // a dry run reads the unfinished journal, changing nothing
+	}
 	for tmp, target := range offload.RedateTemps(d) {
 		rel, _ := filepath.Rel(r.dir, target)
 		var rec journal.FileState
 		journaled := false
-		if r.j != nil {
-			rec, journaled = r.j.Files[rel]
+		if jr != nil {
+			rec, journaled = jr.Files[rel]
 		}
-		if _, err := os.Lstat(target); err == nil {
+		if tst, err := os.Lstat(target); err == nil {
 			if r.o.DryRun {
 				continue
 			}
-			if journaled {
-				sum, err := offload.HashFromDisk(r.ctx, target)
-				if err != nil {
-					if r.ctx.Err() != nil {
-						return r.ctx.Err()
-					}
-					r.orphan(tmp, target, fmt.Sprintf("%s can't be read to check it against the journal (%v)", rel, err))
-					continue
-				}
-				if h := hex.EncodeToString(sum[:]); h != rec.Orig && h != rec.Want {
-					r.orphan(tmp, target, rel+" isn't what the journal recorded, before or after its patches")
-					continue
-				}
+			keep, err := r.keepBeside(tmp, target, rel, tst, rec, journaled)
+			if err != nil {
+				return err
+			}
+			if keep != "" {
+				r.orphan(tmp, target, keep)
+				continue
 			}
 			os.Remove(tmp)
 			continue
 		}
-		if r.o.DryRun || !journaled || rec.Want == "" {
+		if !journaled || rec.Want == "" {
 			r.orphan(tmp, target, rel+" is missing")
 			continue
 		}
@@ -673,6 +686,10 @@ func (r *run) settleTemps(d string) error {
 			r.orphan(tmp, target, rel+" is missing, and the temp doesn't prove: "+why)
 			continue
 		}
+		if r.o.DryRun {
+			r.say("%s: a re-run would restore it from its proven temp (an interrupted swap)", rel)
+			continue
+		}
 		if err := offload.Adopt(tmp, target); err != nil {
 			return fmt.Errorf("restore %s from %s: %w", rel, filepath.Base(tmp), err)
 		}
@@ -681,9 +698,49 @@ func (r *run) settleTemps(d string) error {
 	return nil
 }
 
+// keepBeside decides about a redate temp beside its file: "" removes it (a swap that
+// never happened, the file intact), else why both stay. A journalled file must be what
+// the journal recorded, before or after its patches. Otherwise a shorter temp is a
+// partial copy; a full one goes only if the file proves against its manifest.
+func (r *run) keepBeside(tmp, target, rel string, tst os.FileInfo, rec journal.FileState, journaled bool) (string, error) {
+	if journaled {
+		sum, err := offload.HashFromDisk(r.ctx, target)
+		switch {
+		case err != nil && r.ctx.Err() != nil:
+			return "", r.ctx.Err()
+		case err != nil:
+			return fmt.Sprintf("%s can't be read to check it against the journal (%v)", rel, err), nil
+		}
+		if h := hex.EncodeToString(sum[:]); h != rec.Orig && h != rec.Want {
+			return rel + " isn't what the journal recorded, before or after its patches", nil
+		}
+		return "", nil
+	}
+	if st, err := os.Stat(tmp); err == nil && st.Size() < tst.Size() {
+		return "", nil // cut short: a partial copy, never a frame
+	}
+	e, recorded := r.man[shootFolder(r.dir, target)][strings.ToLower(filepath.Base(target))]
+	if !recorded {
+		return rel + " has no record to check it against, and the temp is as large as it", nil
+	}
+	why, err := r.prove(target, e.CurrentSHA256(), "its manifest", "it doesn't match its manifest")
+	if err != nil {
+		return "", err
+	}
+	if why != "" {
+		return rel + ": " + why, nil
+	}
+	return "", nil
+}
+
 // orphan reports a redate temp left alone: it may be a frame's only copy.
 func (r *run) orphan(tmp, target, why string) {
 	r.res.Orphans = append(r.res.Orphans, tmp)
+	if r.held == nil {
+		r.held = map[string]bool{}
+	}
+	rel, _ := filepath.Rel(r.dir, target)
+	r.held[rel] = true
 	if _, err := os.Lstat(target); err == nil {
 		r.warn("%s; the hidden temp %s was left alone: compare the two and keep the frame (delete the other)", why, tmp)
 		return

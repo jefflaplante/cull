@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/jefflaplante/cull/internal/dng/dngtest"
 	"github.com/jefflaplante/cull/internal/journal"
+	"github.com/jefflaplante/cull/internal/offload"
 )
 
 // While a redate is unfinished, judge, decide and review refuse, naming the command
@@ -127,5 +129,35 @@ func TestUnfinishedRedateGuardsRecursiveAndRestore(t *testing.T) {
 	out, err = run(t, "restore", shoot)
 	if err == nil || !strings.Contains(err.Error(), "cull redate") {
 		t.Fatalf("restore: %v\n%s", err, out)
+	}
+}
+
+// An interrupted replacement: the closing lines say so (not "refused, left as they
+// are") and name the command that finishes it; status points at that command, not at a
+// manual mv.
+func TestRedateInterruptedReplacement(t *testing.T) {
+	dir, _ := redateShoot(t)
+	restore := offload.SetRenameHook(func(old, new string) error { os.Remove(new); return syscall.EIO })
+	out, err := run(t, "redate", "--date", "2026-10-04", dir)
+	restore()
+	if err == nil || !strings.Contains(out, "1 replacement(s) interrupted: run redate again to restore them") ||
+		!strings.Contains(out, "unfinished: run cull redate "+dir+" --date 2026-10-04 to finish it") || strings.Contains(out, "left as they are") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, _ = run(t, "status", dir)
+	if !strings.Contains(out, "next: cull redate "+dir+" --date 2026-10-04") || strings.Contains(out, "next: mv") {
+		t.Fatalf("status:\n%s", out)
+	}
+}
+
+// status lists a temp beside its frame too (redate keeps it when the frame isn't what
+// it recorded).
+func TestStatusTempBesideFrame(t *testing.T) {
+	dir, _ := redateShoot(t)
+	tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+	os.WriteFile(tmp, []byte("x"), 0o644)
+	out, err := run(t, "status", dir)
+	if err != nil || !strings.Contains(out, tmp) {
+		t.Fatalf("status: %v\n%s", err, out)
 	}
 }

@@ -50,7 +50,8 @@ the menu was last set to. True capture times are gone. The dates must be correct
 **Inside each DNG.** All values are rewritten at the same length, digit for digit, so no
 byte outside them changes:
 
-- **TIFF/EXIF ASCII date-times** (`YYYY:MM:DD HH:MM:SS\0`, 20 bytes):
+- **TIFF/EXIF ASCII date-times** (`YYYY:MM:DD HH:MM:SS\0`, 20 bytes), wherever they sit. The
+  M11-P stores DateTimeOriginal in IFD0:
   - DateTime (0x0132), in IFD0;
   - DateTimeOriginal (0x9003) and DateTimeDigitized (0x9004), in the EXIF IFD.
 - **SubSecTime, SubSecTimeOriginal, SubSecTimeDigitized** (0x9290–0x9292), where present:
@@ -66,6 +67,18 @@ byte outside them changes:
 - **Left alone:** time-zone offsets (OffsetTime*, 0x9010–0x9012) and every other byte.
 - **Values that need no change:** if a field already holds the target value, it isn't
   rewritten. That makes a re-run of `redate` idempotent.
+
+**Frames with Content Credentials (C2PA)** (amended 2026-10-06, user decision). Leica
+writes a signed C2PA manifest (IFD0 tag 0xCD41) into some frames: the `L…` files on the
+M11-P. The manifest repeats the capture dates, and its signature covers the date fields,
+so any patch would invalidate it. These frames are therefore never byte-patched:
+
+- they're listed as skipped, with the reason;
+- their file times are still set;
+- cull's sidecar still carries the corrected date. The report records it as
+  `Result.DatesSet`, which the sidecar uses in place of the file's own EXIF date.
+
+**GPS dates** (GPSDateStamp, UTC, from a paired phone) are out of scope and never patched.
 
 **On the file:**
 

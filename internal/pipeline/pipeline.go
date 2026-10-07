@@ -597,8 +597,9 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 			rep.ResolvedModel = prev.ResolvedModel
 			rep.DiscardedCostUSD = prev.DiscardedCostUSD
 			for _, r := range prev.Results {
-				if r.DatesSet == "" {
-					r.DatesSet = cfg.datesSet[r.File]
+				// The manifest is current (redate appends to it); the report may not be.
+				if d, ok := cfg.datesSet[r.File]; ok {
+					r.DatesSet = d
 				}
 				if kept(r, cfg.DryRun, cfg.Policy) {
 					rep.Results = append(rep.Results, r)

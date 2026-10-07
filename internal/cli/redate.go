@@ -3,10 +3,12 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jefflaplante/cull/internal/journal"
+	"github.com/jefflaplante/cull/internal/pipeline"
 	"github.com/jefflaplante/cull/internal/redate"
 )
 
@@ -97,17 +99,45 @@ Lightroom may lose track of frames already imported.`,
 }
 
 // holdShoot takes dir's folder lock, shared, for a command that relies on the frames
-// keeping their names and bytes (judge, decide, review, restore) for its whole run, and
-// refuses while a redate or rename of dir is unfinished: its keys may not match the
-// files yet. With recursive, folders below dir (shoot folders judge -r reaches) are
-// checked too. release ends the hold; call it when the command is done.
-func holdShoot(cmd *cobra.Command, dir string, recursive bool) (release func(), err error) {
-	release, note, err := journal.Lock(dir, false, cmd.Name())
-	if err != nil {
-		return func() {}, err
+// keeping their names and bytes (judge, decide, review, restore, scan, tag, rank,
+// import-labels) for its whole run, and refuses while a redate or rename of dir is
+// unfinished: its keys may not match the files yet. With recursive (judge -r), every
+// folder it reads frames from is held, and checked for unfinished journals. lock false
+// (--estimate) takes no lock and makes no lock file. release ends the hold; call it
+// when the command is done.
+func holdShoot(cmd *cobra.Command, dir string, recursive, lock bool) (release func(), err error) {
+	var held []func()
+	release = func() {
+		for _, h := range held {
+			h()
+		}
 	}
-	if note != "" {
-		fmt.Fprintln(cmd.ErrOrStderr(), "note: "+note)
+	if lock {
+		folders := []string{dir}
+		if recursive {
+			files, err := pipeline.Discover(dir, true)
+			if err != nil {
+				return func() {}, err
+			}
+			seen := map[string]bool{dir: true}
+			for _, f := range files {
+				if d := filepath.Dir(f); !seen[d] {
+					seen[d] = true
+					folders = append(folders, d)
+				}
+			}
+		}
+		for _, d := range folders {
+			h, note, err := journal.Lock(d, false, cmd.Name())
+			if err != nil {
+				release()
+				return func() {}, err
+			}
+			held = append(held, h)
+			if note != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), "note: "+note)
+			}
+		}
 	}
 	pending := journal.Unfinished(dir)
 	if recursive {

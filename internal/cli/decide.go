@@ -52,7 +52,7 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 			if err != nil {
 				return err
 			}
-			release, err := holdShoot(cmd, cfg.Dir, false)
+			release, err := holdShoot(cmd, cfg.Dir, false, true)
 			if err != nil {
 				return err
 			}

@@ -33,7 +33,7 @@ func TestUnfinishedRedateGuards(t *testing.T) {
 		}
 	}
 	out, err := run(t, "status", dir)
-	if err != nil || !strings.Contains(out, "next: cull redate "+dir+" --date 2026-10-04") || !strings.Contains(out, "unfinished") || !strings.Contains(out, "review and restore refuse") {
+	if err != nil || !strings.Contains(out, "next: cull redate "+dir+" --date 2026-10-04") || !strings.Contains(out, "unfinished") || !strings.Contains(out, "restore, scan, tag, rank, import-labels, offload, redate and rename refuse") {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
 	// And without a report.
@@ -233,7 +233,7 @@ func TestOrphanRecursiveCLI(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	out, _ = run(t, "status", "-r", parent)
-	if !strings.Contains(out, ".cull-redate-deadbeef._M2.DNG") || !strings.Contains(out, "next: mv") || !strings.Contains(out, "day1/_M2.DNG") {
+	if !strings.Contains(out, ".cull-redate-deadbeef._M2.DNG") || !strings.Contains(out, "next: mv -n") || !strings.Contains(out, "day1/_M2.DNG") {
 		t.Fatalf("status -r:\n%s", out)
 	}
 }

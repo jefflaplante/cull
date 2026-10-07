@@ -25,7 +25,7 @@ is listed. To keep some frames where they are, move the others back by hand inst
 			if err != nil {
 				return err
 			}
-			release, err := holdShoot(cmd, cfg.Dir, false)
+			release, err := holdShoot(cmd, cfg.Dir, false, true)
 			if err != nil {
 				return err
 			}

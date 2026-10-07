@@ -51,31 +51,60 @@ type Result struct {
 // most two are in flight, and stage B taking one file at a time, in plan order, keeps
 // the manifest in card order. A file is recorded only once its own stage B passed.
 func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
+	res, release, err := RunHeld(ctx, p, sink)
+	release()
+	return res, err
+}
+
+// RunHeld is Run that keeps holding the destinations' folder locks when it returns, so
+// the caller can scan the shoot folder under them; release lets go (call it always).
+//
+// Each shoot folder is held, shared, for the whole copy: redate and rename (which hold
+// it exclusively) never run under it. One that exists already is held before anything
+// is written; a new one as soon as it is created. A folder with an unfinished redate or
+// rename is refused.
+func RunHeld(ctx context.Context, p *Plan, sink ui.Sink) (res *Result, release func(), err error) {
 	start := time.Now()
 	r := &runner{ctx: ctx, p: p, res: &Result{Plan: p}, sink: sink}
-	// A shoot folder that exists already is held, shared, for the whole copy: redate
-	// and rename (which hold it exclusively) never run under it. A new one has nothing
-	// for them to change yet.
-	for _, d := range p.Dests {
-		if st, err := os.Stat(d); err != nil || !st.IsDir() {
-			continue
+	var held []func()
+	release = func() {
+		for _, h := range held {
+			h()
 		}
-		release, note, err := journal.Lock(d, false, "offload")
+	}
+	hold := func(d string) error {
+		h, note, err := journal.Lock(d, false, "offload")
 		if err != nil {
-			return r.res, err
+			return err
 		}
-		defer release()
+		held = append(held, h)
 		if note != "" && sink != nil {
 			sink.Emit(ui.Event{Note: &ui.Note{Sev: ui.Warn, Text: note}})
 		}
 		if ps := journal.Unfinished(d); len(ps) > 0 {
-			return r.res, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s, then offload", ps[0].Which, d, ps[0].Finish)
+			return fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s, then offload", ps[0].Which, d, ps[0].Finish)
+		}
+		return nil
+	}
+	var fresh []string
+	for _, d := range p.Dests {
+		if st, err := os.Stat(d); err != nil || !st.IsDir() {
+			fresh = append(fresh, d)
+			continue
+		}
+		if err := hold(d); err != nil {
+			return r.res, release, err
+		}
+	}
+	for _, d := range fresh {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return r.res, release, err
+		}
+		if err := hold(d); err != nil {
+			return r.res, release, err
 		}
 	}
 	for _, d := range p.Dests {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			return r.res, err
-		}
 		RemoveStaleTemps(d)
 	}
 	r.emit(ui.Event{Stage: &ui.Stage{Name: "offload", Unit: "bytes", Total: p.Bytes}})
@@ -88,7 +117,7 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 	}
 	r.noteSigned()
 	r.noteUndated()
-	res := r.res
+	res = r.res
 	// Only now, with no file in either stage, is each destination's drive cache flushed,
 	// once: fsync stops at the drive. That can take a few seconds after a big copy, so
 	// it shows as a stage. A network share gets fsync instead (flushDrive).
@@ -108,7 +137,7 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 	res.Elapsed = time.Since(start)
 	res.Safe = ctx.Err() == nil && len(res.Failed) == 0 && len(res.SyncErrs) == 0 &&
 		res.Unverified == 0 && res.Copied+res.Skipped == len(p.Files)
-	return res, ctx.Err()
+	return res, release, ctx.Err()
 }
 
 // runner is one Run's state. Only Run's goroutine touches it (stage B's goroutine only

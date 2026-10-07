@@ -807,7 +807,7 @@ func (r *run) orphan(tmp, target, why string) {
 		r.warn("%s; the hidden temp %s %s left alone: compare the two and keep the frame (delete the other)", why, tmp, left)
 		return
 	}
-	r.warn("%s; the hidden temp %s may be its only copy. If it is the frame, put it back with: mv %s %s (if it isn't, delete it)",
+	r.warn("%s; the hidden temp %s may be its only copy. If it is the frame, put it back with: mv -n %s %s (if it isn't, delete it)",
 		why, tmp, journal.ShellQuote(tmp), journal.ShellQuote(target))
 }
 

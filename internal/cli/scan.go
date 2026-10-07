@@ -28,6 +28,11 @@ after copying; set the shoot's tags with offload or 'cull tag'.`,
 			if err != nil {
 				return err
 			}
+			release, err := holdShoot(cmd, cfg.Dir, cfg.Recursive, true)
+			if err != nil {
+				return err
+			}
+			defer release()
 			cfg.DryRun = true
 			cfg.Concurrency = concurrency
 			cfg.RawClip = rawClip

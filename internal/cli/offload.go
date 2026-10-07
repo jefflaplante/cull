@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jefflaplante/cull/internal/journal"
 	"github.com/jefflaplante/cull/internal/offload"
 	"github.com/jefflaplante/cull/internal/pipeline"
 	"github.com/jefflaplante/cull/internal/report"
@@ -94,8 +95,16 @@ judge it next.`,
 			fmt.Fprintln(out.Log, plansSummary(plans, o))
 			var results []*offload.Result
 			var runErr error
+			// Each shoot folder stays held (shared) until the scan below is done.
+			var held []func()
+			defer func() {
+				for _, h := range held {
+					h()
+				}
+			}()
 			for _, p := range plans {
-				res, err := offload.Run(cmd.Context(), p, out.UI)
+				res, release, err := offload.RunHeld(cmd.Context(), p, out.UI)
+				held = append(held, release)
 				results = append(results, res)
 				if err != nil {
 					runErr = err
@@ -228,6 +237,9 @@ func parseLocalTime(dateFlag, day, clock string) (time.Time, error) {
 }
 
 func runVerify(cmd *cobra.Command, so *sharedOpts, folder string) error {
+	for _, p := range journal.Unfinished(folder) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: an unfinished %s is recorded in %s: frames under hidden temps show as missing until it's finished (%s)\n", p.Which, folder, p.Finish)
+	}
 	out := so.out.newOutput(cmd, true)
 	defer out.Close()
 	v, err := offload.Verify(cmd.Context(), folder, out.UI)

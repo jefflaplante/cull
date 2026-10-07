@@ -232,7 +232,7 @@ func TestOrphanAdvice(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 	all := n.all()
-	if !strings.Contains(all, "mv "+journal.ShellQuote(tmp)+" "+journal.ShellQuote(filepath.Join(dir, "M1.DNG"))) || strings.Contains(all, "run the same redate again") {
+	if !strings.Contains(all, "mv -n "+journal.ShellQuote(tmp)+" "+journal.ShellQuote(filepath.Join(dir, "M1.DNG"))) || strings.Contains(all, "run the same redate again") {
 		t.Fatalf("notes:\n%s", all)
 	}
 }

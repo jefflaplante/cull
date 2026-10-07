@@ -565,28 +565,38 @@ func (p *Plan) cameraNames(o Options) error {
 			return fmt.Errorf("%s is on two sources (%s and %s): use --rename to keep both", f.Name, other, f.Src)
 		}
 		byName[key] = f.Src
-		// A file the manifest records (card name, size and mtime) is looked for under the
-		// name it records: cull rename may have renamed the copy since, even to another
-		// frame's camera name.
-		for i := range p.Dests {
-			e, ok := byOrig[i][key+"\x00"+strconv.FormatInt(f.Size, 10)]
-			if dt := e.ModTime.Sub(f.ModTime); ok && dt <= mtimeWindow && dt >= -mtimeWindow {
-				f.Name = e.Name
-				break
-			}
-		}
-		key = strings.ToLower(f.Name)
+		// Each destination is checked under the name its own manifest records for this
+		// card file (card name, size and mtime): cull rename may have renamed the copy
+		// there since, even to another frame's camera name, and the primary and the
+		// backup may be renamed differently. A destination that records nothing is
+		// checked under the camera name.
+		camera := f.Name
 		datedThere := false // a copy already there is a dated one
+		copyAs := ""        // the name the copies still to make get
 		for i, d := range p.Dests {
-			at, st, ok := existing(d, f.Name)
+			name := camera
+			if e, ok := byOrig[i][key+"\x00"+strconv.FormatInt(f.Size, 10)]; ok {
+				if dt := e.ModTime.Sub(f.ModTime); dt <= mtimeWindow && dt >= -mtimeWindow {
+					name = e.Name
+				}
+			}
+			if i == 0 {
+				f.Name = name
+			}
+			at, st, ok := existing(d, name)
 			if !ok {
+				if copyAs != "" && copyAs != name {
+					return fmt.Errorf("%s is missing from %s and from another destination, whose manifests record it as %s and %s: copy it by hand, or offload to each destination on its own", camera, d, copyAs, name)
+				}
+				copyAs = name
 				f.To = append(f.To, d)
 				continue
 			}
+			lkey := strings.ToLower(name)
 			// A copy whose dates were set no longer matches the card by mtime or hash:
 			// its manifest entry vouches for it instead.
 			applies, eq, err := false, false, error(nil)
-			if e, ok := dated[i][key]; ok {
+			if e, ok := dated[i][lkey]; ok {
 				applies, eq, err = recordedSame(*f, e, at, st, o.Checksum)
 				datedThere = datedThere || (applies && eq)
 			}
@@ -594,7 +604,7 @@ func (p *Plan) cameraNames(o Options) error {
 				eq, err = same(*f, at, st, o.Checksum)
 				// Only a name no manifest line records: one that does, and doesn't match
 				// above, is another file.
-				if _, recorded := verified[i][f.Name]; !eq && err == nil && p.setDate != nil && !recorded {
+				if _, recorded := verified[i][name]; !eq && err == nil && p.setDate != nil && !recorded {
 					eq, err = sameDated(*f, at, st, o.Checksum, *p.setDate)
 					datedThere = datedThere || eq
 				}
@@ -605,9 +615,12 @@ func (p *Plan) cameraNames(o Options) error {
 			if !eq {
 				return fmt.Errorf("%s exists with different content; use --rename to keep both", at)
 			}
-			if size, ok := verified[i][f.Name]; !o.Checksum && (!ok || size != f.Size) {
+			if size, ok := verified[i][name]; !o.Checksum && (!ok || size != f.Size) {
 				f.Unverified = true
 			}
+		}
+		if copyAs != "" {
+			f.Name = copyAs
 		}
 		if len(f.To) == 0 {
 			f.Skip = "already copied"
@@ -743,12 +756,26 @@ func (p *Plan) renamed(o Options) error {
 			}
 		}
 		if rec != nil {
-			// Copied before under rec.Name: it is skipped only where it still is, and
-			// counts as verified only where that folder's manifest records it.
-			f.Name = rec.Name
+			// Copied before: each destination is checked under the name its own manifest
+			// records (cull rename may have renamed the primary and the backup
+			// differently), or rec.Name where it records nothing. It is skipped only where
+			// it still is, and counts as verified only where that folder's manifest
+			// records it.
+			copyAs := ""
 			for j, d := range p.Dests {
-				at, st, ok := existing(d, rec.Name)
+				name := rec.Name
+				if e, ok := recorded[j][key]; ok && matches(e) {
+					name = e.Name
+				}
+				if j == 0 {
+					f.Name = name
+				}
+				at, st, ok := existing(d, name)
 				if !ok {
+					if copyAs != "" && copyAs != name {
+						return fmt.Errorf("%s is missing from %s and from another destination, whose manifests record it as %s and %s: copy it by hand, or offload to each destination on its own", orig, d, copyAs, name)
+					}
+					copyAs = name
 					f.To = append(f.To, d)
 					continue
 				}
@@ -756,7 +783,7 @@ func (p *Plan) renamed(o Options) error {
 					return fmt.Errorf("%s isn't the copy the manifest records (size %d, the card's is %d); move it aside and rerun",
 						at, st.Size(), f.Size)
 				}
-				if e, ok := recorded[j][key]; ok && e.Name == rec.Name && matches(e) {
+				if e, ok := recorded[j][key]; ok && e.Name == name && matches(e) {
 					// Recorded here: verified when it was made. --checksum checks it
 					// still is, against the checksums that line records.
 					if o.Checksum {
@@ -784,6 +811,9 @@ func (p *Plan) renamed(o Options) error {
 				if !eq {
 					f.Unverified = true
 				}
+			}
+			if copyAs != "" {
+				f.Name = copyAs
 			}
 			if len(f.To) == 0 {
 				f.Skip = "in manifest"

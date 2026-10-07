@@ -87,7 +87,7 @@ Capture One or Lightroom: they lose track of files that move; use apply-c1 inste
 			if err != nil {
 				return err
 			}
-			release, err := holdShoot(cmd, cfg.Dir, false)
+			release, err := holdShoot(cmd, cfg.Dir, false, true)
 			if err != nil {
 				return err
 			}

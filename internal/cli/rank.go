@@ -73,6 +73,11 @@ sidecars or move culls with a following 'cull decide --sort'.`,
 			if err != nil {
 				return err
 			}
+			release, err := holdShoot(cmd, cfg.Dir, false, !o.estimate)
+			if err != nil {
+				return err
+			}
+			defer release()
 			// Sync cull rank refuses up front while a rank-batch state is
 			// recorded, before RankCalls/fillLooks run for nothing (that's a
 			// full DNG decode pass on a schema-v3 report) for a run that's

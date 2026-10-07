@@ -63,6 +63,11 @@ rewrite the sidecars, and 'cull apply-c1' for frames already in Capture One.`,
 			if err != nil {
 				return err
 			}
+			release, err := holdShoot(cmd, cfg.Dir, false, true)
+			if err != nil {
+				return err
+			}
+			defer release()
 			rep, err := report.Load(cfg.ReportPath)
 			if err != nil {
 				return fmt.Errorf("no report at %s: scan or judge the folder first (%w)", cfg.ReportPath, err)

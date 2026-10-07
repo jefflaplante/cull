@@ -155,7 +155,7 @@ model and effort default to the report's. --fresh replaces it.`,
 			if err != nil {
 				return err
 			}
-			release, err := holdShoot(cmd, cfg.Dir, cfg.Recursive)
+			release, err := holdShoot(cmd, cfg.Dir, cfg.Recursive, !o.estimate)
 			if err != nil {
 				return err
 			}

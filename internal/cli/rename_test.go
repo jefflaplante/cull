@@ -110,7 +110,7 @@ func TestStatusRenameTemps(t *testing.T) {
 	os.Rename(filepath.Join(dir, "M1.DNG"), tmp)
 	os.WriteFile(filepath.Join(dir, "._.cull-rename-0a0b0c0d.M1.DNG"), []byte("x"), 0o644)
 	out, _ := run(t, "status", dir)
-	if !strings.Contains(out, tmp) || !strings.Contains(out, "next: mv "+shellQuote(tmp)+" "+shellQuote(filepath.Join(dir, "M1.DNG"))) ||
+	if !strings.Contains(out, tmp) || !strings.Contains(out, "next: mv -n "+shellQuote(tmp)+" "+shellQuote(filepath.Join(dir, "M1.DNG"))) ||
 		strings.Contains(out, "._.cull-rename") {
 		t.Fatalf("orphan:\n%s", out)
 	}
@@ -119,5 +119,21 @@ func TestStatusRenameTemps(t *testing.T) {
 	out, _ = run(t, "status", dir)
 	if !strings.Contains(out, "1 file(s) in hidden rename temps") || !strings.Contains(out, "next: cull rename") || strings.Contains(out, "next: mv") {
 		t.Fatalf("journalled:\n%s", out)
+	}
+}
+
+// The guard text names every command that refuses; offload --verify during an
+// unfinished rename warns that frames under temps show as missing.
+func TestUnfinishedRenameStatusAndVerify(t *testing.T) {
+	dir := renameShoot(t)
+	j := &journal.Rename{Pattern: "{n}", Started: time.Now(), Phase: 1}
+	j.Save(dir)
+	out, _ := run(t, "status", dir)
+	if !strings.Contains(out, "judge, decide, review, restore, scan, tag, rank, import-labels, offload, redate and rename refuse") {
+		t.Fatalf("status:\n%s", out)
+	}
+	out, _ = run(t, "offload", "--verify", dir)
+	if !strings.Contains(out, "frames under hidden temps show as missing") {
+		t.Fatalf("verify:\n%s", out)
 	}
 }

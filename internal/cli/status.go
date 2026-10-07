@@ -21,6 +21,9 @@ import (
 	"github.com/jefflaplante/cull/internal/report"
 )
 
+// refusers are the commands that refuse while a redate or rename is unfinished.
+const refusers = "judge, decide, review, restore, scan, tag, rank, import-labels, offload, redate and rename"
+
 // labelSampleTarget is how many labelled frames make calibrate worth reading.
 const labelSampleTarget = 30
 
@@ -87,7 +90,7 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 				continue
 			}
 			if orphanNext == "" {
-				orphanNext = "mv " + shellQuote(tmp) + " " + shellQuote(target) + "   (if it is the frame; if it isn't, delete it)"
+				orphanNext = "mv -n " + shellQuote(tmp) + " " + shellQuote(target) + "   (if it is the frame; if it isn't, delete it)"
 			}
 			missing = append(missing, fmt.Sprintf("  missing: %s; the hidden temp %s may be its only copy\n", rel, tmp))
 		}
@@ -115,7 +118,7 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 			}
 			target := filepath.Join(d, temps[tmp])
 			if orphanNext == "" {
-				orphanNext = "mv " + shellQuote(tmp) + " " + shellQuote(target) + "   (if that name is free; if it isn't the frame, delete it)"
+				orphanNext = "mv -n " + shellQuote(tmp) + " " + shellQuote(target) + "   (if that name is free; if it isn't the frame, delete it)"
 			}
 			missing = append(missing, fmt.Sprintf("  hidden temp %s: a rename's, which no unfinished rename records: it may be the only copy of %s\n", tmp, temps[tmp]))
 		}
@@ -130,7 +133,7 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 		if !unfinished {
 			return
 		}
-		fmt.Fprintf(w, "  unfinished: a %s (cull-%s.json); judge, decide, review and restore refuse until it's finished\n", which, which)
+		fmt.Fprintf(w, "  unfinished: a %s (cull-%s.json); %s refuse until it's finished\n", which, which, refusers)
 	}
 	if rep == nil {
 		fmt.Fprintf(w, "%s: %d DNGs; no report at %s\n", cfg.Dir, len(files), cfg.ReportPath)

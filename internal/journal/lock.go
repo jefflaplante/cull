@@ -20,9 +20,9 @@ const LockName = ".cull.lock"
 
 // Lock takes dir's folder lock (flock, never waiting): exclusive or shared. holder
 // names the command ("rename"); it is written into the file, best effort, so a refused
-// command can say what holds the folder. release unlocks. A volume without locks
-// (ENOTSUP) or a folder the lock file can't be made in proceeds unlocked, with note
-// saying so.
+// command can name the most recent holder. release unlocks. Only a lock held elsewhere
+// (EWOULDBLOCK) refuses: a volume without locks, any other flock error, or a folder the
+// lock file can't be made in proceeds unlocked, with note saying so.
 func Lock(dir string, exclusive bool, holder string) (release func(), note string, err error) {
 	none := func() {}
 	p := filepath.Join(dir, LockName)
@@ -35,7 +35,7 @@ func Lock(dir string, exclusive bool, holder string) (release func(), note strin
 		how = syscall.LOCK_EX
 	}
 	for {
-		err = syscall.Flock(int(f.Fd()), how|syscall.LOCK_NB)
+		err = flockFn(int(f.Fd()), how|syscall.LOCK_NB)
 		if !errors.Is(err, syscall.EINTR) {
 			break
 		}
@@ -45,20 +45,20 @@ func Lock(dir string, exclusive bool, holder string) (release func(), note strin
 	case errors.Is(err, syscall.EWOULDBLOCK):
 		b, _ := io.ReadAll(io.LimitReader(f, 200))
 		f.Close()
-		who := strings.TrimSpace(string(b))
-		if who == "" {
-			who = "another cull command"
+		// The file names the most recent holder, which may have finished since: shared
+		// holders take turns writing it.
+		who := ""
+		if line := strings.TrimSpace(string(b)); line != "" {
+			who = " (most recent: " + line + ")"
 		}
-		return none, "", fmt.Errorf("%s is in use by %s: wait for it to finish (or stop it), then run this again", dir, who)
-	case errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP):
-		f.Close()
-		return none, fmt.Sprintf("%s: this volume has no file locks; make sure no other cull command uses this folder meanwhile", dir), nil
+		return none, "", fmt.Errorf("%s is in use by another cull command%s: wait for it to finish (or stop it), then run this again", dir, who)
 	default:
+		// No usable locks here (ENOTSUP on some network shares, ENOLCK, …): go on.
 		f.Close()
-		return none, "", fmt.Errorf("lock %s: %w", p, err)
+		return none, fmt.Sprintf("%s: folder lock unavailable (%v); make sure no other cull command uses this folder meanwhile", dir, err), nil
 	}
 	// Best effort: who holds it, for a refused command's message.
-	line := []byte(fmt.Sprintf("cull %s (pid %d)\n", holder, os.Getpid()))
+	line := []byte(fmt.Sprintf("cull %s pid %d\n", holder, os.Getpid()))
 	if b, _ := io.ReadAll(io.LimitReader(f, 200)); string(b) != string(line) && f.Truncate(0) == nil {
 		f.WriteAt(line, 0)
 	}
@@ -67,3 +67,6 @@ func Lock(dir string, exclusive bool, holder string) (release func(), note strin
 		f.Close()
 	}, "", nil
 }
+
+// flockFn is flock(2); tests act out volumes that refuse it.
+var flockFn = syscall.Flock

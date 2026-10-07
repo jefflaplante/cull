@@ -30,6 +30,11 @@ report: one that doesn't came from another shoot's page, and nothing is imported
 			if err != nil {
 				return err
 			}
+			release, err := holdShoot(cmd, cfg.Dir, false, true)
+			if err != nil {
+				return err
+			}
+			defer release()
 			rep, err := report.Load(cfg.ReportPath)
 			if err != nil {
 				return fmt.Errorf("no report: %w (run scan or judge first, or pass -o)", err)

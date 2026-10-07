@@ -36,8 +36,9 @@ sheet's cache follow, so judge continues the report without calling the model ag
 
 Limits, checked before anything moves (each refuses the rename, naming the files):
   - Only the frame and its <stem>.xmp sidecar move. Other files named for the frame
-    (a camera JPG, a <name>.xmp, Capture One's settings in
-    CaptureOne/Settings*/<name>.cos) would keep the old name and lose their frame.
+    (a camera JPG, darktable's <name>.xmp such as M1103817.DNG.xmp, and
+    Capture One's settings in CaptureOne/Settings*/<name>.cos) would keep the old
+    name and lose their frame.
   - Names over 255 bytes, locked frames and folders that can't be written.
   - A rename that changes the order of frames with the same capture time (an
     unpadded {n} sorts 10 before 2) regroups the shoot's sets, and judge would rank
@@ -46,9 +47,9 @@ Limits, checked before anything moves (each refuses the rename, naming the files
     cull command is using (the folder lock, .cull.lock).
 
 An interrupted rename is finished by running the same command again, or put back with
---undo; until then judge, decide, review, restore, redate and offload refuse. --undo
-also puts back the last finished rename. Capture One and Lightroom may lose track of
-frames already imported.`,
+--undo; until then the other cull commands refuse the folder, and cull status says
+why. --undo also puts back the last finished rename. Capture One and Lightroom may
+lose track of frames already imported.`,
 		Example: `  cull rename ~/Pictures/"2026-10-04 Smith wedding" "{date}_{name}_{n:4}" --dry-run
   cull rename ~/Pictures/"2026-10-04 Smith wedding" "{date}_{name}_{n:4}"
   cull rename --undo ~/Pictures/"2026-10-04 Smith wedding"`,

@@ -8,7 +8,9 @@ editor is Capture One (macOS).
 Scaffolded in a claude.ai chat; this file carries that context forward.
 
 The binary is **`cull`** (renamed 2026-09-28); the model step is `cull judge`. Files and
-tags it writes: `cull-report.json`, `cull-labels.jsonl`, `cull-review/`, keywords
+tags it writes: `cull-report.json`, `cull-labels.jsonl`, `cull-review/`,
+`cull-offload.jsonl`, `cull-redate.json` (while a redate runs), `cull-rename.json` (the
+last rename, for `--undo`), the hidden folder lock `.cull.lock` / `.cull-holder-*`, keywords
 `cull:<verdict>` / `cull:labeled`. npm, crates.io and PyPI each have an unrelated `cull`
 package that installs a `cull` command (npm's deletes files); none is installed here.
 
@@ -27,6 +29,9 @@ make vet
 ./bin/cull judge --backend openai --model <m> <dir>  # local OpenAI-compatible server (free)
 ./bin/cull judge --rerank <dir>                      # re-rank every set
 ./bin/cull decide --sort <dir>                       # keep/ review/ cull/ (--sort=culls: only culls); sidecars are written by default
+./bin/cull offload <card> <dest> --set-date 2026-10-04   # fix copies' capture dates (proven); card untouched
+./bin/cull redate <dir> --date 2026-10-04 --dry-run  # the same for a folder already offloaded
+./bin/cull rename <dir> "{date}_{name}_{n:4}" --dry-run   # bulk rename; everything follows; --undo
 ```
 
 ## Layout
@@ -35,15 +40,20 @@ make vet
 - `internal/cli` — cobra tree: `offload`, `scan`, `judge` (model; code in cull.go; continues, ranks), `rank` (rank.go,
   deprecated in v0.2.0),
   `decide`, `review`, `calibrate`, `apply-c1`, `restore`, `status`, `tag`, `import-labels`
-  (deprecated),
-  `version` (+ built-in `completion`);
+  (deprecated), `redate` (redate.go; also `holdShoot`: the folder lock and unfinished-journal
+  refusal every frame-reading command takes), `rename` (rename.go),
+  `version` (+ built-in `completion`); status.go also lists unfinished journals and hidden
+  temps that may be a frame's only copy;
   help.go (sectioned `--help`, `--help-all`); sortflag.go (`--sort[=all|culls]`, `--move-culled` as its
   deprecated alias);
   backend.go (`--backend`/`--model`/credential flags shared by judge and rank); dotfile.go (`~/.cull` /
   `$CULL_CONFIG` flag defaults, applied in the root's PersistentPreRunE: typed flag > stored policy >
   dotfile > built-in default; `notInDotfile` refuses one-off/risky flags)
 - `internal/dng` — pure-Go TIFF IFD/SubIFD walk for the largest reduced-resolution
-  JPEG; reads IFDs + preview bytes only. `exiftool` fallback.
+  JPEG; reads IFDs + preview bytes only. `exiftool` fallback. patch.go: `PatchDates`
+  returns the capture-date fields as same-length byte patches (`Patch{Off, Old, New}`) plus
+  what it left alone, writing nothing; `ContentCredentials` (IFD0 0xCD41). `dngtest`: the
+  synthetic DNG builder (`Build`, `Apply`) every package's tests share.
 - `internal/imageprep` — `Frame`: decoder's YCbCr kept in stored orientation + display
   `[]uint8` luma; crops/downscale cut in stored coords, only results rotated; stats
 - `internal/focus` — pigo face detection (cascades embedded, MIT), subject-crop
@@ -56,7 +66,7 @@ make vet
 - `internal/pipeline` — detect → locate → crops → evaluate → decide; worker pool,
   resume (path+size+mtime; refuses a different backend/model/schema), checkpointing,
   quota stop, `--save-inputs`, `--sort` / `Restore` (move.go: `place` puts frames
-  home or in `keep/` `review/` `cull/`; `--sort=culls` puts culls in `cull/`; `culled/` is legacy, read only (moved out on the next sort); `reconcileMove` searches them all; Discover skips them),
+  home or in `keep/` `review/` `cull/`; `--sort=culls` puts culls in `cull/`; `culled/` is legacy, read only (moved out on the next sort); `reconcileMove` searches them all; Discover skips them, and every hidden file: temps end in `.DNG`),
   stages.go (shared frame stages), decide.go, groups.go (decideAll: regroups sequences,
   reuses/applies stored ranks, marks best), batch.go (Message Batches driver with
   re-attachable `<report>.batch.json` state), escalation, cost budget; rank.go (`Rank`/
@@ -73,10 +83,11 @@ make vet
   scan/judge pre-render thumbs and subject crops via `Prerender` while the preview is decoded,
   `--no-review-images` off; `review --prepare` / `--clear-cache` / `--force`) and
   the server `review` runs by default (serve.go: 127.0.0.1, Host/Origin/token checks, appends labels,
-  optional sidecars)
+  optional sidecars); `CachedImages` gives rename the cache images to carry over
 - `internal/labels` — the user's append-only JSONL labels log (last line per file wins),
   `Effective` verdict (label over model), and the one sidecar mapping (`Sidecar`,
-  `WriteSidecar`) used by cull, decide, the server; apply-c1 mirrors it
+  `WriteSidecar`) used by cull, decide, the server; apply-c1 mirrors it. An entry's `from`
+  records the old name when rename carries a label over
 - `internal/calib` — confusion matrix, rates, the policy grid (keep-best × outranked × raw-clipped)
 - `internal/c1` — Capture One AppleScript generator, read-only probe, osascript runner
 - `internal/offload` — `cull offload`: plan.go (hygienic card walk, one folder per run or per event with
@@ -89,8 +100,39 @@ make vet
   `cull-offload.jsonl`, F_FULLFSYNC per destination, `Safe`, `Verify`), sys_darwin.go
   (fcntl/msync/mincore; no-ops elsewhere). `go test -tags cardbench` benchmarks against
   `cp` on the LEICA M card.
+  Dates: patch.go (`streamPatched`: `orig` and `want` SHA-256s in one read; `applyPatches`;
+  `proveFrom`: evict + uncached re-read must hash to `want`; `setFileTimes`: mtime and
+  creation time). `--set-date` runs in stage B: verify against the card → patch → prove →
+  times → link. Manifest entries gain `file_sha256`, `dates_set`, `patched_at`
+  (`CurrentManifest`, `AppendManifest`); a re-run finds copies by their recorded name.
+  replace.go: `ReplacePatched`, redate's one replace (stream into `.cull-redate-<hex>.<name>`,
+  prove, F_FULLFSYNC, `rename(2)` over the original, F_FULLFSYNC the folder), `RedateTemps`,
+  `Adopt`, `RemoveStaleTemps`; xattr_unix.go copies xattrs onto the replacement.
+  rename_temps.go: `.cull-rename-<hex>.<name>` temps, `MoveNoReplace`. No temp name starts
+  `._` (macOS's AppleDouble companions on exFAT/FAT).
+- `internal/redate` — `cull redate`: per frame `PatchDates` → `ReplacePatched` (file times
+  only for Content Credentials or nothing to patch), proven against the manifest's checksum
+  (a mismatch is refused, never "fixed"); then a manifest line, the report (`ModTime`,
+  `DatesSet`), cull's sidecar. The journal `cull-redate.json` records each frame before its
+  swap; `settleTemps` restores or removes temps an interruption left; refuses a sort folder,
+  a parent of shoots, a pending batch. `Folders`/`ShootOf` are shared with rename.
+- `internal/rename` — `cull rename` / `--undo`: plans every name and refuses before moving
+  anything (clashes, case-insensitive; foreign files; companions such as a JPG, `.DNG.xmp`
+  or Capture One `.cos`; a frame order change without `--reorder`; unusable names, locked
+  frames, unwritable folders; batches), journals `cull-rename.json`, moves old → temp →
+  new, then the report (two saves, `report_at`), labels (desired-state entries with `from`),
+  manifest and review cache. Re-running finishes from any stop; `--undo` reverses it.
+- `internal/journal` — journal.go: the redate and rename journals, `Unfinished`/
+  `IncompleteBelow`, `Finish` (the exact command), `PendingBatch`. lock.go: the folder lock,
+  exclusive flocks only. redate and rename hold the gate `.cull.lock` and check every
+  `.cull-holder-<pid>-<hex>`; each reader (judge, decide, the review server, restore,
+  offload, scan, tag, rank, import-labels) holds its own holder file and probes the gate.
+  Released by close alone, never `LOCK_UN`; EACCES on the gate counts as held (a stale SMB
+  lock). `cmd/cull` calls `RemoveHolders` on exit.
 - `internal/report` — JSON source of truth (schema v4); `Tags` (the shoot's project/event/
-  location/keywords, merged per run by `MergeTags`, changed by `cull tag`, cli/tags.go)
+  location/keywords, merged per run by `MergeTags`, changed by `cull tag`, cli/tags.go);
+  `Result.DatesSet` (the date `--set-date`/redate set; the sidecar prefers it over EXIF);
+  `RenamePaths` maps every path field (File, XMP, MovedTo, set members/order/notes)
 - `internal/ui` — verbosity levels and progress events (`Sink`): plain lines, or the Bubble Tea
   live view on an interactive terminal (live.go); `-q`/`-v`/`--debug`/`--plain` in cli/output.go.
   Every step that can take a while is a stage (`ui.Track`): sidecars, sort/move, restore, looks,
@@ -106,9 +148,36 @@ make vet
 
 ## Invariants — do not break
 
-- Never modify or delete DNGs. Only `--sort` (judge, decide, review; `--move-culled` is its deprecated
-  alias) moves them (same-disk rename into `keep/` `review/` `cull/`, never overwriting, recorded as `moved_to`),
-  and `restore` undoes it. `offload` only reads cards and never replaces a file. Never overwrite an existing `.xmp` unless `--overwrite-xmp`.
+- Never modify or delete DNGs, with one exception: `offload --set-date` and `redate`
+  rewrite only the capture-date fields listed in the spec, at the same length.
+  - The card is never written.
+  - Every patched file is proven byte-identical to its source outside those fields before
+    it takes its name.
+  - The manifest keeps both the card's hash and the patched file's hash.
+
+  The spec is `docs/superpowers/specs/2026-10-06-redate-rename-design.md` (§2 lists the
+  fields). Amended during the build:
+  - **Frames with Content Credentials** (C2PA, IFD0 tag 0xCD41) are never byte-patched: the
+    signature covers the date fields. Only their file times change, and `Result.DatesSet`
+    carries the corrected date to cull's sidecar.
+  - **`redate` never rewrites the report's `Result.Exif`**: sequence grouping reads it, so a
+    rewrite would regroup and re-rank. The corrected date lives in `Result.DatesSet` (and
+    `ModTime` follows the file).
+- Only `--sort` (judge, decide, review; `--move-culled` is its deprecated alias) moves DNGs
+  (same-disk rename into `keep/` `review/` `cull/`, never overwriting, recorded as `moved_to`),
+  and `restore` undoes it. `rename` (and `--undo`) renames them in their folders: journalled,
+  through hidden temps, never replacing anything, with the report, labels log, manifest,
+  sidecars and review cache following. `offload` only reads cards.
+- Never replace a file, with one exception: `redate`'s atomic `rename(2)` of a proven temp
+  over its original, in the same directory, after the proof step. Never overwrite an
+  existing `.xmp` unless `--overwrite-xmp`.
+- `cull-offload.jsonl` and `cull-labels.jsonl` are append-only: the last line per
+  `(orig, size)` / per file name is current. A manifest's `sha256` is always the card's hash.
+- After `redate` or `rename`, a following `judge` makes zero model calls: the report's keys
+  (path + size + mtime) follow the files. Both refuse while a batch is pending (its state
+  is keyed by path). judge, decide, review, restore, scan, tag, rank, import-labels,
+  offload, redate and rename refuse a folder with an unfinished `cull-redate.json` or
+  `cull-rename.json` (`holdShoot`, `journal.Unfinished`); `status` names it.
 - Never print, log, or read the API key contents beyond `internal/config`.
 - Keep/review/cull is decided in Go (`eval.Policy`), not by the model. The model
   only assesses. Keeps decisions deterministic, auditable, and tunable.
@@ -117,7 +186,9 @@ make vet
   2026-09-26 spec), and Charm's Bubble Tea v2 / Bubbles / Lip Gloss (+ `x/term`) for the
   live progress view on terminals (2026-10-02: a live view of a 1000-frame, multi-hour run
   was asked for; non-terminal output stays plain lines). Bubble Tea v2.0.10 requires
-  Go 1.26. Justify anything else.
+  Go 1.26. `golang.org/x/sys` is direct since 2026-10-06 (already in go.sum through Bubble
+  Tea): `Setattrlist` for a file's creation time, xattr copying on redate's replace,
+  `Access` in rename's checks. Justify anything else.
 - Tests use synthetic fixtures. Never commit real images.
 
 ## Verified facts
@@ -602,7 +673,69 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
   different poses at the same spot apart (4110→4112 at 0.127). A portrait↔landscape
   switch is always far, because the grid is in display orientation.
 
+### Date fixing and renaming (2026-10-06/07, built for a camera whose clock stopped)
+
+The user's M11-P has a dead real-time clock: every frame carries the same timestamp. These
+were measured while building `--set-date`, `redate` and `rename`.
+
+- **The card's frames, read-only probe of `/Volumes/LEICA M` (10 frames, 2026-10-06):**
+  - **5 `L…` frames carry Content Credentials:** a signed C2PA manifest in IFD0 tag 0xCD41,
+    about 60 KB. It repeats the capture dates, and its hash binding covers the date fields,
+    so any patch would invalidate the signature. `PatchDates` skips them.
+  - **5 `M…` frames get exactly 5 patches each:** 3 EXIF ASCII dates (DateTimeOriginal in
+    IFD0, DateTimeOriginal and DateTimeDigitized in the EXIF IFD) and 2 XMP attributes
+    (`xmp:CreateDate`, `xmp:ModifyDate`). Nothing else was reported left alone.
+  - **The embedded XMP** uses the literal prefix `xmp:` (namespace `xap/1.0`), values like
+    `2026-10-05T19:09:00`, with no fraction and no zone. There are no `exif:` or
+    `photoshop:` date properties.
+- **File times on removable filesystems** (hdiutil images, 2026-10-07):
+  - exFAT keeps mtimes to 10 ms, truncated (`.1234567` → `.12`);
+  - FAT32 keeps 2 s, truncated to an even second (`:01.567` → `:00`).
+
+  So redate counts ±2 s of the target as already set, and offload's quick check allows 2 s
+  (`mtimeWindow`).
+- **macOS writes `._<name>` AppleDouble companions** on exFAT and FAT32 for a file with
+  extended attributes, such as a Finder tag (measured on the same images).
+  - A temp named `.<name>.…` would read as one for a frame named `_DSC…`, `_IGP…` or `_MG_…`.
+    Hence `.cull-redate-<hex>.<name>` and `.cull-rename-<hex>.<name>`.
+  - The real-filesystem tests (`CULL_ADV_DEST`) passed on exFAT and FAT32 images, with
+    companions present.
+- **Replacing a file drops its extended attributes** (Finder tags, comments), because the
+  replacement is a new inode. redate copies them (`copyXattrs`; `TestXattrKept`, including a
+  read-only original).
+- **flock on the user's NAS** (`/Volumes/photos-1`, smbfs, SMB 3.1.1 to TrueNAS,
+  2026-10-06/07):
+  - **A shared lock held by one process blocks a shared lock from another:** smbfs treats
+    shared as exclusive. Hence the exclusive-only scheme (holder files plus a gate).
+  - **Within one process, locks never conflict.**
+  - **Unlocking with `LOCK_UN` and then closing drops a lock another process took in
+    between.** The next holder's lock was lost in 35–47 of 60 rounds, and the stress test
+    found 2–6 cases of two writers at once. Releasing by close alone: 0 in 9 runs.
+  - **Closing any other handle to a locked file in the same process drops that process's
+    lock.** So cull never opens a lock file it holds.
+  - **A lock nobody owns comes back as EACCES,** not EWOULDBLOCK. A `.cull.lock` left by a
+    `LOCK_UN`-then-close run couldn't be deleted from either mount ("Resource busy"), and
+    still refused a fresh flock. Hence EACCES on the gate counts as held, with advice to
+    remount or remove the file.
+  - **Exclusive flocks across processes work** there, and on APFS, exFAT and FAT32, with no
+    "lock unavailable" note.
+- **Not yet run on real frames:** `offload --set-date`, `redate` and `rename` themselves.
+  They're tested on synthetic DNGs, on APFS and on exFAT and FAT32 images; the folder
+  lock also on the NAS.
+  The live check on the card (each step followed by `--verify`) is the plan's Task 8.
+
 ## Unverified assumptions — check before building on them
+
+- Whether Capture One 16.7 shows the capture date from the DNG's EXIF or from cull's
+  sidecar. This matters for Content Credentials frames: their EXIF keeps the camera's
+  date, and only the sidecar carries the corrected one. The plan's live check imports a
+  redated frame and a `--set-date` frame to find out.
+- What makes the M11-P write Content Credentials on some frames (`L…`) and not others
+  (`M…`). It was seen on one card only.
+- The cost of `--set-date`'s proof: one extra full re-read of every patched copy, and one
+  extra fsync. This hasn't been benched; expect it to show on the NAS, where stage B
+  already bounds the run.
+- The smbfs flock findings come from one TrueNAS share. Other SMB servers are unchecked.
 
 - Whether `--rank-twice` disagreement (reversed-order ranking) tracks real ranking
   uncertainty, and how often sets are disputed: measure on a labeled sample.
@@ -666,6 +799,9 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
    (sync and `--batch`), `cull:best` keyword, review-sheet set badges/filter/
    filmstrip, and a calibrate sets section. Replaces `--burst-gap`, `--burst-hash`,
    `--duplicates`. Ranking quality/stability still unverified (see above).
+7. ~~Date fixing and bulk renaming~~ built 2026-10-06/07 (`offload --set-date`, `redate`,
+   `rename`; spec and plan in `docs/superpowers/`) for a camera whose clock stopped. The
+   live check on the card and the Capture One date check are still to do.
 
 ## Working style
 

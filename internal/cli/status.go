@@ -33,7 +33,10 @@ func newStatusCmd(so *sharedOpts) *cobra.Command {
 		Use:   "status <dir>",
 		Short: "Where a shoot stands (judged, labelled, ranked, spent) and what to run next",
 		Long: `status reads the folder, its report and your labels log, and prints counts and
-the next command to run. It changes nothing and calls no model.`,
+the next command to run. It changes nothing and calls no model.
+
+It also names an unfinished redate or rename (and the command that finishes it), and
+any hidden temp file that may hold a frame's only copy after an interruption.`,
 		Example: "  cull status ~/Pictures/2026-09-26",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

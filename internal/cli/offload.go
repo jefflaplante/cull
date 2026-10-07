@@ -38,8 +38,9 @@ re-run copies only what is missing (cull-offload.jsonl records what was verified
 clock stopped): once a copy is verified, its EXIF and embedded XMP dates are rewritten
 in place at the same length, and it is read back from the disk and must hash to the
 card's bytes with exactly those fields changed before it gets its name. Its file times
-are set too. The manifest keeps both checksums. Frames with Content Credentials keep
-their signed dates; only their file times change.
+are set too, and the shoot folder takes that date. The manifest keeps both checksums.
+Frames with Content Credentials keep their signed dates; only their file times change.
+For copies already made, use cull redate.
 
 "safe to format" is printed only when every file is verified on every destination
 and each drive's own write cache was flushed. Then the folder is scanned (free);

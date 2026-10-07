@@ -12,8 +12,9 @@ the decision. Its priorities:
 
 It also groups similar frames into sets and ranks each set side by side, so you keep
 the best few of a sequence. Before any of that, it copies the card with every file
-verified. Afterwards it sorts frames into folders and writes sidecars with keywords, for
-Capture One or Lightroom.
+verified, and can fix the capture dates of a camera whose clock stopped. Afterwards it
+sorts frames into folders and writes sidecars with keywords, for Capture One or
+Lightroom.
 
 ![cull judge running: per-frame verdicts, progress, and keep/review/cull tallies](docs/images/judge-running.png)
 
@@ -23,13 +24,16 @@ For a whole session with real output at every step, from the card to Capture One
 - [Camera support](#camera-support)
 - [Install](#install)
 - [Quick start](#quick-start)
+- [Offload: card to shoot folder](#offload-card-to-shoot-folder)
+- [Fixing capture dates](#fixing-capture-dates)
+- [Renaming frames](#renaming-frames)
 - [Commands](#commands)
 - [How decisions are made](#how-decisions-are-made)
 - [Sequences and best of set](#sequences-and-best-of-set)
 - [Reviewing and labelling](#reviewing-and-labelling)
 - [Model backends](#model-backends)
 - [Cost control](#cost-control)
-- [Output: sidecars, Capture One and moving culls](#output-sidecars-capture-one-and-moving-culls)
+- [Output: sidecars, Capture One and sorting](#output-sidecars-capture-one-and-sorting)
 - [Flag reference](#flag-reference)
 - [Limitations](#limitations)
 
@@ -162,6 +166,9 @@ Every step, with its full output and screenshots of the live progress view, is i
 - **The cards are only read.** Nothing on them is written, renamed or deleted.
 - **The folder date** comes from the earliest capture date. Camera clocks get set wrong,
   so the plan says which file it came from; use `--date` to set it yourself.
+- **A clock that stopped:** `--set-date 2026-10-04` fixes the capture dates of every copy
+  as it lands, and dates the folder. Each patched copy is proven against the card; the
+  card itself is never changed. See [Fixing capture dates](#fixing-capture-dates).
 - **One folder per event, if you ask.** A card holding several events can go into one
   numbered shoot folder each (`2026-10-02 Smith wedding 1`, `… 2`), so each imports into
   Capture One or Lightroom as its own set. Each event folder gets its own manifest, scan
@@ -245,6 +252,134 @@ Every step, with its full output and screenshots of the live progress view, is i
   | write until fsync returned | 159 |
   | read back uncached | 829 |
 
+## Fixing capture dates
+
+A camera whose clock has stopped stamps every frame with the same date and time, so
+Capture One, Lightroom and Finder date and sort the shoot wrongly. The real capture times
+are gone, but cull can set one fixed date and time on every frame:
+
+```sh
+cull offload /Volumes/LEICA\ M ~/Pictures --name "Smith wedding" --set-date 2026-10-04   # while copying
+cull redate "$S" --date 2026-10-04 --dry-run     # a folder already offloaded: list the changes
+cull redate "$S" --date 2026-10-04 --time 15:00:00
+```
+
+`--time` sets the time of day, in the Mac's time zone (default `12:00:00`). redate covers
+the frames in `keep/`, `review/` and `cull/` too, and `-r` takes subfolders.
+
+**What changes:**
+- **Inside each DNG, only the capture-date fields:** the EXIF dates (DateTime,
+  DateTimeOriginal, DateTimeDigitized; any sub-second fields become zeros) and the same
+  dates in the embedded XMP. Each value is rewritten digit for digit at the same length,
+  so no other byte of the file moves. A value cull can't read, or one in a form it doesn't
+  rewrite, is left alone and named in the output.
+- **The file's modification time and creation time** (Finder's "Created", where the disk
+  keeps one).
+- **cull's own sidecars,** which get the corrected date. Sidecars cull didn't write are
+  never touched.
+
+Time-zone offsets and GPS dates (from a paired phone) stay as they are. A field that
+already holds the date isn't rewritten, so a second run changes nothing.
+
+**How every file is proven.** cull knows exactly which bytes it changes, so it knows what
+the whole file must hash to afterwards: the original's bytes with exactly those fields
+replaced. After writing, it drops the file from memory, reads it back from the disk and
+compares. Only a match takes the file's name. So every patched file is the original, byte
+for byte, everywhere except the dates.
+- **`offload --set-date`:** each copy is first verified against the card as usual, then
+  patched, then proven. The card is never written.
+- **`redate`:** the frame is first checked against the checksum offload recorded for it.
+  A frame that no longer matches is refused and left alone: a damaged file is never
+  "fixed". The patched version is written to a hidden file beside the frame, proven, and
+  then swapped in with one atomic rename. That swap is the only place cull ever replaces a
+  file. A crash leaves the old file or the new one, never a half-written one.
+- **The manifest keeps both checksums:** the card's (`sha256`) and the patched file's
+  (`file_sha256`). `offload --verify` checks each frame against the right one, and running
+  offload again on the same card copies nothing.
+
+**Content Credentials.** Some frames carry a signed Content Credentials (C2PA) record, and
+its signature covers the dates; on the M11-P these were the `L…` files. Changing the dates
+would break the signature, so those frames keep their dates inside the file. Their file
+times still change, and cull's sidecar carries the corrected date. The run lists them.
+
+**What doesn't change:**
+- **The shoot's sets and rankings.** cull's report keeps the camera's capture time, which
+  the sets are grouped by. A `judge` afterwards continues the report without calling the
+  model again.
+- **The shoot folder's name.** redate doesn't rename it; `offload --set-date` names a new
+  folder by the date you give.
+
+**Interrupted?** Run the same command again: it finishes the job, proving any hidden copy
+it left. Until then the other cull commands refuse the folder, and `cull status` names the
+command that finishes it. redate also refuses while a judge or ranking batch is still
+pending, and while another cull command is working on the folder (see
+[the folder lock](#the-folder-lock)).
+
+**Before import.** Capture One and Lightroom may lose track of files changed after import,
+so fix dates first. Whether Capture One shows the date inside the DNG or the one in cull's
+sidecar hasn't been checked yet; for Content Credentials frames they differ.
+
+## Renaming frames
+
+```sh
+cull rename "$S" "{date}_{name}_{n:4}" --dry-run   # list old → new, change nothing
+cull rename "$S" "{date}_{name}_{n:4}"
+cull rename --undo "$S"                            # put the old names back
+```
+
+- **The tokens are offload `--rename`'s:**
+  - `{date}`: the capture date as `20261004` (the date redate or `--set-date` set, else
+    EXIF, else the folder name's date);
+  - `{name}`: the folder name after its date, with spaces as `_`;
+  - `{orig}`: the camera's name, such as `M1103817`;
+  - `{n}` and `{n:4}`: a counter, plain or zero-padded.
+
+  A pattern needs `{n}` or `{orig}`. Frames are numbered in camera order (the card's
+  names), never by capture time.
+- **Before or after judging.** Frames sorted into `keep/`, `review/` and `cull/` are renamed
+  where they are.
+- **Everything follows the file:** its sidecar, the report, your labels, the offload
+  manifest (so `--verify` and a re-run of offload still find every frame) and the review
+  sheet's images. A `judge` afterwards makes no model calls.
+- **Nothing moves until the whole plan passes.** The rename is refused, naming the files,
+  when:
+  - two frames would get the same name, or a new name belongs to another file;
+  - a name is too long, a frame is locked, or a folder can't be written;
+  - a judge or ranking batch is pending, or another cull command is using the folder.
+- **Names can swap safely.** Frames first move to hidden temp names, then to their new
+  ones, so two frames can trade names. Each step is recorded in `cull-rename.json`. If a
+  rename is interrupted, run the same command again to finish it, or `--undo` to put the
+  names back; until then the other cull commands refuse the folder. `--undo` also reverses
+  the last finished rename.
+- **A pattern that changes the frames' order is refused.** Frames with the same capture
+  time (every frame, with a stopped clock) are grouped into sets in name order. An
+  unpadded `{n}` sorts `10` before `2`, so the sets would regroup and `judge` would rank
+  them again, which costs model calls. The refusal suggests `{n:4}`; `--reorder` goes
+  ahead anyway.
+- **Files that share a frame's name aren't moved, so they refuse the rename:** a camera
+  JPG beside the DNG, darktable's `M1103817.DNG.xmp`, Capture One's settings in
+  `CaptureOne/Settings*/M1103817.DNG.cos`. Moving them along isn't built yet; move them out
+  of the shoot folder first, or rename before Capture One has seen the folder.
+- **Rename before importing:** Capture One and Lightroom lose track of renamed files.
+
+### The folder lock
+
+Commands that work on a shoot's frames take a lock on the folder, held in hidden files
+(`.cull.lock`, `.cull-holder-…`). judge, decide, review, restore, offload and the others
+can share a folder. redate and rename need it to themselves: they're refused while another
+cull command uses the folder, and the others are refused while they run. The refusal names
+the command in the way; wait for it to finish, or stop it.
+
+- **On a network share** a lock can outlive a crash or a dropped connection. If no cull
+  command is running and the refusal says the share holds a stale lock, remount the share,
+  or remove the `.cull.lock` the message names.
+- **A disk that can't lock at all** gets a one-line note, and the command goes ahead.
+- **The hidden files stay.** They're never taken for frames.
+
+**`cull status`** names an unfinished redate or rename and the command that finishes it.
+It also lists any hidden temp file that may hold a frame's only copy after a crash, and
+says how to put it back: the next run of the same command, or an `mv -n` it prints.
+
 ## Your defaults: `~/.cull`
 
 Flags you always type can go in a dotfile, `~/.cull`. Each line is a flag's name (without
@@ -282,7 +417,8 @@ Quotes around a value are optional.
 - **What it can't set:** one-off and risky flags are refused with a warning, so you always
   type them on purpose: `yes`, `fresh`, `force`, `run`, `probe`, `verify`, `dry-run`,
   `estimate`, `prepare`, `clear-cache`, `rerank`, `overwrite-xmp`, `report`, `help`,
-  `version`, and the verbosity flags `quiet`, `verbose`, `debug` and `log-level`.
+  `version`, the verbosity flags `quiet`, `verbose`, `debug` and `log-level`, and the
+  per-shoot `date`, `set-date`, `time`, `undo` and `reorder`.
 - **Old keys still work, with a warning:** `write-xmp = false` means no sidecars,
   `move-culled = true` means `sort = culls`, `sort = true` means `sort = all` (write
   `sort = all`), and `resume` is ignored. If both `sort` and `move-culled` come from the
@@ -347,7 +483,9 @@ Junk frames get your tags but no content keywords, since the model never saw the
 
 | Command | What it does | Calls a model |
 |---|---|---|
-| `offload <card>... <dest>` | Copy a card into a dated shoot folder, every file verified; then scan it (`--verify <folder>` re-checks later) | no |
+| `offload <card>... <dest>` | Copy a card into a dated shoot folder, every file verified; then scan it (`--verify <folder>` re-checks later; `--set-date` fixes the copies' capture dates) | no |
+| `redate <dir> --date D` | Fix the capture dates of frames already offloaded: only the date fields change, and each file is proven against its original | no |
+| `rename <dir> <pattern>` | Rename frames by a pattern; sidecars, report, labels and manifest follow (`--undo` puts the names back) | no |
 | `scan <dir>` | Extract previews, EXIF, faces and look fingerprints, flag junk frames; write the report | no |
 | `judge <dir>` | Assess every frame, decide keep/review/cull, then rank the sets; continues an existing report | yes |
 | `decide <dir>` | Re-apply the policy to stored assessments; regroup sets; rewrite sidecars; sort into keep/ review/ cull/ (`--sort`) or only culls into cull/ (`--sort=culls`) | no |
@@ -647,6 +785,7 @@ effort, and a continued run refuses a different one.
 | Rating | your stars only; left out when you haven't rated (the model never sets stars) |
 | Label | the verdict (yours if you labelled, else the model's): keep **Green**, review **Yellow**, cull **Red** |
 | Keywords | `cull:<verdict>`; `cull:labeled` when the verdict is yours; `cull:best` for a set's best frames |
+| Date taken | the date `--set-date` or `redate` set, else the camera's: `exif:DateTimeOriginal`, `xmp:CreateDate` and `photoshop:DateCreated` |
 
 Sidecars carry no exposure or crop: Capture One 16.7.2 ignores `crs:` develop settings in
 a sidecar on import (tested). Use `apply-c1 --exposure --crop` to set them.
@@ -796,11 +935,14 @@ plain lines. Ctrl-C works as before: in-flight frames finish, the report is save
 
 `--compare`, `--labels`, and the Policy flags, which set the row marked `← current`.
 
-### `offload`, `tag`, `status`, `restore`, `apply-c1`
+### `offload`, `redate`, `rename`, `tag`, `status`, `restore`, `apply-c1`
 
-- `offload`: `--name`, `--date`, `--backup`, `--rename`, `--split`, `--split-gap`,
-  `--split-at`, `--dry-run`, `--verify`, `--no-scan`, `--checksum`, and the shoot's tags
-  `--project`, `--event`, `--location`, `--keyword`.
+- `offload`: `--name`, `--date`, `--set-date`, `--time` (`12:00:00`, with `--set-date`),
+  `--backup`, `--rename`, `--split`, `--split-gap`, `--split-at`, `--dry-run`, `--verify`,
+  `--no-scan`, `--checksum`, and the shoot's tags `--project`, `--event`, `--location`,
+  `--keyword`.
+- `redate`: `--date` (required), `--time` (`12:00:00`), `--dry-run`; `-r` for subfolders.
+- `rename`: `--dry-run`, `--reorder`, `--undo`; `-r` for subfolders.
 - `tag`: the same four tag flags, and `--clear-project`, `--clear-event`,
   `--clear-location`, `--clear-keywords`.
 - `status`: `--labels`. `restore`: no flags.
@@ -843,3 +985,11 @@ the next release, except the `calibrate` sweep, which the policy grid replaced.
 - **Crop coordinates** in `crs:Crop*` for rotated images follow the stored
   orientation. This hasn't been verified in Adobe tools, and `crs:CropAngle` isn't
   written.
+- **Fixed dates in Capture One:** whether it shows the date inside the DNG or the one in
+  cull's sidecar hasn't been checked. They differ only for frames with Content
+  Credentials, whose own dates stay unchanged.
+- **`rename` moves only the DNG and its sidecar** (`M1103817.xmp`), so it refuses a folder where
+  other files share a frame's name (JPG pairs, darktable's `.DNG.xmp`, Capture One's `.cos`
+  settings).
+- **Hidden DNGs** (names starting with `.`) are ignored by every command: that's how cull's
+  own temp files look during a redate or rename.

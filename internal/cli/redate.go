@@ -31,9 +31,15 @@ or damaged file is never "fixed". Frames with Content Credentials keep their sig
 dates; only their file times change.
 
 The offload manifest, the report and cull's sidecars follow, so judge continues the
-report without calling the model again. An interrupted run is finished by running the
-same command again; until then judge, decide and review refuse. Capture One and
-Lightroom may lose track of frames already imported.`,
+report without calling the model again. The report keeps the camera's capture time,
+which the shoot's sets are grouped by, so sets and rankings stay as they were; the
+corrected date goes into cull's sidecars.
+
+redate refuses while a judge or ranking batch is pending (finish or cancel it first)
+and while another cull command is using the folder (the folder lock, .cull.lock). An
+interrupted run is finished by running the same command again; until then the other
+cull commands refuse the folder, and cull status says why. Capture One and Lightroom
+may lose track of frames already imported.`,
 		Example: `  cull redate ~/Pictures/"2026-10-04 Smith wedding" --date 2026-10-04 --dry-run
   cull redate ~/Pictures/"2026-10-04 Smith wedding" --date 2026-10-04 --time 15:00:00`,
 		Args: cobra.ExactArgs(1),

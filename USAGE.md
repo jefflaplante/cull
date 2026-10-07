@@ -89,6 +89,25 @@ all 17 files verified on Pictures/2025-12-28 Forest portraits: safe to format th
   - `--dry-run` only prints the plan.
 - **Re-running is safe:** only what's missing is copied.
 
+**If your camera's clock is wrong.** `--date` only names the folder; the frames keep
+whatever date the camera wrote. If the clock stopped, so every frame carries the same wrong
+date, fix the copies themselves as they land:
+
+```sh
+cull offload LEICA_M Pictures --name "Forest portraits" --set-date 2026-10-02
+```
+
+- **Only the capture-date fields inside each copy change,** digit for digit. The copy is
+  then read back from the disk and must match the card's bytes with exactly those fields
+  changed, or it doesn't keep its name. The card is never touched.
+- **The file times are set too:** noon by default, or `--time 15:30:00`, in your Mac's time
+  zone. The folder takes the date.
+- **Frames with Content Credentials** (a signed record some cameras add) keep the dates
+  inside the file, so the signature stays valid. Their file times and cull's sidecars still
+  get the new date.
+- **Already copied?** `cull redate` does the same to a shoot folder; see
+  [Fixing dates and renaming frames](#fixing-dates-and-renaming-frames).
+
 The plan refuses, before writing anything, when the copy won't fit:
 
 ```
@@ -391,12 +410,63 @@ cull judge --rerank --batch <dir>   # half price
   `cull decide`, which is free.
 - **What it uses:** the report's backend, model and stored policy, unless you type others.
 
+## Fixing dates and renaming frames
+
+**`cull redate`** fixes the capture dates of a shoot folder you've already copied, including
+the frames in `keep/`, `review/` and `cull/`. Look at the plan first:
+
+```sh
+cull redate "Pictures/2025-12-28 Forest portraits" --date 2026-10-02 --dry-run
+cull redate "Pictures/2025-12-28 Forest portraits" --date 2026-10-02
+```
+
+- **Each frame is checked first** against the checksum taken when it was copied. A frame
+  that changed since is refused and left alone.
+- **The fixed version is proven before it replaces the frame.** It is written to a hidden
+  file beside the frame, read back from the disk, and must match the original byte for
+  byte, apart from the dates. Only then is it swapped in.
+- **The report, the manifest and cull's sidecars follow,** so `judge` carries on without
+  calling the model again. The sets stay as they were: cull still groups frames by the
+  time the camera wrote.
+- **The folder keeps its name:** redate doesn't rename it.
+- **Interrupted?** Run the same command again. Until it has finished, the other commands
+  refuse the folder, and `cull status` tells you what to run.
+
+**`cull rename`** renames every frame by a pattern, with the same tokens as offload's
+`--rename`:
+
+```sh
+cull rename "Pictures/2025-12-28 Forest portraits" "{date}_{name}_{n:4}" --dry-run
+cull rename "Pictures/2025-12-28 Forest portraits" "{date}_{name}_{n:4}"
+cull rename --undo "Pictures/2025-12-28 Forest portraits"
+```
+
+- **Everything follows the file:** its sidecar, the report, your labels, the checksums
+  and the review sheet. Sorted frames are renamed where they are.
+- **Nothing moves until the whole plan is checked.** A clash, a name that's already taken
+  or a file it can't move stops it, naming the files.
+- **Pad the counter** (`{n:4}`, not `{n}`): an unpadded one sorts `10` before `2`, which
+  would regroup the sets and cost ranking calls. rename refuses such a pattern unless you
+  add `--reorder`.
+- **JPG pairs and other files named after a frame** (darktable's `.DNG.xmp`, Capture One's
+  `.cos` settings) stop the rename: it moves only the DNG and its `.xmp` sidecar.
+- **`--undo`** puts the names back, or finishes putting them back after an interruption.
+
+**Do both before importing:** Capture One and Lightroom lose track of files changed or
+renamed after import. The README has the details: [Fixing capture
+dates](README.md#fixing-capture-dates), [Renaming frames](README.md#renaming-frames), and
+[the folder lock](README.md#the-folder-lock) that keeps either from running while another
+cull command uses the folder.
+
 ## Things to know
 
-- **Your DNGs are never modified.**
-  - `offload` only reads the card, and never replaces a file.
+- **Your DNGs are never modified,** except the capture dates you ask `--set-date` or
+  `redate` to fix (each fixed file is proven against its original).
+  - `offload` only reads the card.
   - `--sort` moves frames within the shoot folder, recorded in the
-    report and undone by `cull restore`.
+    report and undone by `cull restore`. `rename` renames them, undone by
+    `cull rename --undo`.
+  - The one file cull ever replaces is a frame `redate` has just proven.
   - Sidecars that cull didn't write are never overwritten unless you pass
     `--overwrite-xmp`.
 - **Verdicts are only as good as calibration.** Label a sample in `review`, check

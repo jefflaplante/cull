@@ -22,6 +22,7 @@ var notInDotfile = map[string]bool{
 	"quiet": true, "verbose": true, "debug": true, "log-level": true,
 	"set-date": true, "time": true, // offload: a date fix is per card, never a standing default
 	"date": true, // redate's date to set, offload's folder date: per shoot, never a default
+	"undo": true, // rename --undo: a one-off reversal
 }
 
 // applyDotfile sets flag defaults from the user's dotfile (config.SettingsPath) on

@@ -145,7 +145,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 				filepath.Join(dir, journal.RedateName), j.Recursive, cmp.Or(j.Report, defReport), j.Finish(dir))
 		}
 	}
-	folders, err := walkFolders(dir, o.Recursive)
+	folders, err := Folders(dir, o.Recursive, "redate")
 	if err != nil {
 		return r.res, err
 	}
@@ -591,10 +591,11 @@ func patchesFor(p string, size int64, t time.Time) ([]dng.Patch, []string, error
 	return dng.PatchDates(f, size, t)
 }
 
-// walkFolders lists dir, its sort folders (offload.MovedDirs), and with recursive
-// every subfolder. Hidden folders are skipped. A subfolder holding its own report or
-// offload manifest is another shoot folder, with its own bookkeeping: refused.
-func walkFolders(dir string, recursive bool) ([]string, error) {
+// Folders lists dir, its sort folders (offload.MovedDirs), and with recursive every
+// subfolder: the folders cull redate (and cull rename) change files in. Hidden folders
+// are skipped. A subfolder holding its own report or offload manifest is another shoot
+// folder, with its own bookkeeping: refused, naming cmd ("redate", "rename").
+func Folders(dir string, recursive bool, cmd string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -613,7 +614,7 @@ func walkFolders(dir string, recursive bool) ([]string, error) {
 		default:
 			for _, own := range []string{"cull-report.json", offload.ManifestName} {
 				if _, err := os.Stat(filepath.Join(p, own)); err == nil {
-					return fmt.Errorf("%s is a shoot folder of its own (it has %s): run cull redate on each shoot folder, not -r on %s", p, own, dir)
+					return fmt.Errorf("%s is a shoot folder of its own (it has %s): run cull %s on each shoot folder, not -r on %s", p, own, cmd, dir)
 				}
 			}
 		}
@@ -832,6 +833,10 @@ func (r *run) isTarget(m time.Time) bool {
 	d := m.Sub(r.o.Target)
 	return d >= -2*time.Second && d <= 2*time.Second
 }
+
+// ShootOf is the folder whose manifest records the files in d (one of Folders(root,
+// …)): d, or the one above a sort folder.
+func ShootOf(root, d string) string { return folderShoot(root, d) }
 
 // folderShoot is the folder whose manifest records the files in d: d, or the one
 // above a sort folder.

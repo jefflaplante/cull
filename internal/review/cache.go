@@ -37,6 +37,19 @@ func subjectName(base string, r report.Result, b eval.NormBox) string {
 
 func nativeName(base string, r report.Result) string { return assetName(base, "native", r, "") }
 
+// CachedImages are the names, in the assets folder, of the images a sheet keeps for r
+// (thumbnail, subject crop when r has a focus box, the loupe's native image), with
+// root the shoot folder: built from r.File's name, size and modification time. cull
+// rename carries them from the old name's to the new one's.
+func CachedImages(root string, r report.Result) []string {
+	base := baseName(root, r.File)
+	out := []string{thumbName(base, r), nativeName(base, r)}
+	if r.FocusTarget != nil && r.FocusTarget.Box != nil {
+		out = append(out, subjectName(base, r, *r.FocusTarget.Box))
+	}
+	return out
+}
+
 // ours reports whether a file in the assets folder is one of the sheet's cached
 // images (current, stale, from before cache names, or a partial write).
 func ours(name string) bool {

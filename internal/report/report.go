@@ -302,6 +302,53 @@ func (r *Report) ResultFor(path string) *Result {
 	return nil
 }
 
+// RenamePath rewrites every stored path equal to old (a frame's file, sidecar or
+// sort-folder path; its sets' members, orders and notes) to new, and returns how many
+// it changed. The caller saves.
+func (r *Report) RenamePath(old, new string) int { return r.RenamePaths(map[string]string{old: new}) }
+
+// RenamePaths is RenamePath for a whole mapping at once, old → new: each stored path is
+// looked up once, so frames that swap names (A→B, B→A) swap in the report too.
+func (r *Report) RenamePaths(m map[string]string) int {
+	n := 0
+	r.eachPath(func(p *string) {
+		if to, ok := m[*p]; ok && *p != "" {
+			*p = to
+			n++
+		}
+	})
+	return n
+}
+
+// HasAnyPath reports whether the report stores any of paths (as RenamePath matches them).
+func (r *Report) HasAnyPath(paths map[string]bool) bool {
+	found := false
+	r.eachPath(func(p *string) { found = found || (*p != "" && paths[*p]) })
+	return found
+}
+
+// eachPath calls re with every stored path: each result's file, sidecar and
+// sort-folder path; each set's members, orders and notes.
+func (r *Report) eachPath(re func(*string)) {
+	for i := range r.Results {
+		x := &r.Results[i]
+		re(&x.File)
+		re(&x.XMP)
+		re(&x.MovedTo)
+	}
+	for i := range r.Sets {
+		s := &r.Sets[i]
+		for _, list := range [][]string{s.Members, s.Order, s.Reversed} {
+			for j := range list {
+				re(&list[j])
+			}
+		}
+		for j := range s.Notes {
+			re(&s.Notes[j].File)
+		}
+	}
+}
+
 // Facts are the measurements the policy combines with a frame's assessment.
 func (r Result) Facts() eval.Facts {
 	var f eval.Facts
@@ -344,6 +391,9 @@ func (r *Report) Rebase(dir string) bool {
 		}
 		for j := range s.Order {
 			s.Order[j] = re(s.Order[j])
+		}
+		for j := range s.Reversed {
+			s.Reversed[j] = re(s.Reversed[j])
 		}
 		for j := range s.Notes {
 			s.Notes[j].File = re(s.Notes[j].File)

@@ -171,3 +171,18 @@ func TestEntryCarriesExposure(t *testing.T) {
 		t.Fatal("EV 9 accepted")
 	}
 }
+
+// A renamed frame's entry records the name it had (From); the log is read as before.
+func TestEntryFrom(t *testing.T) {
+	p := filepath.Join(t.TempDir(), FileName)
+	if err := Append(p, Entry{File: "B.DNG", From: "A.DNG", Label: "keep", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Read(p)
+	if err != nil || m["B.DNG"].From != "A.DNG" || m["B.DNG"].Label != "keep" {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if err := Append(p, Entry{File: "B.DNG", From: "x/A.DNG", Label: "keep"}); err == nil {
+		t.Fatal("a From with a directory was accepted")
+	}
+}

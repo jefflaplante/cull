@@ -24,12 +24,18 @@ type Entry struct {
 	Stars int       `json:"stars"`        // 0-5; 0 = unrated
 	EV    *float64  `json:"ev,omitempty"` // your exposure adjustment from review; nil = none
 	At    time.Time `json:"at"`
+	// From is the name the frame had when cull rename carried this entry to its new
+	// name; "" otherwise.
+	From string `json:"from,omitempty"`
 }
 
 // Validate checks an entry's fields.
 func (e Entry) Validate() error {
 	if e.File == "" || e.File == "." || e.File == ".." || e.File != filepath.Base(e.File) {
 		return fmt.Errorf("file %q: want a file name without a directory", e.File)
+	}
+	if e.From != "" && (e.From == "." || e.From == ".." || e.From != filepath.Base(e.From)) {
+		return fmt.Errorf("from %q: want a file name without a directory", e.From)
 	}
 	switch e.Label {
 	case "", "keep", "review", "cull":

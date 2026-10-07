@@ -206,3 +206,28 @@ func contains(s []string, v string) bool {
 	}
 	return false
 }
+
+// CachedImages names exactly the images a sheet build makes for a frame (so cull
+// rename can carry them to its new name), relative to the shoot.
+func TestCachedImagesMatchBuild(t *testing.T) {
+	dir, rep := cacheShoot(t)
+	out := filepath.Join(dir, "cull-review")
+	if _, err := Build(rep, filepath.Join(dir, "cull-report.json"), Options{Out: out}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	on := map[string]bool{}
+	for _, n := range assets(t, out) {
+		on[n] = true
+	}
+	for _, r := range rep.Results {
+		names := CachedImages(rep.Dir, r)
+		if len(names) < 2 {
+			t.Fatalf("%s: %v", r.File, names)
+		}
+		for _, n := range names {
+			if !strings.Contains(n, ".native.") && !on[n] {
+				t.Errorf("%s: %s isn't one the build made (%v)", r.File, n, on)
+			}
+		}
+	}
+}

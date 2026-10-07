@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -90,6 +91,37 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 			}
 			missing = append(missing, fmt.Sprintf("  missing: %s; the hidden temp %s may be its only copy\n", rel, tmp))
 		}
+	}
+	// Hidden rename temps: those the unfinished rename records are moved on by its next
+	// run; one no unfinished rename records may be a frame's only copy (a journal moved
+	// aside): it goes back under the name it was made for.
+	rj, _ := journal.LoadRename(cfg.Dir)
+	var recorded map[string]bool
+	if rj != nil && !rj.Complete {
+		recorded = rj.Temps()
+	}
+	renaming := 0
+	for _, d := range tempFolders(cfg.Dir, cfg.Recursive) {
+		temps := offload.RenameTemps(d)
+		names := make([]string, 0, len(temps))
+		for tmp := range temps {
+			names = append(names, tmp)
+		}
+		sort.Strings(names)
+		for _, tmp := range names {
+			if rel, _ := filepath.Rel(cfg.Dir, tmp); recorded[rel] {
+				renaming++
+				continue
+			}
+			target := filepath.Join(d, temps[tmp])
+			if orphanNext == "" {
+				orphanNext = "mv " + shellQuote(tmp) + " " + shellQuote(target) + "   (if that name is free; if it isn't the frame, delete it)"
+			}
+			missing = append(missing, fmt.Sprintf("  hidden temp %s: a rename's, which no unfinished rename records: it may be the only copy of %s\n", tmp, temps[tmp]))
+		}
+	}
+	if renaming > 0 {
+		missing = append(missing, fmt.Sprintf("  %d file(s) in hidden rename temps (.cull-rename-…): the unfinished rename's next run moves them on\n", renaming))
 	}
 	pending := func() {
 		for _, m := range missing {

@@ -97,13 +97,13 @@ func TestLoadRefusesNewerSchema(t *testing.T) {
 
 func TestRebaseMovesEveryPathUnderTheOldDir(t *testing.T) {
 	r := &Report{Dir: "/old", Results: []Result{{File: "/old/a/L1.DNG", MovedTo: "/old/a/culled/L1.DNG", XMP: "/old/a/culled/L1.xmp"}, {File: "/elsewhere/L2.DNG"}},
-		Sets: []Set{{Members: []string{"/old/a/L1.DNG"}, Order: []string{"/old/a/L1.DNG"}, Notes: []RankNote{{File: "/old/a/L1.DNG"}}}}}
+		Sets: []Set{{Members: []string{"/old/a/L1.DNG"}, Order: []string{"/old/a/L1.DNG"}, Reversed: []string{"/old/a/L1.DNG"}, Notes: []RankNote{{File: "/old/a/L1.DNG"}}}}}
 	if !r.Rebase("/new") {
 		t.Fatal("no change reported")
 	}
 	x := r.Results[0]
 	if r.Dir != "/new" || x.File != "/new/a/L1.DNG" || x.MovedTo != "/new/a/culled/L1.DNG" || x.XMP != "/new/a/culled/L1.xmp" ||
-		r.Results[1].File != "/elsewhere/L2.DNG" || r.Sets[0].Members[0] != "/new/a/L1.DNG" || r.Sets[0].Order[0] != "/new/a/L1.DNG" || r.Sets[0].Notes[0].File != "/new/a/L1.DNG" {
+		r.Results[1].File != "/elsewhere/L2.DNG" || r.Sets[0].Members[0] != "/new/a/L1.DNG" || r.Sets[0].Order[0] != "/new/a/L1.DNG" || r.Sets[0].Reversed[0] != "/new/a/L1.DNG" || r.Sets[0].Notes[0].File != "/new/a/L1.DNG" {
 		t.Fatalf("%+v %+v", r.Results, r.Sets)
 	}
 	if r.Rebase("/new") {
@@ -172,5 +172,37 @@ func TestMergeTags(t *testing.T) {
 	var none *Tags
 	if none.Plain() != nil || none.Paths() != nil {
 		t.Fatal("nil tags must be safe")
+	}
+}
+
+// RenamePath rewrites every stored path equal to old, and RenamePaths does a whole
+// mapping at once, so two frames can swap names.
+func TestRenamePaths(t *testing.T) {
+	a, b, c := "/s/A.DNG", "/s/B.DNG", "/s/keep/C.DNG"
+	r := &Report{
+		Results: []Result{
+			{File: a, XMP: "/s/A.xmp"},
+			{File: b, XMP: "/s/B.xmp"},
+			{File: "/s/C.DNG", MovedTo: c, XMP: "/s/keep/C.xmp"},
+		},
+		Sets: []Set{{Members: []string{a, b}, Order: []string{b, a}, Reversed: []string{a, b},
+			Notes: []RankNote{{File: a}, {File: b}}}},
+	}
+	if n := r.RenamePaths(map[string]string{a: b, b: a, "/s/A.xmp": "/s/B.xmp", "/s/B.xmp": "/s/A.xmp"}); n != 12 {
+		t.Fatalf("swap changed %d", n)
+	}
+	x := r.Results
+	if x[0].File != b || x[0].XMP != "/s/B.xmp" || x[1].File != a || x[1].XMP != "/s/A.xmp" {
+		t.Fatalf("swap: %+v", x)
+	}
+	s := r.Sets[0]
+	if s.Members[0] != b || s.Order[0] != a || s.Reversed[0] != b || s.Notes[0].File != b || s.Notes[1].File != a {
+		t.Fatalf("set: %+v", s)
+	}
+	if n := r.RenamePath(c, "/s/keep/D.DNG"); n != 1 || x[2].MovedTo != "/s/keep/D.DNG" {
+		t.Fatalf("moved: %d %+v", n, x[2])
+	}
+	if n := r.RenamePath("/s/none.DNG", "/s/x.DNG"); n != 0 {
+		t.Fatalf("none: %d", n)
 	}
 }

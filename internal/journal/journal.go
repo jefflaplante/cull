@@ -14,11 +14,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/jefflaplante/cull/internal/labels"
 )
 
 const (
 	RedateName = "cull-redate.json" // in the shoot folder while a redate runs
-	RenameName = "cull-rename.json" // the last rename, kept for --undo (Task 6)
+	RenameName = "cull-rename.json" // the last rename, kept for --undo
 )
 
 // isoLocal is how a redate target is written: local wall-clock time.
@@ -118,10 +120,115 @@ func (j *Redate) FileRecord(rel string) (FileState, bool) {
 	return rec, ok
 }
 
-// rename is the part of the rename journal (Task 6) Incomplete reads.
-type rename struct {
-	Pattern  string `json:"pattern"`
+// Rename is a rename's record (cull-rename.json), written and flushed before the first
+// file moves. A rename moves every frame (and its sidecar) to a hidden temp beside it
+// (phase 1), then every temp to its new name (phase 2), so frames can swap names; then
+// the report, labels log, manifest and review cache follow. It is kept once complete,
+// so --undo can reverse the last rename; an undo is journalled the same way (Undo),
+// and removed when it completes.
+type Rename struct {
+	Pattern   string       `json:"pattern"`
+	Undo      bool         `json:"undo,omitempty"`
+	Recursive bool         `json:"recursive,omitempty"`
+	Report    string       `json:"report,omitempty"` // the report it updates, when not the folder's default
+	Started   time.Time    `json:"started"`
+	Moves     []RenameMove `json:"moves"`
+	// Phase is where the files stand: 1 moving to their temps, 2 moving from the temps
+	// to the new names (every old name is free by then).
+	Phase int `json:"phase"`
+	// ReportAt is which paths the report holds for the moved frames: "" the old ones,
+	// "temp" the temps', "new" the new ones. It takes them in two saves, so names that
+	// swap never mix; a re-run tells from the report itself which save a crash beat.
+	ReportAt string `json:"report_at,omitempty"`
 	Complete bool   `json:"complete"`
+}
+
+// Temps are the journal's temp paths (frames' and sidecars'), relative to the folder.
+func (j *Rename) Temps() map[string]bool {
+	out := map[string]bool{}
+	if j == nil {
+		return out
+	}
+	for _, m := range j.Moves {
+		out[m.Tmp] = true
+		if m.SidecarTmp != "" {
+			out[m.SidecarTmp] = true
+		}
+	}
+	return out
+}
+
+// RenameMove is one frame's move, by paths relative to the folder, and the frame as it
+// was when the journal was written: a re-run finds it at Old, Tmp or New, and checks
+// that a file there is this frame (same size and modification time: a rename keeps
+// both).
+type RenameMove struct {
+	Old        string    `json:"old"`
+	Tmp        string    `json:"tmp"`
+	New        string    `json:"new"`
+	SidecarOld string    `json:"sidecar_old,omitempty"` // set when the frame had a sidecar
+	SidecarTmp string    `json:"sidecar_tmp,omitempty"`
+	SidecarNew string    `json:"sidecar_new,omitempty"`
+	Size       int64     `json:"size"`
+	ModTime    time.Time `json:"mtime"`
+	// Orig is the camera name the offload manifest records for the frame (with Size, its
+	// manifest key); "" for a frame no manifest records.
+	Orig string `json:"orig,omitempty"`
+	// Label is the frame's entry in the labels log when the journal was written: the
+	// new name gets it (nil: none, so a label left under the new name is cleared).
+	Label *labels.Entry `json:"label,omitempty"`
+}
+
+// LoadRename reads dir's rename journal; none gives nil, nil.
+func LoadRename(dir string) (*Rename, error) {
+	b, err := os.ReadFile(filepath.Join(dir, RenameName))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var j Rename
+	if err := json.Unmarshal(b, &j); err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, RenameName), err)
+	}
+	return &j, nil
+}
+
+// Save writes the rename journal atomically and fsyncs it; the caller then flushes it
+// to the media (F_FULLFSYNC) before moving anything.
+func (j *Rename) Save(dir string) error {
+	b, err := json.MarshalIndent(j, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(dir, RenameName, b)
+}
+
+// RemoveRename deletes dir's rename journal (an undo completed). None is fine.
+func RemoveRename(dir string) error {
+	err := os.Remove(filepath.Join(dir, RenameName))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return syncDir(dir)
+}
+
+// Finish is the command that finishes this rename of dir (and, for a forward rename,
+// the one that reverses it instead).
+func (j *Rename) Finish(dir string) string {
+	opts := ""
+	if j.Recursive {
+		opts += " -r"
+	}
+	if j.Report != "" {
+		opts += " -o " + ShellQuote(j.Report)
+	}
+	undo := "cull rename --undo" + opts + " " + ShellQuote(dir)
+	if j.Undo {
+		return undo
+	}
+	return "cull rename" + opts + " " + ShellQuote(dir) + " " + ShellQuote(j.Pattern) + " (or " + undo + ")"
 }
 
 // Incomplete reports an unfinished redate or rename journal in dir: which ("redate"
@@ -133,19 +240,11 @@ func Incomplete(dir string) (which, finish string, ok bool) {
 	} else if j != nil && !j.Complete {
 		return "redate", j.Finish(dir), true
 	}
-	b, err := os.ReadFile(filepath.Join(dir, RenameName))
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", "", false
-	}
-	var r rename
-	if err == nil {
-		err = json.Unmarshal(b, &r)
-	}
-	switch {
+	switch r, err := LoadRename(dir); {
 	case err != nil:
 		return "rename", fmt.Sprintf("cull rename --undo %s (%s can't be read: %v)", ShellQuote(dir), RenameName, err), true
-	case !r.Complete:
-		return "rename", fmt.Sprintf("cull rename %s %s (or cull rename --undo %s)", ShellQuote(dir), ShellQuote(r.Pattern), ShellQuote(dir)), true
+	case r != nil && !r.Complete:
+		return "rename", r.Finish(dir), true
 	}
 	return "", "", false
 }

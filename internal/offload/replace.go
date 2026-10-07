@@ -198,12 +198,13 @@ func ProveFrom(ctx context.Context, path string, want [32]byte) error {
 
 // RemoveStaleTemps removes the hidden temps (".<name>.cull-<rand>.tmp") an offload crash
 // left in dir: never a file's only copy, since a copy takes its name (by link, never
-// replacing) only once proven. Redate's temps (RedateTempPrefix) are never touched here.
+// replacing) only once proven. Redate's and rename's temps (RedateTempPrefix,
+// RenameTempPrefix) are never touched here.
 func RemoveStaleTemps(dir string) {
 	ents, _ := os.ReadDir(dir)
 	for _, e := range ents {
 		n := e.Name()
-		if offloadTempRE.MatchString(n) && !redateTempRE.MatchString(n) && e.Type().IsRegular() && !appleDouble(n) {
+		if offloadTempRE.MatchString(n) && !redateTempRE.MatchString(n) && !renameTempRE.MatchString(n) && e.Type().IsRegular() && !appleDouble(n) {
 			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}

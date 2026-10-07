@@ -598,45 +598,77 @@ func (p *Plan) cameraNames(o Options) error {
 
 var tokenRE = regexp.MustCompile(`\{(date|name|orig|n)(?::(\d+))?\}`)
 
+// ValidatePattern checks a file-name pattern (offload --rename, cull rename): the
+// tokens {date} {name} {orig} {n} {n:W}, with {n} or {orig} so that every file gets
+// its own name, no path separators or colons, and no leading "." (a hidden file is
+// never a frame). Errors start with the pattern, quoted.
+func ValidatePattern(pat string) error {
+	if !patternNumbered(pat) && !strings.Contains(pat, "{orig}") {
+		return fmt.Errorf("%q needs {n} or {orig}, or every file gets the same name", pat)
+	}
+	if strings.ContainsAny(tokenRE.ReplaceAllString(pat, ""), `/\:`) {
+		return fmt.Errorf("%q: no path separators or colons", pat)
+	}
+	for _, m := range tokenRE.FindAllStringSubmatch(pat, -1) {
+		if m[2] != "" && m[1] != "n" {
+			return fmt.Errorf("%q: only {n} takes a width", pat)
+		}
+	}
+	if rest := tokenRE.ReplaceAllString(pat, ""); strings.ContainsAny(rest, "{}") {
+		return fmt.Errorf("%q: unknown token (use {date} {name} {orig} {n} {n:W})", pat)
+	}
+	if strings.HasPrefix(pat, ".") {
+		return fmt.Errorf("%q: a name starting with \".\" is hidden, and never taken for a frame", pat)
+	}
+	return nil
+}
+
+func patternNumbered(pat string) bool {
+	for _, m := range tokenRE.FindAllStringSubmatch(pat, -1) {
+		if m[1] == "n" {
+			return true
+		}
+	}
+	return false
+}
+
+// ExpandName fills pattern's tokens: {date} (YYYYMMDD), {name} (spaces become "_"),
+// {orig} (the camera name's stem) and {n} ({n:W}: zero-padded to W digits). The result
+// has no extension. The pattern is checked with ValidatePattern first.
+func ExpandName(pattern string, date, name, orig string, n int) (string, error) {
+	if err := ValidatePattern(pattern); err != nil {
+		return "", err
+	}
+	name = strings.ReplaceAll(name, " ", "_")
+	return tokenRE.ReplaceAllStringFunc(pattern, func(tok string) string {
+		m := tokenRE.FindStringSubmatch(tok)
+		switch m[1] {
+		case "date":
+			return date
+		case "name":
+			return name
+		case "orig":
+			return orig
+		}
+		w, _ := strconv.Atoi(m[2])
+		return fmt.Sprintf("%0*d", w, n)
+	}), nil
+}
+
 // renamed names files by the pattern, numbering in camera-name order from one past the
 // largest number already in the shoot folder. Files the manifest already records
 // (same source name, size and mtime) are skipped under their recorded name.
 func (p *Plan) renamed(o Options) error {
 	pat := o.Rename
-	numbered := false
-	for _, m := range tokenRE.FindAllStringSubmatch(pat, -1) {
-		numbered = numbered || m[1] == "n"
+	if err := ValidatePattern(pat); err != nil {
+		return fmt.Errorf("--rename %w", err)
 	}
-	if !numbered && !strings.Contains(pat, "{orig}") {
-		return fmt.Errorf("--rename %q needs {n} or {orig}, or every file gets the same name", pat)
-	}
-	if strings.ContainsAny(tokenRE.ReplaceAllString(pat, ""), `/\:`) {
-		return fmt.Errorf("--rename %q: no path separators or colons", pat)
-	}
-	for _, m := range tokenRE.FindAllStringSubmatch(pat, -1) {
-		if m[2] != "" && m[1] != "n" {
-			return fmt.Errorf("--rename %q: only {n} takes a width", pat)
-		}
-	}
-	if rest := tokenRE.ReplaceAllString(pat, ""); strings.ContainsAny(rest, "{}") {
-		return fmt.Errorf("--rename %q: unknown token (use {date} {name} {orig} {n} {n:W})", pat)
-	}
+	numbered := patternNumbered(pat)
 	date := strings.ReplaceAll(p.Folder[:10], "-", "")
 	name := strings.ReplaceAll(o.Name, " ", "_")
 	expand := func(orig string, n int) string {
-		return tokenRE.ReplaceAllStringFunc(pat, func(tok string) string {
-			m := tokenRE.FindStringSubmatch(tok)
-			switch m[1] {
-			case "date":
-				return date
-			case "name":
-				return name
-			case "orig":
-				return orig
-			}
-			w, _ := strconv.Atoi(m[2])
-			return fmt.Sprintf("%0*d", w, n)
-		})
+		s, _ := ExpandName(pat, date, name, orig, n) // validated above
+		return s
 	}
 	// The counter continues from the largest n among names the pattern produced, in the
 	// shoot folder and in the folders --sort and --move-culled move frames into.

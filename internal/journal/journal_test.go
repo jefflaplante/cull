@@ -72,3 +72,51 @@ func TestIncompleteRename(t *testing.T) {
 		t.Fatal("a complete rename journal counted as unfinished")
 	}
 }
+
+// The rename journal round-trips, names the command that finishes it (with -r and -o
+// when it ran with them), and an undo journal names --undo.
+func TestRenameJournal(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "2026-10-04 Smith wedding")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if j, err := LoadRename(dir); j != nil || err != nil {
+		t.Fatalf("none: %+v %v", j, err)
+	}
+	j := &Rename{Pattern: "{date}_{n:4}", Started: time.Now(), Phase: 1, Moves: []RenameMove{
+		{Old: "M1.DNG", Tmp: ".cull-rename-0123abcd.M1.DNG", New: "20251228_0001.DNG", Size: 3, ModTime: time.Unix(5, 6)},
+	}}
+	if err := j.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadRename(dir)
+	if err != nil || got == nil || len(got.Moves) != 1 || got.Moves[0] != j.Moves[0] || got.Phase != 1 {
+		t.Fatalf("load %+v %v", got, err)
+	}
+	which, finish, ok := Incomplete(dir)
+	want := "cull rename '" + dir + "' '{date}_{n:4}' (or cull rename --undo '" + dir + "')"
+	if !ok || which != "rename" || finish != want {
+		t.Fatalf("%q %q %v", which, finish, ok)
+	}
+	j.Recursive, j.Report = true, "/r/x.json"
+	if f := j.Finish(dir); f != "cull rename -r -o /r/x.json '"+dir+"' '{date}_{n:4}' (or cull rename --undo -r -o /r/x.json '"+dir+"')" {
+		t.Fatalf("finish %q", f)
+	}
+	j.Recursive, j.Report = false, ""
+	j.Undo = true
+	j.Save(dir)
+	if _, finish, ok := Incomplete(dir); !ok || finish != "cull rename --undo '"+dir+"'" {
+		t.Fatalf("undo: %q %v", finish, ok)
+	}
+	j.Complete = true
+	j.Save(dir)
+	if _, _, ok := Incomplete(dir); ok {
+		t.Fatal("complete journal unfinished")
+	}
+	if err := RemoveRename(dir); err != nil {
+		t.Fatal(err)
+	}
+	if j, err := LoadRename(dir); j != nil || err != nil {
+		t.Fatalf("after remove: %+v %v", j, err)
+	}
+}

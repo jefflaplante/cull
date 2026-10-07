@@ -33,6 +33,16 @@ type Entry struct {
 	PatchedAt  time.Time `json:"patched_at,omitzero"`
 }
 
+// CardName is the frame's name on the card with its card folder,
+// "100LEICA/M1103127.DNG" (the last two parts of Src): camera order (dcf) reads the
+// DCF folder number from it. Just Orig when no source is recorded.
+func (e Entry) CardName() string {
+	if e.Src == "" {
+		return e.Orig
+	}
+	return filepath.Join(filepath.Base(filepath.Dir(e.Src)), e.Orig)
+}
+
 // CurrentSHA256 is the checksum the file on disk must have now: FileSHA256 for a patched
 // file, else the card's.
 func (e Entry) CurrentSHA256() string {

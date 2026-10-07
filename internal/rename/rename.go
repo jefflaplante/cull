@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jefflaplante/cull/internal/dcf"
 	"github.com/jefflaplante/cull/internal/dng"
 	"github.com/jefflaplante/cull/internal/group"
 	"github.com/jefflaplante/cull/internal/journal"
@@ -225,6 +226,7 @@ type frame struct {
 	size       int64
 	mtime      time.Time
 	orig       string // the manifest's camera name; "" unrecorded
+	card       string // with orig, its card folder and name ("100LEICA/M1103127.DNG"): camera order
 	origSize   int64  // with orig, the manifest's key for it
 	datesSet   string // the manifest's date set, "2026-10-04T12:00:00"
 	hasSidecar bool
@@ -277,7 +279,7 @@ func (r *run) survey(folders []string) (*shoot, error) {
 			}
 			f := frame{rel: rel, unit: unit, size: st.Size(), mtime: st.ModTime(), locked: lockedFlag(st)}
 			if me, ok := man[unit][low]; ok {
-				f.orig, f.origSize, f.datesSet = me.Orig, me.Size, me.DatesSet
+				f.orig, f.origSize, f.datesSet, f.card = me.Orig, me.Size, me.DatesSet, me.CardName()
 			}
 			if st, err := os.Lstat(xmp.Path(r.abs(rel))); err == nil && st.Mode().IsRegular() {
 				f.hasSidecar = true
@@ -329,8 +331,10 @@ func (r *run) refuseOrphans(folders []string) error {
 
 var datedFolder = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})(?: (.+))?$`)
 
-// plan names every frame by the pattern, in camera order: by the manifest's camera
-// name where it records one, else by the current name. nil: nothing changes.
+// plan names every frame by the pattern, in camera order (dcf: the DCF folder and
+// file counter, so an M11-P's M… and L… frames, numbered from one counter, interleave
+// as shot) of the manifest's card name where it records one, else of the current
+// name. nil: nothing changes.
 func (r *run) plan() (*journal.Rename, error) {
 	folders, err := redate.Folders(r.dir, r.o.Recursive, "rename")
 	if err != nil {
@@ -344,13 +348,26 @@ func (r *run) plan() (*journal.Rename, error) {
 		return nil, err
 	}
 	frames := sh.frames
-	key := func(f frame) string { return strings.ToLower(cmp.Or(f.orig, f.base())) }
-	sort.SliceStable(frames, func(a, b int) bool {
-		if ka, kb := key(frames[a]), key(frames[b]); ka != kb {
-			return ka < kb
+	cam := make([]dcf.Name, len(frames))
+	for i, f := range frames {
+		cam[i] = dcf.Of(cmp.Or(f.card, f.base()))
+	}
+	dcf.Unify(cam)
+	idx := make([]int, len(frames))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.Slice(idx, func(a, b int) bool {
+		ia, ib := idx[a], idx[b]
+		if c := dcf.Compare(cam[ia], cam[ib]); c != 0 {
+			return c < 0
 		}
-		return frames[a].rel < frames[b].rel
+		return frames[ia].rel < frames[ib].rel
 	})
+	frames = make([]frame, len(idx))
+	for k, i := range idx {
+		frames[k] = sh.frames[i]
+	}
 	folderDate, name := "", filepath.Base(r.dir)
 	if m := datedFolder.FindStringSubmatch(name); m != nil {
 		folderDate, name = m[1]+m[2]+m[3], m[4]
@@ -384,8 +401,10 @@ func (r *run) plan() (*journal.Rename, error) {
 }
 
 // checkOrder refuses a rename that changes the order of the report's frames as
-// sequence grouping sees it (capture time, then path: frames with the same capture
-// time, as a burst or a stopped clock gives, are ordered by name). A new order regroups
+// sequence grouping sees it (group.Order: capture time, then camera order of the
+// report's card name, else the current name; frames with the same capture time, as a
+// burst or a stopped clock gives, are ordered by name only when no manifest records
+// them). A new order regroups
 // the shoot's sets, and judge would rank the changed sets again. Reorder goes ahead,
 // saying how many sets change.
 func (r *run) checkOrder(moves []journal.RenameMove) error {
@@ -406,20 +425,13 @@ func (r *run) checkOrder(moves []journal.RenameMove) error {
 		if x.Error != "" || x.Preview == nil {
 			continue
 		}
-		f := group.Frame{Key: x.File}
-		if x.Exif != nil {
-			f.Time, f.HasTime = x.Exif.CaptureTime()
-		}
-		if look, ok := x.LookBytes(); ok {
-			f.Look = look
-		}
-		before = append(before, f)
+		before = append(before, x.GroupFrame())
 		if n, ok := to[x.File]; ok {
-			f.Key = n
+			x.File = n // what the renamed report gives decide and judge
 		}
-		after = append(after, f)
+		after = append(after, x.GroupFrame())
 	}
-	if slices.Equal(seqOrder(before), seqOrder(after)) {
+	if slices.Equal(group.Order(before), group.Order(after)) {
 		return nil
 	}
 	changed := -1
@@ -443,27 +455,6 @@ func (r *run) checkOrder(moves []journal.RenameMove) error {
 		sets = fmt.Sprintf(" (%d set(s) would change)", changed)
 	}
 	return fmt.Errorf("this rename would change the order of the report's frames, which regroups the shoot's sets%s and makes judge rank them again: %s; or pass --reorder to go ahead; nothing was renamed", sets, cause)
-}
-
-// seqOrder is the order group.Sequences puts frames in: by capture time when every
-// frame has one, then by key (path).
-func seqOrder(fs []group.Frame) []int {
-	allTimed := true
-	for _, f := range fs {
-		allTimed = allTimed && f.HasTime
-	}
-	order := make([]int, len(fs))
-	for i := range order {
-		order[i] = i
-	}
-	sort.SliceStable(order, func(a, b int) bool {
-		fa, fb := fs[order[a]], fs[order[b]]
-		if allTimed && !fa.Time.Equal(fb.Time) {
-			return fa.Time.Before(fb.Time)
-		}
-		return fa.Key < fb.Key
-	})
-	return order
 }
 
 // setsChanged counts the sets in a that b doesn't have, and those in b that a doesn't.

@@ -81,7 +81,7 @@ type Config struct {
 	rankWith    rankExec                            // set by Run (sync) or RunBatch (batch) when Rank: what finishRun ranks with; nil = no ranking
 	pinner      llm.ModelPinner                     // the backend, when its model is an alias: finishRun records what it resolved to
 	detect      func(*imageprep.Frame) []focus.Face // test hook; nil = pigo
-	datesSet    map[string]string                   // by frame path: the date offload --set-date or redate set (startRun reads the manifests)
+	manifested  map[string]offload.Entry            // by frame path: its offload manifest entry (dates set, card name; startRun reads the manifests)
 	CheckpointN int
 	Log         io.Writer // Normal-level lines (the CLI backs it with UI)
 	UI          ui.Sink   // structured progress events; nil = plain lines through Log
@@ -521,7 +521,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	cfg.datesSet = datesSet(*cfg, files)
+	cfg.manifested = manifested(*cfg, files)
 	if cfg.detect == nil {
 		d, err := focus.NewDetector()
 		if err != nil {
@@ -601,8 +601,11 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 			rep.DiscardedCostUSD = prev.DiscardedCostUSD
 			for _, r := range prev.Results {
 				// The manifest is current (redate appends to it); the report may not be.
-				if d, ok := cfg.datesSet[r.File]; ok {
-					r.DatesSet = d
+				if e, ok := cfg.manifested[r.File]; ok {
+					if e.DatesSet != "" {
+						r.DatesSet = e.DatesSet
+					}
+					r.CardName = e.CardName()
 				}
 				if kept(r, cfg.DryRun, cfg.Policy) {
 					rep.Results = append(rep.Results, r)
@@ -641,11 +644,12 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 	return rep, todo, nil
 }
 
-// datesSet reads the offload manifest of each folder the frames are in, once per
-// run, and returns the capture date each frame had set (offload --set-date, redate),
-// by path. A manifest that can't be read only costs those dates: a warning.
-func datesSet(cfg Config, files []string) map[string]string {
-	out := map[string]string{}
+// manifested reads the offload manifest of each folder the frames are in, once per
+// run, and returns each recorded frame's current entry, by path: the capture date it
+// had set (offload --set-date, redate) and its card name (camera order). A manifest
+// that can't be read only costs those: a warning.
+func manifested(cfg Config, files []string) map[string]offload.Entry {
+	out := map[string]offload.Entry{}
 	read := map[string]bool{}
 	dirs := []string{cfg.Dir} // even with every frame moved into sort folders: resumed results look it up
 	for _, f := range files {
@@ -657,13 +661,13 @@ func datesSet(cfg Config, files []string) map[string]string {
 			continue
 		}
 		read[dir] = true
-		m, err := offload.DatesSet(dir)
+		es, err := offload.CurrentManifest(dir)
 		if err != nil {
-			cfg.warn("%s: %v (capture dates set on offload not recorded)", filepath.Join(dir, offload.ManifestName), err)
+			cfg.warn("%s: %v (capture dates set on offload and card names not recorded)", filepath.Join(dir, offload.ManifestName), err)
 			continue
 		}
-		for name, d := range m {
-			out[filepath.Join(dir, name)] = d
+		for _, e := range es {
+			out[filepath.Join(dir, e.Name)] = e
 		}
 	}
 	return out

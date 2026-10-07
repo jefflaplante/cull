@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/jefflaplante/cull/internal/dcf"
 )
 
 func seqFrame(key string, sec int, look []uint8) Frame {
@@ -196,5 +198,38 @@ func TestLookDistanceRejectsMalformedLooks(t *testing.T) {
 		if d := LookDistance(pair[0], pair[1]); d != 1 {
 			t.Errorf("%s: distance %v, want 1", name, d)
 		}
+	}
+}
+
+// Frames with one capture time (a burst, or a camera clock that wasn't running) are
+// in camera order: the M11-P numbers its M… and L… frames from one counter, so
+// M1102771 comes before L1002772 although L sorts first by name.
+func TestOrderTiesByCameraCounter(t *testing.T) {
+	look := scene(park, coat, 0.5, 0.5, 0, 0, 1, 1)
+	var frames []Frame
+	for _, n := range []string{"L1002773.DNG", "M1102770.DNG", "L1002772.DNG", "M1102771.DNG"} {
+		f := seqFrame("/shoot/"+n, 0, look)
+		f.Name = dcf.Of(n)
+		frames = append(frames, f)
+	}
+	want := []int{1, 3, 2, 0} // M1102770 M1102771 L1002772 L1002773
+	if got := Order(frames); !reflect.DeepEqual(got, want) {
+		t.Fatalf("order %v, want %v", got, want)
+	}
+	if sets := Sequences(frames, Options{Gap: time.Minute, MaxLook: DefaultLook}); len(sets) != 1 || !reflect.DeepEqual(sets[0], want) {
+		t.Fatalf("sets %v", sets)
+	}
+	// Without capture times, the same.
+	for i := range frames {
+		frames[i].HasTime = false
+	}
+	if got := Order(frames); !reflect.DeepEqual(got, want) {
+		t.Fatalf("untimed order %v, want %v", got, want)
+	}
+	// Capture time still comes first.
+	frames[3].HasTime, frames[0].HasTime, frames[1].HasTime, frames[2].HasTime = true, true, true, true
+	frames[1].Time = frames[1].Time.Add(time.Second) // M1102770 a second later
+	if got := Order(frames); !reflect.DeepEqual(got, []int{3, 2, 0, 1}) {
+		t.Fatalf("timed order %v", got)
 	}
 }

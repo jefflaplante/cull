@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -279,5 +280,59 @@ func TestPlanDestNotYetCreated(t *testing.T) {
 	o.Dest = filepath.Join(t.TempDir(), "Pictures", "new")
 	if _, err := MakePlan(o); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The M11-P numbers its M… and L… (Content Credentials) frames from one counter:
+// --rename's {n} numbers them in that order (the counter), not by name, which puts
+// every L before every M. A counter that wraps into the next DCF folder continues it.
+func TestRenameNumbersInCameraOrder(t *testing.T) {
+	src := t.TempDir()
+	files := map[string]spec{}
+	var want []string
+	for i, n := range []string{"M1102767", "M1102768", "M1102769", "M1102770", "M1102771",
+		"L1002772", "L1002773", "L1002774", "L1002775", "L1002776"} {
+		files["DCIM/100LEICA/"+n+".DNG"] = spec{seed: byte(i)}
+		want = append(want, n)
+	}
+	files["DCIM/100LEICA/M1109999.DNG"] = spec{seed: 20}
+	files["DCIM/101LEICA/M1100001.DNG"] = spec{seed: 21}
+	want = append(want, "M1109999", "M1100001")
+	card(t, src, files)
+	o := opts(t, src)
+	o.Rename = "{n:4}_{orig}"
+	p, err := MakePlan(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for i, f := range p.Files {
+		got = append(got, f.Name)
+		if exp := fmt.Sprintf("%04d_%s.DNG", i+1, want[i]); f.Name != exp {
+			t.Errorf("file %d: %s, want %s", i, f.Name, exp)
+		}
+	}
+	if t.Failed() {
+		t.Fatalf("names %v", got)
+	}
+}
+
+// --split-at names the first frame of each later event in camera order too.
+func TestSplitAtCameraOrder(t *testing.T) {
+	src := t.TempDir()
+	card(t, src, map[string]spec{"DCIM/100LEICA/M1102770.DNG": {}, "DCIM/100LEICA/M1102771.DNG": {seed: 1},
+		"DCIM/100LEICA/L1002772.DNG": {seed: 2}, "DCIM/100LEICA/L1002773.DNG": {seed: 3}})
+	o := opts(t, src)
+	o.SplitAt = []string{"L1002772"}
+	ps, err := MakePlans(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 2 || strings.Join(names(ps[0], false), ",") != "M1102770.DNG,M1102771.DNG" ||
+		strings.Join(names(ps[1], false), ",") != "L1002772.DNG,L1002773.DNG" {
+		for _, p := range ps {
+			t.Logf("%s: %v", p.Folder, names(p, false))
+		}
+		t.Fatal("events not split in camera order")
 	}
 }

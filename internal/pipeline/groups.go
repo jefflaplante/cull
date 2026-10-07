@@ -31,13 +31,7 @@ func decideAll(rep *report.Report, p eval.Policy, o group.Options) []int {
 		if r.Error != "" || r.Preview == nil || junked(*r, p) {
 			continue
 		}
-		f := group.Frame{Key: r.File}
-		if r.Exif != nil {
-			f.Time, f.HasTime = r.Exif.CaptureTime()
-		}
-		if look, ok := r.LookBytes(); ok {
-			f.Look = look
-		}
+		f := r.GroupFrame()
 		if e := r.Evaluation; e != nil {
 			f.Score = group.Score{Evaluated: true, Sharp: e.Sharpness.Score, EyesOpen: e.People.Eyes == "open",
 				Comp: e.Composition.Score, Exp: e.Exposure.Score}

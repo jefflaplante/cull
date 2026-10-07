@@ -7,6 +7,8 @@ import (
 	"math"
 	"sort"
 	"time"
+
+	"github.com/jefflaplante/cull/internal/dcf"
 )
 
 // Score ranks frames within a set.
@@ -19,7 +21,8 @@ type Score struct {
 
 // Frame is one image as grouping sees it.
 type Frame struct {
-	Key     string // file path; orders frames with equal or missing times
+	Key     string   // file path; the last tie-break
+	Name    dcf.Name // camera order (the camera's own name for the frame): orders frames with equal or missing times
 	Time    time.Time
 	HasTime bool
 	Look    []uint8 // look fingerprint (imageprep Grid(LookSize)); nil = never links
@@ -40,30 +43,45 @@ type Options struct {
 	MaxLook float64       // max LookDistance to the previous frame
 }
 
-// Sequences returns sets of two or more similar frames as indices into frames,
-// each in capture order. Frames are ordered by capture time then key when every
-// frame has a time, otherwise by key (Leica numbers are sequential). A frame joins
-// the current set when it is within Gap of the previous frame and looks like the
-// previous frame (not the first: sequences drift), up to MaxSequence frames.
-func Sequences(frames []Frame, o Options) [][]int {
-	if o.Gap <= 0 || len(frames) < 2 {
-		return nil
-	}
+// Order is the order Sequences puts frames in, as indices into frames: by capture
+// time when every frame has one, then in camera order (Name, the DCF counter: file
+// numbers survive a clock that wasn't running), then by Key. rename checks a new
+// name's effect with it, so the two can't disagree.
+func Order(frames []Frame) []int {
 	allTimed := true
-	for _, f := range frames {
+	names := make([]dcf.Name, len(frames))
+	for i, f := range frames {
 		allTimed = allTimed && f.HasTime
+		names[i] = f.Name
 	}
+	dcf.Unify(names)
 	order := make([]int, len(frames))
 	for i := range order {
 		order[i] = i
 	}
 	sort.SliceStable(order, func(a, b int) bool {
-		fa, fb := frames[order[a]], frames[order[b]]
+		ia, ib := order[a], order[b]
+		fa, fb := frames[ia], frames[ib]
 		if allTimed && !fa.Time.Equal(fb.Time) {
 			return fa.Time.Before(fb.Time)
 		}
+		if c := dcf.Compare(names[ia], names[ib]); c != 0 {
+			return c < 0
+		}
 		return fa.Key < fb.Key
 	})
+	return order
+}
+
+// Sequences returns sets of two or more similar frames as indices into frames,
+// each in capture order (Order). A frame joins the current set when it is within
+// Gap of the previous frame and looks like the previous frame (not the first:
+// sequences drift), up to MaxSequence frames.
+func Sequences(frames []Frame, o Options) [][]int {
+	if o.Gap <= 0 || len(frames) < 2 {
+		return nil
+	}
+	order := Order(frames)
 	var sets [][]int
 	cur := []int{order[0]}
 	flush := func() {

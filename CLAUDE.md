@@ -75,7 +75,12 @@ make vet
   rankplan.go (chunk/finalist/merge math), rankcalls.go (`RankCalls`: exact call count
   for `--estimate` without spending anything)
 - `internal/group` — look fingerprint (8×8 mean RGB) + sequence grouping (time gap +
-  look to the previous frame), score order
+  look to the previous frame), score order; `Order` (capture time, then camera order, then
+  path) is Sequences' order and rename's reorder check
+- `internal/dcf` — camera order: `Of`/`Unify`/`Compare` on DCF names (4 chars + 4-digit
+  counter, in `NNNXXXXX` folders): folder number (only when every frame's is known), then
+  counter, then name; other names after, by name. Used by offload's scan order (numbering,
+  `--split-at`), rename's numbering and `group.Order`
 - `internal/rawclip` — pure-Go lossless-JPEG (SOF3) decoder; raw highlight clipping
 - `internal/review` — HTML contact sheet (index.html from embedded page.html: labels, stars,
   filters; images in its assets/ folder, a cache: cache.go names each image after the DNG's size+mtime,
@@ -92,6 +97,7 @@ make vet
 - `internal/c1` — Capture One AppleScript generator, read-only probe, osascript runner
 - `internal/offload` — `cull offload`: plan.go (hygienic card walk, one folder per run or per event with
   `--split` (capture-time gap or new day; refused when `clockBroken`) / `--split-at` (file names), `MakePlans`,
+  files in camera order (`cameraOrder`, dcf),
   names/--rename counter, skips, clashes, free space; nothing written), copy.go (two stages:
   `writeStage` single-read tee, SHA-256 while reading, F_NOCACHE temps; `finishStage` fsync,
   evict + mincore check, uncached verify, link-based no-replace rename), run.go (pipeline: file
@@ -132,6 +138,9 @@ make vet
 - `internal/report` — JSON source of truth (schema v4); `Tags` (the shoot's project/event/
   location/keywords, merged per run by `MergeTags`, changed by `cull tag`, cli/tags.go);
   `Result.DatesSet` (the date `--set-date`/redate set; the sidecar prefers it over EXIF);
+  `Result.CardName` (`100LEICA/M1103127.DNG`, from the manifest's `Entry.CardName`; judge
+  refreshes it, rename leaves it) and `GroupFrame`/`CameraName`, the one frame key judge,
+  decide and rename's reorder check group with;
   `RenamePaths` maps every path field (File, XMP, MovedTo, set members/order/notes)
 - `internal/ui` — verbosity levels and progress events (`Sink`): plain lines, or the Bubble Tea
   live view on an interactive terminal (live.go); `-q`/`-v`/`--debug`/`--plain` in cli/output.go.
@@ -517,7 +526,8 @@ balance`, but no run has tested them yet.
   - The user says the card holds several shoots and a multi-day trip, and the camera's clock
     was set wrong at one point.
   - So EXIF times can't date or split folders, or order frames. Offload makes one folder
-    per run (`--date` overrides) and numbers frames in file-name order.
+    per run (`--date` overrides) and numbers frames in camera order (the DCF file counter;
+    see "One counter, two prefixes" below).
   - The file times match EXIF exactly, offset by the time zone, so they're no better.
 - **A real offload, verified (2026-10-02):** the whole LEICA M card went to the user's `Grey` volume
   (an exFAT SSD over USB, `/Volumes/Grey/test_cull`), with no backup.
@@ -622,6 +632,20 @@ balance`, but no run has tested them yet.
       re-cached page came from the device.
     - **The tests tolerate ≤ 1% resident** at verify start. Without eviction, 100% is
       resident, so they still catch a failure.
+
+### One counter, two prefixes (2026-10-07, the user's M11-P card, read only)
+
+- The camera names frames from **one shared 4-digit counter** under two prefixes:
+  M1102767–M1102771 (shot 19:09 camera time), then L1002772–L1002776 (19:23; Content
+  Credentials frames). Sorting by name put every `L…` before every `M…`: a live
+  `cull rename <shoot> "{date}_{name}_{n:4}"` numbered L1002772 → `_0001` … and M1102767 →
+  `_0006`, the wrong order.
+- So camera order is DCF order (`internal/dcf`): the DCF folder number (`100LEICA`; it
+  increments when the counter wraps past 9999) when every frame's is known, then the
+  4-digit counter, then the name. Capture times can't stand in (the clock wasn't running).
+  For a single-prefix shoot it equals name order.
+- Not yet checked: what the M11-P does at a wrap (folder number, prefix), and whether
+  other bodies share a counter across prefixes.
 
 ### Junk filter (2026-10-02, the 992 frames copied to Grey and the 17 samples)
 

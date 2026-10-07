@@ -34,7 +34,10 @@ type prepared struct {
 // prepareFrame reads the preview, EXIF and raw clipping and decodes the frame. On
 // error the result already records the failure.
 func prepareFrame(cfg Config, path string) (*prepared, error) {
-	p := &prepared{res: report.Result{File: path, DatesSet: cfg.datesSet[path]}}
+	p := &prepared{res: report.Result{File: path}}
+	if e, ok := cfg.manifested[path]; ok {
+		p.res.DatesSet, p.res.CardName = e.DatesSet, e.CardName()
+	}
 	res := &p.res
 	if st, err := os.Stat(path); err == nil {
 		res.Size, res.ModTime = st.Size(), st.ModTime()

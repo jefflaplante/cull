@@ -201,7 +201,13 @@ Every step, with its full output and screenshots of the live progress view, is i
 - **`--rename "{date}_{name}_{n:4}"`** renames as it copies. Tokens: `{date}` (YYYYMMDD),
   `{name}`, `{orig}` (camera name), `{n}` and `{n:W}`. The counter continues from the
   folder's largest number, so a second card carries on from the first. Frames are
-  numbered in camera file order, not by capture time.
+  numbered in camera order, not by capture time or by name.
+- **Camera order is the camera's file counter:** the last 4 digits of a name such as
+  `M1103127`, then the card folder's number (`100LEICA`) when the counter wraps past
+  9999. The letters before it don't count: an M11-P numbers its `M…` frames and its
+  `L…` (Content Credentials) frames from one counter, so `M1102771` comes before
+  `L1002772`, where sorting by name would put every `L` first. Names of another shape
+  follow, by name. `--split-at` and grouping into sets use the same order.
 - **Speed (measured on an M11-P card over USB):** the card reads at about 260 MB/s. A
   992-frame, 67.7 GB card went to a USB SSD in 8 minutes, every file verified; to the
   Mac's SSD, the measured 235 MB/s below would take about 5 minutes.
@@ -344,8 +350,8 @@ cull rename --undo "$S"                            # put the old names back
   - `{orig}`: the camera's name, such as `M1103817`;
   - `{n}` and `{n:4}`: a counter, plain or zero-padded.
 
-  A pattern needs `{n}` or `{orig}`. Frames are numbered in camera order (the card's
-  names), never by capture time.
+  A pattern needs `{n}` or `{orig}`. Frames are numbered in camera order (the counter
+  in the card's names, as offload's manifest records them), never by capture time.
 - **Before or after judging.** Frames sorted into `keep/`, `review/` and `cull/` are renamed
   where they are.
 - **Everything follows the file:** its sidecar, the report, your labels, the offload
@@ -363,10 +369,11 @@ cull rename --undo "$S"                            # put the old names back
   names back; until then the commands that read or change its frames refuse the folder.
   `--undo` also reverses the last finished rename.
 - **A pattern that changes the frames' order is refused.** Frames with the same capture
-  time (every frame, with a stopped clock) are grouped into sets in name order. An
-  unpadded `{n}` sorts `10` before `2`, so the sets would regroup and `judge` would rank
-  them again, which costs model calls. The refusal suggests `{n:4}`; `--reorder` goes
-  ahead anyway.
+  time (every frame, with a stopped clock) are grouped into sets in camera order: by the
+  card names offload's manifest records, which no rename changes. Frames no manifest
+  records (copied in by hand) go by their names now: there an unpadded `{n}` sorts `10`
+  before `2`, so the sets would regroup and `judge` would rank them again, which costs
+  model calls. The refusal suggests `{n:4}`; `--reorder` goes ahead anyway.
 - **Files that share a frame's name aren't moved, so they refuse the rename:** a camera
   JPG beside the DNG, darktable's `M1103817.DNG.xmp`, Capture One's settings in
   `CaptureOne/Settings*/M1103817.DNG.cos`. Moving them along isn't built yet; move them out
@@ -562,8 +569,9 @@ For each DNG:
 Similar frames (the same subject or scene over seconds to minutes) are grouped into
 **sets**. Each set is ranked by one side-by-side model call, and Go keeps the best few.
 
-**Grouping.** Frames are ordered by capture time, then file name. A frame joins the
-previous frame's set when both hold:
+**Grouping.** Frames are ordered by capture time, then in camera order (the file
+counter of the card name the offload manifest records, else of the name now). A frame
+joins the previous frame's set when both hold:
 
 - **Time:** it was taken within `--seq-gap` (default 60 s) of the previous frame. The
   gap is ignored when either frame has no capture time. `--seq-gap 0` turns grouping

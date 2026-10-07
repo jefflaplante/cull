@@ -145,8 +145,9 @@ func (r *ranker) Call(ctx context.Context, req llm.Request) (*llm.Response, erro
 	return r.counting.Call(ctx, req)
 }
 
-// rankedShoot is 12 frames with equal capture times, judged and ranked in sets.
-func rankedShoot(t *testing.T) (string, *ranker, pipeline.Config) {
+// rankedShoot is 12 frames with equal capture times, judged and ranked in sets:
+// offloaded (the manifest records their card names), or copied in loose (none does).
+func rankedShoot(t *testing.T, offloaded bool) (string, *ranker, pipeline.Config) {
 	t.Helper()
 	// Sets {L01, L02} and {L11, L12}; with "{n}" the order becomes s_1 s_10 s_11 s_12 s_2 …
 	looks := []int{0, 0, 2, 1, 2, 1, 2, 1, 2, 0, 1, 1}
@@ -156,9 +157,15 @@ func rankedShoot(t *testing.T) (string, *ranker, pipeline.Config) {
 		fx.Preview = lookJPEG(k)
 		files[fmt.Sprintf("L%02d.DNG", i+1)] = fx
 	}
-	c, dest := t.TempDir(), t.TempDir()
-	card(t, c, files)
-	dir := offloadCard(t, c, dest)
+	var dir string
+	if offloaded {
+		c, dest := t.TempDir(), t.TempDir()
+		card(t, c, files)
+		dir = offloadCard(t, c, dest)
+	} else {
+		dir = filepath.Join(t.TempDir(), "2026-10-02 test")
+		loose(t, dir, files)
+	}
 	b := &ranker{}
 	cfg := judgeCfg(dir)
 	cfg.Resume, cfg.Rank = true, true
@@ -183,19 +190,30 @@ func calls(t *testing.T, b *ranker, cfg pipeline.Config) int32 {
 }
 
 // IMPORTANT 1: with ranking on, a rename that keeps the frames' order (`{n:2}`) costs
-// judge no calls. One that changes it (`{n}` with 12 frames sorts 10 before 2) is
-// refused, naming the cause, in a dry run too; with Reorder it goes ahead and says how
-// many sets change.
+// judge no calls. Frames a manifest records keep their card names' camera order
+// whatever they're called, so even `{n}` (12 frames: 10 sorts before 2) costs none.
+// Frames no manifest records are ordered by their names: there `{n}` changes the
+// order and is refused, naming the cause, in a dry run too; with Reorder it goes
+// ahead and says how many sets change.
 func TestAdvRankReorder(t *testing.T) {
-	t.Run("padded", func(t *testing.T) {
-		dir, b, cfg := rankedShoot(t)
-		runRename(t, rename.Options{Dir: dir, Pattern: "s_{n:2}"})
+	for _, offloaded := range []bool{true, false} {
+		t.Run(fmt.Sprintf("padded offloaded=%v", offloaded), func(t *testing.T) {
+			dir, b, cfg := rankedShoot(t, offloaded)
+			runRename(t, rename.Options{Dir: dir, Pattern: "s_{n:2}"})
+			if n := calls(t, b, cfg); n != 0 {
+				t.Fatalf("judge (ranking on) after the rename made %d calls", n)
+			}
+		})
+	}
+	t.Run("unpadded offloaded", func(t *testing.T) {
+		dir, b, cfg := rankedShoot(t, true)
+		runRename(t, rename.Options{Dir: dir, Pattern: "s_{n}"})
 		if n := calls(t, b, cfg); n != 0 {
 			t.Fatalf("judge (ranking on) after the rename made %d calls", n)
 		}
 	})
-	t.Run("unpadded", func(t *testing.T) {
-		dir, _, _ := rankedShoot(t)
+	t.Run("unpadded loose", func(t *testing.T) {
+		dir, _, _ := rankedShoot(t, false)
 		before := snapshot(t, dir)
 		for _, dry := range []bool{true, false} {
 			_, err := rename.Run(context.Background(), rename.Options{Dir: dir, Pattern: "s_{n}", DryRun: dry})

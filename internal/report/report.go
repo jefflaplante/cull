@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jefflaplante/cull/internal/dcf"
 	"github.com/jefflaplante/cull/internal/dng"
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/group"
@@ -147,7 +148,12 @@ type Result struct {
 	// DatesSet is the capture date set on the file (offload --set-date, redate), local
 	// "2006-01-02T15:04:05", from the shoot folder's offload manifest. The sidecar uses
 	// it over Exif: a Content Credentials frame keeps its camera dates in the file.
-	DatesSet    string           `json:"dates_set,omitempty"`
+	DatesSet string `json:"dates_set,omitempty"`
+	// CardName is the frame's name on the card with its card folder,
+	// "100LEICA/M1103127.DNG", from the shoot folder's offload manifest; "" when no
+	// manifest records the frame. It is the frame's place in camera order (see
+	// CameraName), and a rename leaves it as it is.
+	CardName    string           `json:"card_name,omitempty"`
 	Stats       *imageprep.Stats `json:"stats,omitempty"`
 	FocusTarget *FocusTarget     `json:"focus_target,omitempty"`
 	Look        string           `json:"look,omitempty"` // look fingerprint (imageprep Grid), base64
@@ -166,6 +172,28 @@ type Result struct {
 	MovedTo     string           `json:"moved_to,omitempty"`    // set by --sort; cleared by restore
 	Junk        *JunkInfo        `json:"junk,omitempty"`        // an unmistakably empty frame (see imageprep.Junk)
 	Error       string           `json:"error,omitempty"`
+}
+
+// CameraName is the frame's place in camera order: the card name the manifest
+// recorded, else the name the file has now (a sort folder's frame: its home name).
+func (r Result) CameraName() dcf.Name {
+	if r.CardName != "" {
+		return dcf.Of(r.CardName)
+	}
+	return dcf.Of(filepath.Base(r.File))
+}
+
+// GroupFrame is the frame as sequence grouping sees it (no Score): judge and decide
+// group with it, and rename checks a new name's effect with it.
+func (r Result) GroupFrame() group.Frame {
+	f := group.Frame{Key: r.File, Name: r.CameraName()}
+	if r.Exif != nil {
+		f.Time, f.HasTime = r.Exif.CaptureTime()
+	}
+	if look, ok := r.LookBytes(); ok {
+		f.Look = look
+	}
+	return f
 }
 
 // Key identifies a file version for resume: same path+size+mtime = already done.

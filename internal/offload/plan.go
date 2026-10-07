@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jefflaplante/cull/internal/dcf"
 	"github.com/jefflaplante/cull/internal/dng"
 	"github.com/jefflaplante/cull/internal/journal"
 	"github.com/jefflaplante/cull/internal/ui"
@@ -185,7 +186,7 @@ func planEvent(o Options, files []File, n int) (*Plan, error) {
 	return p, nil
 }
 
-// partition splits the scanned files into events, each in camera-name order.
+// partition splits the scanned files into events, each in camera order.
 func partition(files []File, o Options) ([][]File, error) {
 	switch {
 	case len(o.SplitAt) > 0:
@@ -194,7 +195,7 @@ func partition(files []File, o Options) ([][]File, error) {
 			starts[stem(n)] = true
 		}
 		var events [][]File
-		for i, f := range files { // files are in camera-name order
+		for i, f := range files { // files are in camera order
 			if i == 0 || starts[stem(f.Src)] {
 				events = append(events, nil)
 			}
@@ -232,7 +233,7 @@ func partition(files []File, o Options) ([][]File, error) {
 			events[len(events)-1] = append(events[len(events)-1], f)
 		}
 		for _, ev := range events {
-			sort.Slice(ev, func(i, j int) bool { return lessByName(ev[i], ev[j]) })
+			cameraOrder(ev)
 		}
 		return events, nil
 	}
@@ -360,17 +361,35 @@ func scan(sources []string, s ui.Sink) ([]File, error) {
 			return nil, err
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return lessByName(out[i], out[j]) })
+	cameraOrder(out)
 	return out, nil
 }
 
-// lessByName is camera order: by file name, then full path.
-func lessByName(a, b File) bool {
-	ba, bb := filepath.Base(a.Src), filepath.Base(b.Src)
-	if ba != bb {
-		return ba < bb
+// cameraOrder sorts files in camera order (dcf: the DCF folder and file counter,
+// so an M11-P's M… and L… frames, numbered from one counter, interleave as shot),
+// then by full path.
+func cameraOrder(files []File) {
+	names := make([]dcf.Name, len(files))
+	for i, f := range files {
+		names[i] = dcf.Of(f.Src)
 	}
-	return a.Src < b.Src
+	dcf.Unify(names)
+	idx := make([]int, len(files))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.Slice(idx, func(a, b int) bool {
+		ia, ib := idx[a], idx[b]
+		if c := dcf.Compare(names[ia], names[ib]); c != 0 {
+			return c < 0
+		}
+		return files[ia].Src < files[ib].Src
+	})
+	sorted := make([]File, len(files))
+	for k, i := range idx {
+		sorted[k] = files[i]
+	}
+	copy(files, sorted)
 }
 
 func (p *Plan) date(o Options) error {

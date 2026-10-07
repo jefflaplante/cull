@@ -449,9 +449,11 @@ cull rename --undo "Pictures/2025-12-28 Forest portraits"
   and the review sheet. Sorted frames are renamed where they are.
 - **Nothing moves until the whole plan is checked.** A clash, a name that's already taken
   or a file it can't move stops it, naming the files.
-- **Pad the counter** (`{n:4}`, not `{n}`): an unpadded one sorts `10` before `2`, which
-  would regroup the sets and cost ranking calls. rename refuses such a pattern unless you
-  add `--reorder`.
+- **Frames are numbered in camera order:** by the camera's file counter, so an M11-P's
+  `M…` and `L…` (Content Credentials) frames stay in the order they were shot.
+- **Pad the counter** (`{n:4}`, not `{n}`): for frames offload didn't copy, an unpadded
+  one sorts `10` before `2`, which would regroup the sets and cost ranking calls. rename
+  refuses such a pattern unless you add `--reorder`.
 - **JPG pairs and other files named after a frame** (darktable's `.DNG.xmp`, Capture One's
   `.cos` settings) stop the rename: it moves only the DNG and its `.xmp` sidecar.
 - **`--undo`** puts the names back, or finishes putting them back after an interruption.

@@ -50,6 +50,9 @@ type Result struct {
 	Refusals   []string // "<name>: <why>"
 	Skipped    []string // "<name>: <field>": values left alone (unparseable, or a length change)
 	Signed     []string // Content Credentials frames: their bytes and signed dates unchanged
+	// Orphans are hidden redate temps left alone that may be a frame's only copy (their
+	// file is missing, or isn't what the journal recorded): the user decides.
+	Orphans []string
 	// CrtimeFailed counts files whose creation time couldn't be set (best effort).
 	CrtimeFailed int
 }
@@ -82,7 +85,6 @@ type run struct {
 	unsaved                    []string                            // recorded since the last checkpoint
 	dirty                      bool                                // the report changed since the last save
 	manDirty                   map[string]bool                     // shoot folders whose manifest grew since the last checkpoint
-	orphans                    int                                 // temps left alone that may be a file's only copy
 	xattrNoted                 map[string]bool                     // extended-attribute failures noted, by kind
 	warned                     bool                                // the catalogue warning was given
 }
@@ -229,8 +231,10 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		}
 		switch {
 		case runErr != nil:
-		case len(r.j.Files) > 0 || r.orphans > 0: // journalled and not finished, or a temp left alone
-			r.warn("%d file(s) may be half done: run the same redate again to finish them", max(len(r.j.Files), r.orphans))
+		case len(r.res.Orphans) > 0: // a re-run can't settle them: the user decides
+			r.warn("%d hidden temp file(s) left alone may be a frame's only copy: deal with each as said above; until then the journal stays, and redate finishes the run once they're settled", len(r.res.Orphans))
+		case len(r.j.Files) > 0: // journalled and not finished
+			r.warn("%d file(s) may be half done: run the same redate again to finish them", len(r.j.Files))
 		default:
 			r.traced("journal remove")
 			if err := journal.RemoveRedate(dir); err != nil {
@@ -271,7 +275,7 @@ func (r *run) file(p string) error {
 		return nil
 	}
 	when := r.o.Target.Format(time.DateTime)
-	if len(ps) == 0 && st.ModTime().Equal(r.o.Target) {
+	if len(ps) == 0 && r.isTarget(st.ModTime()) {
 		r.res.AlreadySet++
 		if r.o.DryRun {
 			r.say("%s: already set", rel)
@@ -296,19 +300,21 @@ func (r *run) file(p string) error {
 
 	pre := journal.FileState{Size: st.Size(), ModTime: st.ModTime()}
 	if len(ps) == 0 {
-		// Its bytes don't change, but a recorded file is still proven first: a damaged
-		// frame is refused and left exactly as it is, as a patched one would be.
-		if recorded {
-			w, err := hex.DecodeString(e.CurrentSHA256())
-			if err == nil && len(w) == 32 {
-				err = offload.ProveFrom(r.ctx, p, [32]byte(w))
+		// Its bytes don't change, but it is still proven first, so a damaged frame is
+		// refused and left exactly as it is, as a patched one would be: against the
+		// journal when an earlier run of this redate swapped it in (its mtime didn't
+		// stick), else against its manifest.
+		want := ""
+		rec, journaled := r.j.Files[rel]
+		switch {
+		case journaled && rec.Want != "":
+			if why, err := r.prove(p, rec.Want, "the journal's", "its dates are set, but it isn't the file redate wrote"); err != nil || why != "" {
+				return r.refused(rel, why, err)
 			}
-			if err != nil {
-				if r.ctx.Err() != nil {
-					return r.ctx.Err()
-				}
-				r.refuse(rel, offload.ErrChanged.Error())
-				return nil
+			pre, want = rec, rec.Want // the report follows from the original's key
+		case recorded:
+			if why, err := r.prove(p, e.CurrentSHA256(), "its manifest", offload.ErrChanged.Error()); err != nil || why != "" {
+				return r.refused(rel, why, err)
 			}
 		}
 		r.changing()
@@ -317,15 +323,17 @@ func (r *run) file(p string) error {
 			return err
 		}
 		crErr, err := offload.SetFileTimes(p, r.o.Target)
-		if err != nil { // the mtime didn't change: nothing to finish
-			delete(r.j.Files, rel)
+		if err != nil { // the mtime didn't change: nothing more to finish than before
+			if rec, ok := r.j.Files[rel]; ok && rec.Want == "" {
+				delete(r.j.Files, rel)
+			}
 			r.refuse(rel, "its times can't be set: "+err.Error())
 			return nil
 		}
 		r.crtime(crErr)
 		r.res.TimesOnly++
 		r.verbose("%s: file times → %s", rel, when)
-		return r.record(p, rel, pre, folder, e, recorded, "")
+		return r.record(p, rel, pre, folder, e, recorded, want)
 	}
 	expect := ""
 	if recorded {
@@ -339,12 +347,17 @@ func (r *run) file(p string) error {
 		journalErr = r.saveJournal()
 		return journalErr
 	})
-	if err != nil && !rp.Swapped { // the original is untouched: nothing to finish
+	if err != nil && !rp.Swapped && !rp.TempKept { // the original is untouched: nothing to finish
 		delete(r.j.Files, rel)
 	}
 	switch {
 	case journalErr != nil:
 		return journalErr
+	case err != nil && rp.TempKept: // the original's name went before the swap failed
+		r.res.Refused++
+		r.res.Refusals = append(r.res.Refusals, rel+": replacement interrupted ("+err.Error()+"): run redate again to restore it")
+		r.warn("%s: replacement interrupted — run redate again to restore it from its proven temp (%v)", rel, err)
+		return nil
 	case errors.Is(err, offload.ErrChanged):
 		r.refuse(rel, err.Error())
 		return nil
@@ -406,31 +419,13 @@ func (r *run) recover(p, rel string, st os.FileInfo, folder string, e offload.En
 	want := ""
 	switch {
 	case journaled && fs.Want != "":
-		w, err := hex.DecodeString(fs.Want)
-		if err != nil || len(w) != 32 {
-			r.refuse(rel, "the journal's checksum for it can't be read")
-			return nil
-		}
-		if err := offload.ProveFrom(r.ctx, p, [32]byte(w)); err != nil {
-			if r.ctx.Err() != nil {
-				return r.ctx.Err()
-			}
-			r.refuse(rel, "its dates are set, but it isn't the file redate wrote: "+err.Error())
-			return nil
+		if why, err := r.prove(p, fs.Want, "the journal's", "its dates are set, but it isn't the file redate wrote"); err != nil || why != "" {
+			return r.refused(rel, why, err)
 		}
 		want = fs.Want
 	case needMan:
-		w, err := hex.DecodeString(e.CurrentSHA256())
-		if err != nil || len(w) != 32 {
-			r.refuse(rel, "its manifest checksum can't be read")
-			return nil
-		}
-		if err := offload.ProveFrom(r.ctx, p, [32]byte(w)); err != nil {
-			if r.ctx.Err() != nil {
-				return r.ctx.Err()
-			}
-			r.refuse(rel, offload.ErrChanged.Error())
-			return nil
+		if why, err := r.prove(p, e.CurrentSHA256(), "its manifest", offload.ErrChanged.Error()); err != nil || why != "" {
+			return r.refused(rel, why, err)
 		}
 	}
 	if needMan {
@@ -627,40 +622,55 @@ func listDNGs(folders []string) ([]string, error) {
 	return out, nil
 }
 
-// settleTemps deals with the redate temps a crash left in folder d. One beside its file
-// is a swap that never happened: removed. One whose file is missing may be that file's
-// only copy (a rename-over that deletes first, interrupted): if the journal records the
-// file and the temp proves against its patched checksum, it takes the file's name;
-// otherwise it is left alone and the journal stays. A dry run only says so.
+// settleTemps deals with the redate temps a crash left in folder d.
+//   - Beside its file: a swap that never happened, removed. When the journal records
+//     the file, only once the file proves to be what it recorded (before or after the
+//     patches); otherwise both stay, and the user is told.
+//   - Its file missing: it may be that file's only copy (a rename-over that deletes
+//     first, interrupted). If the journal records the file and the temp proves against
+//     its patched checksum, it takes the file's name; otherwise it is left alone, and the
+//     user is told how to put it back.
+//
+// A dry run changes nothing.
 func (r *run) settleTemps(d string) error {
 	for tmp, target := range offload.RedateTemps(d) {
 		rel, _ := filepath.Rel(r.dir, target)
-		if _, err := os.Lstat(target); err == nil {
-			if !r.o.DryRun {
-				os.Remove(tmp)
-			}
-			continue
-		}
 		var rec journal.FileState
-		ok := false
+		journaled := false
 		if r.j != nil {
-			rec, ok = r.j.Files[rel]
+			rec, journaled = r.j.Files[rel]
 		}
-		if r.o.DryRun || !ok || rec.Want == "" {
-			r.orphans++
-			r.warn("%s is missing, and %s may be its only copy: left alone (move it back to %s if it is the frame)", rel, filepath.Base(tmp), filepath.Base(target))
+		if _, err := os.Lstat(target); err == nil {
+			if r.o.DryRun {
+				continue
+			}
+			if journaled {
+				sum, err := offload.HashFromDisk(r.ctx, target)
+				if err != nil {
+					if r.ctx.Err() != nil {
+						return r.ctx.Err()
+					}
+					r.orphan(tmp, target, fmt.Sprintf("%s can't be read to check it against the journal (%v)", rel, err))
+					continue
+				}
+				if h := hex.EncodeToString(sum[:]); h != rec.Orig && h != rec.Want {
+					r.orphan(tmp, target, rel+" isn't what the journal recorded, before or after its patches")
+					continue
+				}
+			}
+			os.Remove(tmp)
 			continue
 		}
-		w, err := hex.DecodeString(rec.Want)
-		if err == nil && len(w) == 32 {
-			err = offload.ProveFrom(r.ctx, tmp, [32]byte(w))
+		if r.o.DryRun || !journaled || rec.Want == "" {
+			r.orphan(tmp, target, rel+" is missing")
+			continue
 		}
+		why, err := r.prove(tmp, rec.Want, "the journal's", "it isn't what redate wrote")
 		if err != nil {
-			if r.ctx.Err() != nil {
-				return r.ctx.Err()
-			}
-			r.orphans++
-			r.warn("%s is missing, and %s doesn't prove against what redate wrote (%v): left alone", rel, filepath.Base(tmp), err)
+			return err
+		}
+		if why != "" {
+			r.orphan(tmp, target, rel+" is missing, and the temp doesn't prove: "+why)
 			continue
 		}
 		if err := offload.Adopt(tmp, target); err != nil {
@@ -669,6 +679,55 @@ func (r *run) settleTemps(d string) error {
 		r.warn("%s: restored from its proven temp (an interrupted swap)", rel)
 	}
 	return nil
+}
+
+// orphan reports a redate temp left alone: it may be a frame's only copy.
+func (r *run) orphan(tmp, target, why string) {
+	r.res.Orphans = append(r.res.Orphans, tmp)
+	if _, err := os.Lstat(target); err == nil {
+		r.warn("%s; the hidden temp %s was left alone: compare the two and keep the frame (delete the other)", why, tmp)
+		return
+	}
+	r.warn("%s; the hidden temp %s may be its only copy. If it is the frame, put it back with: mv %s %s (if it isn't, delete it)",
+		why, tmp, journal.ShellQuote(tmp), journal.ShellQuote(target))
+}
+
+// prove checks p's bytes, read from the disk, against sum (hex; whose names its
+// source, e.g. "its manifest"). It returns the refusal ("" when p matches): mismatch
+// for different bytes, or a read error with retry advice. err is a cancellation.
+func (r *run) prove(p, sum, whose, mismatch string) (why string, err error) {
+	w, derr := hex.DecodeString(sum)
+	if derr != nil || len(w) != 32 {
+		return whose + " checksum can't be read", nil
+	}
+	switch perr := offload.ProveFrom(r.ctx, p, [32]byte(w)); {
+	case perr == nil:
+		return "", nil
+	case r.ctx.Err() != nil:
+		return "", r.ctx.Err()
+	case errors.Is(perr, offload.ErrNotProven):
+		return mismatch, nil
+	default:
+		return fmt.Sprintf("it can't be read to check it (%v); run redate again", perr), nil
+	}
+}
+
+// refused is prove's outcome as file's: a refusal (nil), or the cancellation.
+func (r *run) refused(rel, why string, err error) error {
+	if err != nil {
+		return err
+	}
+	r.refuse(rel, why)
+	return nil
+}
+
+// isTarget reports a modification time that is the target, within FAT's 2 s
+// resolution: FAT32 stores an odd second rounded, and every run would otherwise set
+// those frames' times again. (On a finer filesystem a frame within 2 s of the target
+// counts as set too.)
+func (r *run) isTarget(m time.Time) bool {
+	d := m.Sub(r.o.Target)
+	return d >= -2*time.Second && d <= 2*time.Second
 }
 
 // folderShoot is the folder whose manifest records the files in d: d, or the one

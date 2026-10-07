@@ -239,7 +239,8 @@ func currentEntries(t *testing.T, dir string) map[string]offload.Entry {
 func noTemps(t *testing.T, dir string) {
 	t.Helper()
 	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err == nil && strings.HasSuffix(d.Name(), ".tmp") {
+		// Offload's ".tmp" temps, redate's ".redate" ones, the journal's and the report's.
+		if err == nil && strings.HasPrefix(d.Name(), ".") && (strings.Contains(d.Name(), ".cull-") || strings.HasSuffix(d.Name(), ".tmp")) {
 			t.Errorf("temp left behind: %s", p)
 		}
 		return nil

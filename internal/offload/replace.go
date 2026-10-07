@@ -29,6 +29,9 @@ type Replaced struct {
 	// Swapped: the proven temp was renamed over the original. False with an error means
 	// the original is untouched.
 	Swapped bool
+	// TempKept: the swap failed after the original's name was gone (a rename-over that
+	// deletes first), so the proven temp was kept: it may be the only copy.
+	TempKept bool
 }
 
 // RedateTempExt ends ReplacePatched's temps (".<name>.cull-<rand>.redate"): distinct from
@@ -82,8 +85,10 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 		if r.Swapped {
 			return
 		}
-		if _, err := os.Lstat(path); err == nil { // never the only copy
+		if _, err := os.Lstat(path); err == nil {
 			os.Remove(tmp.Name())
+		} else { // never the only copy
+			r.TempKept = true
 		}
 	}()
 	r.Orig, r.Want, err = streamPatched(ctx, in, ps, tmp)
@@ -101,8 +106,9 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 			return r, err
 		}
 	}
-	_ = tmp.Chmod(st.Mode().Perm()) // best effort: exFAT and some shares refuse modes
+	// Attributes first: once the temp takes a read-only original's mode, some can't be set.
 	r.XattrErrs = copyXattrs(in, tmp)
+	_ = tmp.Chmod(st.Mode().Perm()) // best effort: exFAT and some shares refuse modes
 	// The times go on before the flush, with nothing written after them.
 	if r.CrtimeErr, err = setFileTimesFn(tmp.Name(), t); err != nil {
 		return r, err
@@ -120,7 +126,7 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 	if now, err := os.Lstat(path); err != nil || now.Size() != st.Size() || !now.ModTime().Equal(st.ModTime()) || !os.SameFile(now, st) {
 		return r, fmt.Errorf("%s changed while it was being fixed; not replaced", path)
 	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	if err := renameFn(tmp.Name(), path); err != nil {
 		return r, err
 	}
 	r.Swapped = true
@@ -130,13 +136,15 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 	return r, nil
 }
 
-// RedateTemps lists dir's redate temps, each with the path it was to replace.
+// RedateTemps lists dir's redate temps, each with the path it was to replace. Names
+// are matched one by one (not by a glob on the path: a folder may be named
+// "trip [day 1]").
 func RedateTemps(dir string) map[string]string {
 	out := map[string]string{}
-	ms, _ := filepath.Glob(filepath.Join(dir, ".*.cull-*"+RedateTempExt))
-	for _, m := range ms {
-		if sm := redateTempRE.FindStringSubmatch(filepath.Base(m)); sm != nil {
-			out[m] = filepath.Join(dir, sm[1])
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if sm := redateTempRE.FindStringSubmatch(e.Name()); sm != nil && e.Type().IsRegular() {
+			out[filepath.Join(dir, e.Name())] = filepath.Join(dir, sm[1])
 		}
 	}
 	return out
@@ -168,6 +176,10 @@ func Flush(path string) error {
 // creation time: crtimeErr reports a creation-time failure, err a mtime failure.
 func SetFileTimes(path string, t time.Time) (crtimeErr, err error) { return setFileTimesFn(path, t) }
 
+// HashFromDisk drops path from the page cache, checks it's gone, and hashes it from the
+// device.
+func HashFromDisk(ctx context.Context, path string) ([32]byte, error) { return hashFromDisk(ctx, path) }
+
 // ProveFrom drops path from the page cache, re-reads it from the device, and requires
 // its SHA-256 to equal want.
 func ProveFrom(ctx context.Context, path string, want [32]byte) error {
@@ -178,8 +190,23 @@ func ProveFrom(ctx context.Context, path string, want [32]byte) error {
 // left in dir: never a file's only copy, since a copy takes its name (by link, never
 // replacing) only once proven. Redate's temps (RedateTempExt) are never touched here.
 func RemoveStaleTemps(dir string) {
-	stale, _ := filepath.Glob(filepath.Join(dir, ".*.cull-*.tmp"))
-	for _, s := range stale {
-		os.Remove(s)
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if offloadTempRE.MatchString(e.Name()) && e.Type().IsRegular() {
+			os.Remove(filepath.Join(dir, e.Name()))
+		}
 	}
+}
+
+// offloadTempRE matches createTemp's names, as the glob ".*.cull-*.tmp" did.
+var offloadTempRE = regexp.MustCompile(`^\..*\.cull-.*\.tmp$`)
+
+// renameFn is the swap's rename(2); SetRenameHook replaces it in tests.
+var renameFn = os.Rename
+
+// SetRenameHook is a test seam: f replaces the rename(2) that swaps a proven temp in
+// (to act out a filesystem whose rename-over fails half way). restore puts it back.
+func SetRenameHook(f func(old, new string) error) (restore func()) {
+	renameFn = f
+	return func() { renameFn = os.Rename }
 }

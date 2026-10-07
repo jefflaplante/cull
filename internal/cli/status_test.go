@@ -270,3 +270,15 @@ func TestStatusRankBatchPointsAtJudge(t *testing.T) {
 		t.Fatalf("%s", out)
 	}
 }
+
+// status names a hidden redate temp that may be a frame's only copy, with the command
+// that puts it back.
+func TestStatusOrphanTemp(t *testing.T) {
+	dir := statusShoot(t)
+	tmp := filepath.Join(dir, ".L9.DNG.cull-deadbeef.redate")
+	os.WriteFile(tmp, []byte("x"), 0o644)
+	out, err := run(t, "status", dir)
+	if err != nil || !strings.Contains(out, "next: mv "+shellQuote(tmp)+" "+shellQuote(filepath.Join(dir, "L9.DNG"))) {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}

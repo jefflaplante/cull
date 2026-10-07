@@ -214,3 +214,30 @@ func TestRemoveStaleTempsSparesRedate(t *testing.T) {
 		t.Fatal("redate temp removed")
 	}
 }
+
+// Folder names with glob characters: both sweeps find their temps by name.
+func TestTempsInGlobFolder(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "2026-10-02 trip [day 1] *?")
+	os.Mkdir(dir, 0o755)
+	mine, theirs := filepath.Join(dir, ".A.DNG.cull-01020304.tmp"), filepath.Join(dir, ".A.DNG.cull-01020304.redate")
+	os.WriteFile(mine, nil, 0o644)
+	os.WriteFile(theirs, nil, 0o644)
+	if got := RedateTemps(dir); got[theirs] != filepath.Join(dir, "A.DNG") || len(got) != 1 {
+		t.Fatalf("redate temps %v", got)
+	}
+	RemoveStaleTemps(dir)
+	if _, err := os.Stat(mine); !os.IsNotExist(err) {
+		t.Fatal("offload temp kept")
+	}
+}
+
+// The swap reports that it kept its temp because the original's name is gone.
+func TestReplacePatchedTempKept(t *testing.T) {
+	path, _, ps := replaceFixture(t)
+	restore := SetRenameHook(func(old, new string) error { os.Remove(new); return syscall.EIO })
+	defer restore()
+	r, err := ReplacePatched(context.Background(), path, ps, "", setTarget, nil)
+	if err == nil || r.Swapped || !r.TempKept {
+		t.Fatalf("%+v %v", r, err)
+	}
+}

@@ -66,6 +66,9 @@ Lightroom may lose track of frames already imported.`,
 				}
 				return err
 			}
+			if len(res.Orphans) > 0 {
+				return fmt.Errorf("%d hidden temp file(s) need you (see the warnings above); cull status lists them", len(res.Orphans))
+			}
 			if res.Refused > 0 {
 				return fmt.Errorf("%d file(s) refused, left as they are", res.Refused)
 			}

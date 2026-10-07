@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"github.com/jefflaplante/cull/internal/journal"
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/llm"
+	"github.com/jefflaplante/cull/internal/offload"
 	"github.com/jefflaplante/cull/internal/pipeline"
 	"github.com/jefflaplante/cull/internal/report"
 )
@@ -65,14 +67,34 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 		dir = "-o " + shellQuote(cfg.ReportPath) + " " + dir // suggested commands keep the same report
 	}
 	which, finish, unfinished := journal.Incomplete(cfg.Dir)
+	// A hidden redate temp whose frame is missing may be that frame's only copy: the
+	// user puts it back (or deletes it if it isn't the frame) before anything else.
+	orphanNext, missing := "", []string(nil)
+	for _, d := range append([]string{cfg.Dir}, placeDirsIn(cfg.Dir)...) {
+		for tmp, target := range offload.RedateTemps(d) {
+			if _, err := os.Lstat(target); err == nil {
+				continue // beside its frame: the next redate settles it
+			}
+			if orphanNext == "" {
+				orphanNext = "mv " + shellQuote(tmp) + " " + shellQuote(target) + "   (if it is the frame; if it isn't, delete it)"
+			}
+			missing = append(missing, fmt.Sprintf("  missing: %s; the hidden temp %s may be its only copy\n", filepath.Base(target), tmp))
+		}
+	}
 	pending := func() {
-		fmt.Fprintf(w, "  unfinished: a %s (cull-%s.json); judge, decide and review refuse until it's finished\n", which, which)
+		for _, m := range missing {
+			fmt.Fprint(w, m)
+		}
+		if !unfinished {
+			return
+		}
+		fmt.Fprintf(w, "  unfinished: a %s (cull-%s.json); judge, decide, review and restore refuse until it's finished\n", which, which)
 	}
 	if rep == nil {
 		fmt.Fprintf(w, "%s: %d DNGs; no report at %s\n", cfg.Dir, len(files), cfg.ReportPath)
-		if unfinished {
+		if orphanNext != "" || unfinished {
 			pending()
-			fmt.Fprintf(w, "next: %s\n", finish)
+			fmt.Fprintf(w, "next: %s\n", cmp.Or(orphanNext, finish))
 			return
 		}
 		fmt.Fprintf(w, "next: cull scan %s   (free), or cull judge --estimate %s\n", dir, dir)
@@ -177,12 +199,12 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 		fmt.Fprintf(w, "  pending: a ranking batch (%s.rank-batch.json)\n", filepath.Base(cfg.ReportPath))
 	}
 
-	if unfinished {
-		pending()
-	}
+	pending()
 
 	var next string
 	switch {
+	case orphanNext != "":
+		next = orphanNext
 	case unfinished:
 		next = finish
 	case judgeBatch:
@@ -214,3 +236,12 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 func shellQuote(s string) string { return journal.ShellQuote(s) }
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// placeDirsIn are dir's sort folders, where frames (and redate temps) may also be.
+func placeDirsIn(dir string) []string {
+	var out []string
+	for _, d := range offload.MovedDirs {
+		out = append(out, filepath.Join(dir, d))
+	}
+	return out
+}

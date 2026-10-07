@@ -135,6 +135,9 @@ func applyPatches(path string, ps []dng.Patch) error {
 	return f.Close()
 }
 
+// ErrNotProven is a proof whose re-read hash differs (as opposed to a read error).
+var ErrNotProven = errors.New("read back from disk, it isn't the expected bytes (the source with exactly its date patches applied)")
+
 // proveFrom evicts path from the page cache, re-reads it from the device and
 // requires its SHA-256 to equal want (the existing dropCache + hashUncached path).
 func proveFrom(ctx context.Context, path string, want [32]byte) error {
@@ -143,7 +146,7 @@ func proveFrom(ctx context.Context, path string, want [32]byte) error {
 		return fmt.Errorf("prove %s: %w", path, err)
 	}
 	if got != want {
-		return fmt.Errorf("prove %s: read back from disk, it isn't the source with exactly its date patches applied", path)
+		return fmt.Errorf("prove %s: %w", path, ErrNotProven)
 	}
 	return nil
 }

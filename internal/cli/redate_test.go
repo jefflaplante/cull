@@ -31,7 +31,7 @@ func TestUnfinishedRedateGuards(t *testing.T) {
 		}
 	}
 	out, err := run(t, "status", dir)
-	if err != nil || !strings.Contains(out, "next: cull redate "+dir+" --date 2026-10-04") || !strings.Contains(out, "unfinished") {
+	if err != nil || !strings.Contains(out, "next: cull redate "+dir+" --date 2026-10-04") || !strings.Contains(out, "unfinished") || !strings.Contains(out, "review and restore refuse") {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
 	// And without a report.

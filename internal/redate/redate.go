@@ -9,6 +9,7 @@
 package redate
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -63,6 +64,9 @@ const isoLocal = "2006-01-02T15:04:05"
 // its manifest line, report save or sidecar, as a crash would.
 var crashAfterSwap func(path string) bool
 
+// trace is a test seam: the durability steps, in order.
+var trace func(event string)
+
 var errCrash = errors.New("redate: stopped right after a swap (test)")
 
 type run struct {
@@ -77,6 +81,9 @@ type run struct {
 	done                       map[string]bool                     // j.Done as a set
 	unsaved                    []string                            // recorded since the last checkpoint
 	dirty                      bool                                // the report changed since the last save
+	manDirty                   map[string]bool                     // shoot folders whose manifest grew since the last checkpoint
+	orphans                    int                                 // temps left alone that may be a file's only copy
+	xattrNoted                 map[string]bool                     // extended-attribute failures noted, by kind
 	warned                     bool                                // the catalogue warning was given
 }
 
@@ -106,6 +113,9 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	if r.reportPath == "" {
 		r.reportPath = defReport
 	}
+	if slices.Contains(offload.MovedDirs, filepath.Base(dir)) {
+		return r.res, fmt.Errorf("%s is a sort folder: run cull redate on its shoot folder, %s", dir, filepath.Dir(dir))
+	}
 	if which, finish, ok := journal.Incomplete(dir); ok && which != "redate" {
 		return r.res, fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", which, dir, finish)
 	}
@@ -113,11 +123,22 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	if err != nil {
 		return r.res, fmt.Errorf("%w: move it aside if no redate is running", err)
 	}
-	if j != nil && !j.Complete && j.Target != r.targetISO {
-		return r.res, fmt.Errorf("an unfinished redate to %s is recorded in %s: finish it first with %s",
-			strings.Replace(j.Target, "T", " ", 1), filepath.Join(dir, journal.RedateName), j.Finish(dir))
+	reportField := "" // the journal's Report: "" for the folder's own report
+	if r.reportPath != defReport {
+		reportField = r.reportPath
 	}
-	files, err := discover(dir, o.Recursive)
+	if j != nil && !j.Complete {
+		if j.Target != r.targetISO {
+			return r.res, fmt.Errorf("an unfinished redate to %s is recorded in %s: finish it first with %s",
+				strings.Replace(j.Target, "T", " ", 1), filepath.Join(dir, journal.RedateName), j.Finish(dir))
+		}
+		// Its records are relative to its folders and its report: finish it with those.
+		if j.Recursive != o.Recursive || j.Report != reportField {
+			return r.res, fmt.Errorf("the unfinished redate recorded in %s ran with recursive %v and report %s: finish it with %s",
+				filepath.Join(dir, journal.RedateName), j.Recursive, cmp.Or(j.Report, defReport), j.Finish(dir))
+		}
+	}
+	folders, err := walkFolders(dir, o.Recursive)
 	if err != nil {
 		return r.res, err
 	}
@@ -135,8 +156,9 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		}
 	}
 	r.man = map[string]map[string]offload.Entry{}
-	for _, p := range files {
-		folder := shootFolder(dir, p)
+	r.manDirty = map[string]bool{}
+	for _, d := range folders {
+		folder := folderShoot(dir, d)
 		if _, ok := r.man[folder]; ok {
 			continue
 		}
@@ -152,18 +174,8 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	}
 
 	if !o.DryRun {
-		folders := map[string]bool{}
-		for _, p := range files {
-			folders[filepath.Dir(p)] = true
-		}
-		for d := range folders {
-			offload.RemoveStaleTemps(d) // a crash's leftovers: never a file's only copy
-		}
 		if j == nil || j.Complete {
-			j = &journal.Redate{Target: r.targetISO, Started: time.Now(), Recursive: o.Recursive}
-			if r.reportPath != defReport {
-				j.Report = r.reportPath
-			}
+			j = &journal.Redate{Target: r.targetISO, Started: time.Now(), Recursive: o.Recursive, Report: reportField}
 		}
 		if j.Files == nil {
 			j.Files = map[string]journal.FileState{}
@@ -172,10 +184,19 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		for _, d := range j.Done {
 			r.done[d] = true
 		}
-		if err := j.Save(dir); err != nil {
-			return r.res, fmt.Errorf("journal: %w", err)
-		}
 		r.j = j
+		if err := r.saveJournal(); err != nil {
+			return r.res, err
+		}
+	}
+	for _, d := range folders {
+		if err := r.settleTemps(d); err != nil {
+			return r.res, err
+		}
+	}
+	files, err := listDNGs(folders)
+	if err != nil {
+		return r.res, err
 	}
 
 	t := ui.Track(o.UI, "redate", "fixing capture dates", "files", len(files))
@@ -208,9 +229,10 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		}
 		switch {
 		case runErr != nil:
-		case len(r.j.Files) > 0: // a file that failed after its swap was journalled
-			r.warn("%d file(s) may be half done: run the same redate again to finish them", len(r.j.Files))
+		case len(r.j.Files) > 0 || r.orphans > 0: // journalled and not finished, or a temp left alone
+			r.warn("%d file(s) may be half done: run the same redate again to finish them", max(len(r.j.Files), r.orphans))
 		default:
+			r.traced("journal remove")
 			if err := journal.RemoveRedate(dir); err != nil {
 				runErr = err
 			}
@@ -272,12 +294,27 @@ func (r *run) file(p string) error {
 		return nil
 	}
 
-	r.changing()
 	pre := journal.FileState{Size: st.Size(), ModTime: st.ModTime()}
 	if len(ps) == 0 {
+		// Its bytes don't change, but a recorded file is still proven first: a damaged
+		// frame is refused and left exactly as it is, as a patched one would be.
+		if recorded {
+			w, err := hex.DecodeString(e.CurrentSHA256())
+			if err == nil && len(w) == 32 {
+				err = offload.ProveFrom(r.ctx, p, [32]byte(w))
+			}
+			if err != nil {
+				if r.ctx.Err() != nil {
+					return r.ctx.Err()
+				}
+				r.refuse(rel, offload.ErrChanged.Error())
+				return nil
+			}
+		}
+		r.changing()
 		r.j.Files[rel] = pre
-		if err := r.j.Save(r.dir); err != nil {
-			return fmt.Errorf("journal: %w", err)
+		if err := r.saveJournal(); err != nil {
+			return err
 		}
 		crErr, err := offload.SetFileTimes(p, r.o.Target)
 		if err != nil { // the mtime didn't change: nothing to finish
@@ -294,28 +331,31 @@ func (r *run) file(p string) error {
 	if recorded {
 		expect = e.CurrentSHA256()
 	}
+	r.changing()
 	var journalErr error
 	rp, err := offload.ReplacePatched(r.ctx, p, ps, expect, r.o.Target, func(orig, want [32]byte) error {
 		pre.Orig, pre.Want = hex.EncodeToString(orig[:]), hex.EncodeToString(want[:])
 		r.j.Files[rel] = pre
-		if journalErr = r.j.Save(r.dir); journalErr != nil {
-			delete(r.j.Files, rel)
-		}
+		journalErr = r.saveJournal()
 		return journalErr
 	})
+	if err != nil && !rp.Swapped { // the original is untouched: nothing to finish
+		delete(r.j.Files, rel)
+	}
 	switch {
 	case journalErr != nil:
-		return fmt.Errorf("journal: %w", journalErr)
+		return journalErr
 	case errors.Is(err, offload.ErrChanged):
 		r.refuse(rel, err.Error())
 		return nil
-	case err != nil && r.ctx.Err() != nil:
+	case err != nil && r.ctx.Err() != nil && !rp.Swapped:
 		return r.ctx.Err()
-	case err != nil: // the original stays, unless the swap happened and only its flush failed: the journal keeps it
+	case err != nil: // swapped but its folder's flush failed: the journal keeps it for a re-run
 		r.refuse(rel, err.Error())
 		return nil
 	}
 	r.crtime(rp.CrtimeErr)
+	r.xattrs(rel, rp.XattrErrs)
 	r.res.Patched++
 	r.verbose("%s: %d fields → %s (proven)", rel, len(ps), when)
 	if crashAfterSwap != nil && crashAfterSwap(p) {
@@ -419,13 +459,19 @@ func (r *run) supersede(folder string, e offload.Entry, want string) error {
 		return err
 	}
 	r.man[folder][strings.ToLower(e.Name)] = ne
+	r.manDirty[folder] = true
 	return nil
 }
 
 // follow moves the report entry for p to the file's new version (now) when it
 // described the version before the change (pre), or already describes now; one that
 // describes some other version is left alone (judge redoes it anyway). It records the
-// date set, the EXIF dates the file holds now, and rewrites cull's sidecar.
+// date set and rewrites cull's sidecar.
+//
+// The entry's Exif is left as the camera recorded it and as the frame was judged:
+// sequence grouping reads capture times from it, so rewriting it would regroup the
+// shoot's sets on the next judge or decide (and judge would pay to rank them again).
+// The corrected date lives in DatesSet, which the sidecar uses.
 func (r *run) follow(p string, pre journal.FileState, now os.FileInfo) {
 	if r.rep == nil {
 		return
@@ -441,11 +487,6 @@ func (r *run) follow(p string, pre journal.FileState, now os.FileInfo) {
 		return
 	}
 	x.DatesSet = r.targetISO
-	if x.Exif != nil {
-		if ex, err := dng.ReadExif(p); err == nil {
-			x.Exif.DateTimeOriginal, x.Exif.SubSec = ex.DateTimeOriginal, ex.SubSec
-		}
-	}
 	r.dirty = true
 	at := x.File
 	if x.MovedTo != "" {
@@ -459,11 +500,24 @@ func (r *run) follow(p string, pre journal.FileState, now os.FileInfo) {
 	}
 }
 
-// checkpoint saves the report, then the journal with what is now fully recorded.
+// checkpoint carries what the recorded files' bookkeeping wrote to the media (the
+// manifest lines; the report, saved, with its folder), and only then saves the journal
+// without their records: a crash can't leave a cleared record whose report is lost.
 func (r *run) checkpoint() error {
+	for folder := range r.manDirty {
+		if err := r.flush(filepath.Join(folder, offload.ManifestName)); err != nil {
+			return fmt.Errorf("manifest: %w", err)
+		}
+		delete(r.manDirty, folder)
+	}
 	if r.rep != nil && r.dirty {
 		if err := r.rep.Save(r.reportPath); err != nil {
 			return fmt.Errorf("report: %w", err)
+		}
+		for _, p := range []string{r.reportPath, filepath.Dir(r.reportPath)} {
+			if err := r.flush(p); err != nil {
+				return fmt.Errorf("report: %w", err)
+			}
 		}
 		r.dirty = false
 	}
@@ -475,10 +529,43 @@ func (r *run) checkpoint() error {
 		}
 	}
 	r.unsaved = nil
+	return r.saveJournal()
+}
+
+func (r *run) saveJournal() error {
+	r.traced("journal save")
 	if err := r.j.Save(r.dir); err != nil {
 		return fmt.Errorf("journal: %w", err)
 	}
 	return nil
+}
+
+func (r *run) flush(p string) error {
+	r.traced("flush " + p)
+	return offload.Flush(p)
+}
+
+func (r *run) traced(ev string) {
+	if trace != nil {
+		trace(ev)
+	}
+}
+
+// xattrs notes, once per kind of failure, extended attributes the swap couldn't keep.
+func (r *run) xattrs(rel string, errs []error) {
+	for _, err := range errs {
+		kind := err
+		for errors.Unwrap(kind) != nil {
+			kind = errors.Unwrap(kind)
+		}
+		if r.xattrNoted == nil {
+			r.xattrNoted = map[string]bool{}
+		}
+		if !r.xattrNoted[kind.Error()] {
+			r.xattrNoted[kind.Error()] = true
+			r.warn("%s: %v (dates fixed; later files with the same failure aren't listed)", rel, err)
+		}
+	}
 }
 
 func patchesFor(p string, size int64, t time.Time) ([]dng.Patch, []string, error) {
@@ -490,43 +577,112 @@ func patchesFor(p string, size int64, t time.Time) ([]dng.Patch, []string, error
 	return dng.PatchDates(f, size, t)
 }
 
-// discover lists the DNGs in dir and its sort folders (offload.MovedDirs), and with
-// recursive in every subfolder. Hidden files and folders are skipped.
-func discover(dir string, recursive bool) ([]string, error) {
+// walkFolders lists dir, its sort folders (offload.MovedDirs), and with recursive
+// every subfolder. Hidden folders are skipped. A subfolder holding its own report or
+// offload manifest is another shoot folder, with its own bookkeeping: refused.
+func walkFolders(dir string, recursive bool) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			switch {
-			case p == dir:
-			case strings.HasPrefix(d.Name(), "."):
-				return filepath.SkipDir
-			case slices.Contains(offload.MovedDirs, d.Name()): // the shoot's sorted frames
-			case !recursive:
-				return filepath.SkipDir
-			}
+		if !d.IsDir() {
 			return nil
 		}
-		if d.Type().IsRegular() && !strings.HasPrefix(d.Name(), ".") && strings.EqualFold(filepath.Ext(p), ".dng") {
-			out = append(out, p)
+		switch {
+		case p == dir:
+		case strings.HasPrefix(d.Name(), "."):
+			return filepath.SkipDir
+		case slices.Contains(offload.MovedDirs, d.Name()): // the shoot's sorted frames
+		case !recursive:
+			return filepath.SkipDir
+		default:
+			for _, own := range []string{"cull-report.json", offload.ManifestName} {
+				if _, err := os.Stat(filepath.Join(p, own)); err == nil {
+					return fmt.Errorf("%s is a shoot folder of its own (it has %s): run cull redate on each shoot folder, not -r on %s", p, own, dir)
+				}
+			}
 		}
+		out = append(out, p)
 		return nil
 	})
-	sort.Strings(out)
 	return out, err
 }
 
-// shootFolder is the folder whose manifest records p: its own, or the one above a
-// sort folder.
-func shootFolder(root, p string) string {
-	d := filepath.Dir(p)
+// listDNGs lists the DNGs in folders (not below them). Hidden files are skipped.
+func listDNGs(folders []string) ([]string, error) {
+	var out []string
+	for _, d := range folders {
+		ents, err := os.ReadDir(d)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range ents {
+			if e.Type().IsRegular() && !strings.HasPrefix(e.Name(), ".") && strings.EqualFold(filepath.Ext(e.Name()), ".dng") {
+				out = append(out, filepath.Join(d, e.Name()))
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// settleTemps deals with the redate temps a crash left in folder d. One beside its file
+// is a swap that never happened: removed. One whose file is missing may be that file's
+// only copy (a rename-over that deletes first, interrupted): if the journal records the
+// file and the temp proves against its patched checksum, it takes the file's name;
+// otherwise it is left alone and the journal stays. A dry run only says so.
+func (r *run) settleTemps(d string) error {
+	for tmp, target := range offload.RedateTemps(d) {
+		rel, _ := filepath.Rel(r.dir, target)
+		if _, err := os.Lstat(target); err == nil {
+			if !r.o.DryRun {
+				os.Remove(tmp)
+			}
+			continue
+		}
+		var rec journal.FileState
+		ok := false
+		if r.j != nil {
+			rec, ok = r.j.Files[rel]
+		}
+		if r.o.DryRun || !ok || rec.Want == "" {
+			r.orphans++
+			r.warn("%s is missing, and %s may be its only copy: left alone (move it back to %s if it is the frame)", rel, filepath.Base(tmp), filepath.Base(target))
+			continue
+		}
+		w, err := hex.DecodeString(rec.Want)
+		if err == nil && len(w) == 32 {
+			err = offload.ProveFrom(r.ctx, tmp, [32]byte(w))
+		}
+		if err != nil {
+			if r.ctx.Err() != nil {
+				return r.ctx.Err()
+			}
+			r.orphans++
+			r.warn("%s is missing, and %s doesn't prove against what redate wrote (%v): left alone", rel, filepath.Base(tmp), err)
+			continue
+		}
+		if err := offload.Adopt(tmp, target); err != nil {
+			return fmt.Errorf("restore %s from %s: %w", rel, filepath.Base(tmp), err)
+		}
+		r.warn("%s: restored from its proven temp (an interrupted swap)", rel)
+	}
+	return nil
+}
+
+// folderShoot is the folder whose manifest records the files in d: d, or the one
+// above a sort folder.
+func folderShoot(root, d string) string {
 	if d != root && slices.Contains(offload.MovedDirs, filepath.Base(d)) {
 		return filepath.Dir(d)
 	}
 	return d
 }
+
+// shootFolder is the folder whose manifest records p: its own, or the one above a
+// sort folder.
+func shootFolder(root, p string) string { return folderShoot(root, filepath.Dir(p)) }
 
 func (r *run) refuse(rel, why string) {
 	r.res.Refused++

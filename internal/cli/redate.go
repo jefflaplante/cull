@@ -79,12 +79,19 @@ Lightroom may lose track of frames already imported.`,
 	return cmd
 }
 
-// refuseUnfinished stops a command that relies on the report's keys, or changes the
+// refuseUnfinished stops a command that relies on the report's keys, or moves the
 // files, while a redate or rename of dir is unfinished: its keys may not match the
 // files yet.
-func refuseUnfinished(dir string) error {
-	if which, finish, ok := journal.Incomplete(dir); ok {
-		return fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", which, dir, finish)
+// With recursive, a folder below dir (a shoot folder judge -r reaches) counts too.
+func refuseUnfinished(dir string, recursive bool) error {
+	folder, which, finish, ok := dir, "", "", false
+	if recursive {
+		folder, which, finish, ok = journal.IncompleteBelow(dir)
+	} else {
+		which, finish, ok = journal.Incomplete(dir)
+	}
+	if ok {
+		return fmt.Errorf("an unfinished %s is recorded in %s: finish it first with %s", which, folder, finish)
 	}
 	return nil
 }

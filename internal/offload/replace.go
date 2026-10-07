@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"syscall"
 	"time"
 
@@ -24,23 +25,37 @@ var ErrChanged = errors.New("no longer matches its offload checksum: not fixing 
 type Replaced struct {
 	Orig, Want [32]byte // the file as read, and with the patches applied (the file now)
 	CrtimeErr  error    // setting the creation time failed (best effort); the mtime is set
+	XattrErrs  []error  // extended attributes that couldn't be copied (best effort)
+	// Swapped: the proven temp was renamed over the original. False with an error means
+	// the original is untouched.
+	Swapped bool
 }
+
+// RedateTempExt ends ReplacePatched's temps (".<name>.cull-<rand>.redate"): distinct from
+// offload's ".tmp", so RemoveStaleTemps never takes one. After a crash a redate temp may
+// be a file's only copy (a rename-over that deletes first, interrupted), so only
+// RedateTemps' caller, which can prove it, decides its fate.
+const RedateTempExt = ".redate"
+
+var redateTempRE = regexp.MustCompile(`^\.(.+)\.cull-[0-9a-f]{8}` + regexp.QuoteMeta(RedateTempExt) + `$`)
 
 // ReplacePatched rewrites path with exactly the patches ps (dng.PatchDates' output)
 // and its times set to t, replacing the original only once the new bytes are proven:
 //
-//  1. The original is read once into a hidden temp beside it (".<name>.cull-<rand>.tmp"),
+//  1. The original is read once into a hidden temp beside it (".<name>.cull-<rand>.redate"),
 //     the patches applied in-stream, hashing both the bytes as read (orig) and as
 //     written (want). If expect (hex) is set and orig differs, ErrChanged.
-//  2. The temp gets path's permissions and the times t, and is flushed to the media
-//     (F_FULLFSYNC; fsync on a network share).
-//  3. It is dropped from the page cache, re-read from the device, and must hash to want.
-//  4. beforeSwap (if set) runs: redate journals the swap there. An error stops here.
-//  5. The temp is renamed over path (rename(2), same folder: either file, never a torn
-//     one), and the folder is flushed to the media.
+//  2. beforeSwap (if set) runs: redate journals the swap there, before the flush below,
+//     which carries it to the media too. An error stops here.
+//  3. The temp gets path's permissions, extended attributes and the times t, and is
+//     flushed to the media (F_FULLFSYNC; fsync on a network share).
+//  4. It is dropped from the page cache, re-read from the device, and must hash to want.
+//  5. The temp is renamed over path (rename(2), same folder), and the folder is flushed
+//     to the media.
 //
-// On any failure before the rename, the temp is removed and path is untouched. A file
-// with other hard links, or changed (size, mtime) while it was read, is refused.
+// On any failure before the rename, the temp is removed and path is untouched, except
+// that a temp is never removed once path's name is gone: it may then be the only copy.
+// A file with other hard links, or changed (size, mtime) while it was read, is refused.
 func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect string, t time.Time, beforeSwap func(orig, want [32]byte) error) (r Replaced, err error) {
 	in, err := os.Open(path)
 	if err != nil {
@@ -58,14 +73,16 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 		return r, fmt.Errorf("%s has %d hard links: replacing it would leave the others with the old dates", path, s.Nlink)
 	}
 	dir, name := filepath.Split(path)
-	tmp, err := createTemp(dir, name)
+	tmp, err := createTempExt(dir, name, RedateTempExt)
 	if err != nil {
 		return r, err
 	}
-	renamed := false
 	defer func() {
 		tmp.Close() // closing twice only returns an error
-		if !renamed {
+		if r.Swapped {
+			return
+		}
+		if _, err := os.Lstat(path); err == nil { // never the only copy
 			os.Remove(tmp.Name())
 		}
 	}()
@@ -79,7 +96,13 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 	if tst, err := tmp.Stat(); err != nil || tst.Size() != st.Size() {
 		return r, fmt.Errorf("the copy of %s isn't the same size (%v)", path, err)
 	}
+	if beforeSwap != nil {
+		if err := beforeSwap(r.Orig, r.Want); err != nil {
+			return r, err
+		}
+	}
 	_ = tmp.Chmod(st.Mode().Perm()) // best effort: exFAT and some shares refuse modes
+	r.XattrErrs = copyXattrs(in, tmp)
 	// The times go on before the flush, with nothing written after them.
 	if r.CrtimeErr, err = setFileTimesFn(tmp.Name(), t); err != nil {
 		return r, err
@@ -93,11 +116,6 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 	if err := proveFrom(ctx, tmp.Name(), r.Want); err != nil {
 		return r, err
 	}
-	if beforeSwap != nil {
-		if err := beforeSwap(r.Orig, r.Want); err != nil {
-			return r, err
-		}
-	}
 	// Narrow the window: the original must still be the file just read.
 	if now, err := os.Lstat(path); err != nil || now.Size() != st.Size() || !now.ModTime().Equal(st.ModTime()) || !os.SameFile(now, st) {
 		return r, fmt.Errorf("%s changed while it was being fixed; not replaced", path)
@@ -105,16 +123,45 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return r, err
 	}
-	renamed = true
-	d, err := os.Open(filepath.Clean(dir))
-	if err != nil {
-		return r, fmt.Errorf("%s replaced, but its folder can't be flushed: %w", path, err)
-	}
-	defer d.Close()
-	if _, err := durable(d); err != nil {
+	r.Swapped = true
+	if err := Flush(filepath.Clean(dir)); err != nil {
 		return r, fmt.Errorf("%s replaced, but its folder can't be flushed: %w", path, err)
 	}
 	return r, nil
+}
+
+// RedateTemps lists dir's redate temps, each with the path it was to replace.
+func RedateTemps(dir string) map[string]string {
+	out := map[string]string{}
+	ms, _ := filepath.Glob(filepath.Join(dir, ".*.cull-*"+RedateTempExt))
+	for _, m := range ms {
+		if sm := redateTempRE.FindStringSubmatch(filepath.Base(m)); sm != nil {
+			out[m] = filepath.Join(dir, sm[1])
+		}
+	}
+	return out
+}
+
+// Adopt gives a proven redate temp its file's name, which must be free (never
+// replacing anything), and flushes the folder.
+func Adopt(tmp, target string) error {
+	if err := linkNoReplace(tmp, target); err != nil {
+		return err
+	}
+	os.Remove(tmp) // after a link, the spare name; after the fallback rename, nothing
+	return Flush(filepath.Dir(target))
+}
+
+// Flush carries path (a file or a folder) to the media: F_FULLFSYNC, or fsync where
+// that isn't supported (a network share).
+func Flush(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = durable(f)
+	return err
 }
 
 // SetFileTimes sets path's modification (and access) time to t and, best effort, its
@@ -127,8 +174,9 @@ func ProveFrom(ctx context.Context, path string, want [32]byte) error {
 	return proveFrom(ctx, path, want)
 }
 
-// RemoveStaleTemps removes the hidden temps (".<name>.cull-<rand>.tmp") a crash left in
-// dir: never a file's only copy, since a temp takes its name only once proven.
+// RemoveStaleTemps removes the hidden temps (".<name>.cull-<rand>.tmp") an offload crash
+// left in dir: never a file's only copy, since a copy takes its name (by link, never
+// replacing) only once proven. Redate's temps (RedateTempExt) are never touched here.
 func RemoveStaleTemps(dir string) {
 	stale, _ := filepath.Glob(filepath.Join(dir, ".*.cull-*.tmp"))
 	for _, s := range stale {

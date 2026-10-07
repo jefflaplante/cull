@@ -155,7 +155,7 @@ model and effort default to the report's. --fresh replaces it.`,
 			if err != nil {
 				return err
 			}
-			if err := refuseUnfinished(cfg.Dir); err != nil {
+			if err := refuseUnfinished(cfg.Dir, cfg.Recursive); err != nil {
 				return err
 			}
 			fl := cmd.Flags()

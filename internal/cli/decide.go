@@ -52,7 +52,7 @@ report keeps the model's), your stars become sidecar ratings. --no-labels ignore
 			if err != nil {
 				return err
 			}
-			if err := refuseUnfinished(cfg.Dir); err != nil {
+			if err := refuseUnfinished(cfg.Dir, false); err != nil {
 				return err
 			}
 			write = sideReportSidecars(cmd, cfg, write)

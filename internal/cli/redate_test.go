@@ -108,3 +108,24 @@ func TestDateNotInDotfile(t *testing.T) {
 		t.Fatal("date settable from the dotfile")
 	}
 }
+
+// judge -r on a parent refuses while a shoot folder below it has an unfinished
+// redate; restore refuses while the folder's own is unfinished.
+func TestUnfinishedRedateGuardsRecursiveAndRestore(t *testing.T) {
+	parent := t.TempDir()
+	shoot := filepath.Join(parent, "2026-10-04 Test")
+	os.Mkdir(shoot, 0o755)
+	tinyDNG(t, filepath.Join(shoot, "L1.DNG"))
+	j := &journal.Redate{Target: "2026-10-04T12:00:00", Started: time.Now()}
+	if err := j.Save(shoot); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "judge", "-r", "--backend", "openai", "--model", "m", parent)
+	if err == nil || !strings.Contains(err.Error(), "cull redate") || !strings.Contains(err.Error(), "2026-10-04 Test") {
+		t.Fatalf("judge -r: %v\n%s", err, out)
+	}
+	out, err = run(t, "restore", shoot)
+	if err == nil || !strings.Contains(err.Error(), "cull redate") {
+		t.Fatalf("restore: %v\n%s", err, out)
+	}
+}

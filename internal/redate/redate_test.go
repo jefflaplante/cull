@@ -45,9 +45,8 @@ func TestMain(m *testing.M) {
 var target = time.Date(2026, 10, 4, 12, 0, 0, 0, time.Local)
 
 const (
-	targetISO  = "2026-10-04T12:00:00"
-	targetEXIF = "2026:10:04 12:00:00"
-	stopped    = "2025:12:28 00:05:59" // a dead clock's time: every fixture carries it
+	targetISO = "2026-10-04T12:00:00"
+	stopped   = "2025:12:28 00:05:59" // a dead clock's time: every fixture carries it
 )
 
 var cardTime = time.Date(2026, 10, 2, 14, 0, 0, 0, time.Local)
@@ -310,11 +309,9 @@ func TestRedatePatchesAndProves(t *testing.T) {
 		if !r.ModTime.Equal(target) || r.DatesSet != targetISO || r.Evaluation == nil {
 			t.Errorf("%s report %+v", name, r)
 		}
-		wantDTO, wantSub := targetEXIF, "00"
-		if name == "L3.DNG" { // the file keeps its camera dates; the report says what it holds
-			wantDTO, wantSub = stopped, "42"
-		}
-		if r.Exif == nil || r.Exif.DateTimeOriginal != wantDTO || r.Exif.SubSec != wantSub {
+		// The report keeps the capture time as the camera recorded it and as it was
+		// judged (its sets came from it); the date set is DatesSet.
+		if r.Exif == nil || r.Exif.DateTimeOriginal != stopped || r.Exif.SubSec != "42" {
 			t.Errorf("%s exif %+v", name, r.Exif)
 		}
 		x := read(t, filepath.Join(dir, strings.TrimSuffix(name, ".DNG")+".xmp"))

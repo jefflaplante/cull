@@ -34,7 +34,8 @@ func replaceFixture(t *testing.T) (path string, b []byte, ps []dng.Patch) {
 func temps(t *testing.T, dir string) []string {
 	t.Helper()
 	m, _ := filepath.Glob(filepath.Join(dir, ".*.tmp"))
-	return m
+	r, _ := filepath.Glob(filepath.Join(dir, ".*.redate"))
+	return append(m, r...)
 }
 
 // The file becomes exactly its old bytes with the patches, with its times set; both
@@ -160,5 +161,56 @@ func TestReplacePatchedFlushFails(t *testing.T) {
 	}
 	if l := temps(t, filepath.Dir(path)); len(l) != 0 {
 		t.Fatalf("temps left: %v", l)
+	}
+}
+
+// The journal record (beforeSwap) is written before the temp's F_FULLFSYNC, so that
+// flush carries it to the media before the swap; the folder is flushed after.
+func TestReplacePatchedJournalBeforeFullSync(t *testing.T) {
+	path, _, ps := replaceFixture(t)
+	var order []string
+	fullSyncFn = func(f *os.File) error {
+		order = append(order, "full "+filepath.Base(f.Name()))
+		return fullSync(f)
+	}
+	defer func() { fullSyncFn = fullSync }()
+	if _, err := ReplacePatched(context.Background(), path, ps, "", setTarget, func(_, _ [32]byte) error {
+		order = append(order, "journal")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(order) != 3 || order[0] != "journal" || !strings.HasSuffix(order[1], ".redate") || order[2] != "full "+filepath.Base(filepath.Dir(path)) {
+		t.Fatalf("order %q", order)
+	}
+}
+
+// A redate temp is never removed once its target name is gone: it may be the only
+// copy (a rename-over that deletes first, interrupted).
+func TestReplacePatchedKeepsTempWithoutTarget(t *testing.T) {
+	path, _, ps := replaceFixture(t)
+	_, err := ReplacePatched(context.Background(), path, ps, "", setTarget, func(_, _ [32]byte) error {
+		return os.Remove(path) // the original's name is gone before the swap
+	})
+	if err == nil {
+		t.Fatal("no error")
+	}
+	if l, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".M7.DNG.cull-*.redate")); len(l) != 1 {
+		t.Fatalf("temp not kept: %v", l)
+	}
+}
+
+// Offload's sweep of its own stale temps leaves redate's alone.
+func TestRemoveStaleTempsSparesRedate(t *testing.T) {
+	dir := t.TempDir()
+	mine, theirs := filepath.Join(dir, ".A.DNG.cull-01020304.tmp"), filepath.Join(dir, ".A.DNG.cull-01020304.redate")
+	os.WriteFile(mine, nil, 0o644)
+	os.WriteFile(theirs, nil, 0o644)
+	RemoveStaleTemps(dir)
+	if _, err := os.Stat(mine); !os.IsNotExist(err) {
+		t.Fatal("offload temp kept")
+	}
+	if _, err := os.Stat(theirs); err != nil {
+		t.Fatal("redate temp removed")
 	}
 }

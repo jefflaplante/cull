@@ -64,10 +64,12 @@ func LoadRedate(dir string) (*Redate, error) {
 	return &j, nil
 }
 
-// Save writes the journal atomically and durably: a temp file, fsynced, renamed into
-// place, the folder fsynced. (fsync on macOS stops at the drive's cache; redate's
-// F_FULLFSYNC of the file it is about to swap, which follows every Save, flushes that
-// cache, journal included, before the swap.)
+// Save writes the journal atomically: a temp file, fsynced, renamed into place, the
+// folder fsynced. On macOS fsync stops at the drive's cache. Redate relies on what it
+// does next: a file's record is saved before that file's temp gets F_FULLFSYNC
+// (offload.ReplacePatched calls back before its flush), and F_FULLFSYNC empties the
+// whole drive cache, this record included, before the swap; a times-only change isn't
+// destructive. (On a network share both fall back to fsync, the most a share offers.)
 func (j *Redate) Save(dir string) error {
 	b, err := json.MarshalIndent(j, "", "  ")
 	if err != nil {
@@ -136,6 +138,25 @@ func Incomplete(dir string) (which, finish string, ok bool) {
 		return "rename", fmt.Sprintf("cull rename %s %s (or cull rename --undo %s)", ShellQuote(dir), ShellQuote(r.Pattern), ShellQuote(dir)), true
 	}
 	return "", "", false
+}
+
+// IncompleteBelow is Incomplete for dir and every folder below it (hidden ones
+// skipped): the first unfinished journal found, and the folder it is in.
+func IncompleteBelow(dir string) (folder, which, finish string, ok bool) {
+	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		if p != dir && strings.HasPrefix(d.Name(), ".") {
+			return filepath.SkipDir
+		}
+		if which, finish, ok = Incomplete(p); ok {
+			folder = p
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return folder, which, finish, ok
 }
 
 // safeShell are the characters a shell argument can hold unquoted.

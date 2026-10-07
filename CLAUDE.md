@@ -637,6 +637,13 @@ balance`, but no run has tested them yet.
     - The user's Proxmox cluster (Linux clients) uses NFS from the same TrueNAS without
       trouble. That points at the macOS NFS client with this server, though no Linux
       client was tested in the same loop.
+    - **Searched online (2026-10-07, macOS 26.4.1 here):** no report matches a macOS
+      *client* stalling 60 s mid-write. The known Sequoia/Tahoe NFS defect is the other
+      direction: a Mac *serving* NFS whose clients hang after 300 s idle (Bresink NFS
+      Manager notes call it a macOS 15+ TCP/IP stack defect, unfixed). An unverified lead
+      on this Mac: CrowdStrike Falcon's system extension is active, and endpoint network
+      filters can stall kernel TCP flows. The test would be the same loop with it paused,
+      which needs IT's say-so on a managed Mac.
 - Offload benchmark, 20 real frames per tool, read from the card uncached: the `cull`
   engine runs at 216 MB/s (hash, uncached write, evict, verify from disk, F_FULLFSYNC);
   `cp` runs at 264 MB/s. The gap was the verify re-read, which wasn't overlapped with the

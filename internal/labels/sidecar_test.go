@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jefflaplante/cull/internal/dng"
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/report"
 	"github.com/jefflaplante/cull/internal/xmp"
@@ -169,5 +170,17 @@ func TestSidecarKeywordsDeduplicated(t *testing.T) {
 	sc := Sidecar(r, Entry{}, 1, false, tags)
 	if got := strings.Join(sc.Keywords, ","); got != "cull:keep,portrait,family" {
 		t.Fatalf("keywords %q", got)
+	}
+}
+
+func TestSidecarDateTaken(t *testing.T) {
+	r := report.Result{Exif: &dng.Exif{DateTimeOriginal: "2025:12:28 00:05:59"}}
+	if got := Sidecar(r, Entry{}, 1, false, nil).DateTaken; got != "2025-12-28T00:05:59" {
+		t.Errorf("DateTaken %q", got)
+	}
+	for _, bad := range []*dng.Exif{nil, {}, {DateTimeOriginal: "garbage"}, {DateTimeOriginal: "0000:00:00 00:00:00"}} {
+		if got := Sidecar(report.Result{Exif: bad}, Entry{}, 1, false, nil).DateTaken; got != "" {
+			t.Errorf("%+v gave DateTaken %q", bad, got)
+		}
 	}
 }

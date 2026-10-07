@@ -2,6 +2,7 @@ package labels
 
 import (
 	"path/filepath"
+	"time"
 
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/report"
@@ -28,6 +29,11 @@ var colors = map[eval.Decision]string{eval.Keep: "Green", eval.Review: "Yellow",
 func Sidecar(r report.Result, l Entry, orientation int, develop bool, tags *report.Tags) xmp.Sidecar {
 	d, yours := Effective(r, l)
 	sc := xmp.Sidecar{Rating: l.Stars, Label: colors[d]}
+	if r.Exif != nil {
+		if t, err := time.Parse("2006:01:02 15:04:05", r.Exif.DateTimeOriginal); err == nil {
+			sc.DateTaken = t.Format("2006-01-02T15:04:05")
+		}
+	}
 	if d != "" {
 		sc.Keywords = append(sc.Keywords, "cull:"+string(d))
 	}

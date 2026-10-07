@@ -643,7 +643,10 @@ balance`, but no run has tested them yet.
 - So camera order is DCF order (`internal/dcf`): the DCF folder number (`100LEICA`; it
   increments when the counter wraps past 9999) when every frame's is known, then the
   4-digit counter, then the name. Capture times can't stand in (the clock wasn't running).
-  For a single-prefix shoot it equals name order.
+  For a single-prefix shoot it equals name order, as long as all names are DCF-shaped and
+  the counter doesn't wrap inside the shoot. Other names (edited copies such as
+  `M1103127-Edit`) sort after all camera names, by name. offload orders card by card in
+  argument order, DCF order within each card.
 - Not yet checked: what the M11-P does at a wrap (folder number, prefix), and whether
   other bodies share a counter across prefixes.
 

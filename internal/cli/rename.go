@@ -16,8 +16,11 @@ func newRenameCmd(so *sharedOpts) *cobra.Command {
 		Use:   "rename <folder> <pattern> | rename --undo <folder>",
 		Short: "Rename a shoot folder's frames by a pattern (the report, labels and manifest follow)",
 		Long: `rename names every DNG in a shoot folder, including the frames sorted into keep/,
-review/ and cull/ (each stays in its folder), by a pattern, in camera order: the
-order of the card's names when the offload manifest records them. The pattern takes
+review/ and cull/ (each stays in its folder), by a pattern, in camera order: by the
+camera's file counter (the last 4 digits of M1103127; the card folder's number first
+when the counter wraps) of the card name the offload manifest records, else of the
+name now. An M11-P's M… and L… frames share one counter, so they interleave as shot.
+Other names (edited copies such as M1103127-Edit) follow, by name. The pattern takes
 offload --rename's tokens:
 
   {date}   the frame's capture date, YYYYMMDD (the date redate or offload --set-date
@@ -40,9 +43,11 @@ Limits, checked before anything moves (each refuses the rename, naming the files
     Capture One's settings in CaptureOne/Settings*/<name>.cos) would keep the old
     name and lose their frame.
   - Names over 255 bytes, locked frames and folders that can't be written.
-  - A rename that changes the order of frames with the same capture time (an
-    unpadded {n} sorts 10 before 2) regroups the shoot's sets, and judge would rank
-    them again: --reorder goes ahead anyway.
+  - A rename that changes the order of frames with the same capture time regroups
+    the shoot's sets, and judge would rank them again: --reorder goes ahead anyway.
+    Frames the manifest records keep their card names' order whatever they're called;
+    only frames it doesn't record go by their new names (an unpadded {n} sorts 10
+    before 2; 8-character names ending in 4 digits go by those digits).
   - A pending judge or ranking batch (finish or cancel it first), and a folder another
     cull command is using (the folder lock, .cull.lock).
 

@@ -141,6 +141,11 @@ type Rename struct {
 	// swap never mix; a re-run tells from the report itself which save a crash beat.
 	ReportAt string `json:"report_at,omitempty"`
 	Complete bool   `json:"complete"`
+	// Cards are the card names (offload.Entry.CardName) the report lacks, by the
+	// report's path for the frame before the rename, relative to the folder: the rename
+	// writes them into the report with its paths, so decide and judge order the frames
+	// as the rename's order check did. Reports from before card names have none.
+	Cards map[string]string `json:"cards,omitempty"`
 }
 
 // Temps are the journal's temp paths (frames' and sidecars'), relative to the folder.

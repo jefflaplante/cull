@@ -67,6 +67,8 @@ type File struct {
 	// Undated: skipped as already there, but with --set-date its copies were made
 	// without it (the manifest records no dates_set): their dates are the camera's.
 	Undated bool
+
+	source int // index of its card in Options.Sources: camera order goes card by card
 }
 
 // DefaultSplitGap is the capture-time gap that starts a new event with --split.
@@ -316,13 +318,14 @@ func checkSpace(plans []*Plan, o Options) error {
 
 // scan lists every regular .dng file under the sources, never following symlinks and
 // skipping dot-files and dot-directories (.Trashes, .Spotlight-V100, .fseventsd,
-// AppleDouble ._ files), in camera-name order: file numbers are the camera's own
-// order, and unlike capture times they survive a clock set wrong.
+// AppleDouble ._ files), card by card in the order given and in camera order within
+// each (cameraOrder): file numbers are the camera's own order, and unlike capture
+// times they survive a clock set wrong.
 func scan(sources []string, s ui.Sink) ([]File, error) {
 	t := ui.Track(s, "plan", "reading the cards", "files", 0)
 	defer t.Done()
 	var out []File
-	for _, root := range sources {
+	for src, root := range sources {
 		root, err := filepath.Abs(root)
 		if err != nil {
 			return nil, err
@@ -347,7 +350,7 @@ func scan(sources []string, s ui.Sink) ([]File, error) {
 			if err != nil {
 				return fmt.Errorf("read %s: %w", p, err)
 			}
-			f := File{Src: p, Size: info.Size(), ModTime: info.ModTime(), Capture: info.ModTime()}
+			f := File{Src: p, Size: info.Size(), ModTime: info.ModTime(), Capture: info.ModTime(), source: src}
 			if e, err := dng.ReadExif(p); err == nil {
 				if t, ok := e.CaptureTime(); ok {
 					f.Capture = t
@@ -365,21 +368,36 @@ func scan(sources []string, s ui.Sink) ([]File, error) {
 	return out, nil
 }
 
-// cameraOrder sorts files in camera order (dcf: the DCF folder and file counter,
-// so an M11-P's M… and L… frames, numbered from one counter, interleave as shot),
-// then by full path.
+// cameraOrder sorts files card by card, in the order the cards were given (two
+// bodies' counters overlap; one numbering takes the first card, then the next), and
+// within a card in camera order (dcf: the DCF folder and file counter, so an M11-P's
+// M… and L… frames, numbered from one counter, interleave as shot), then by full path.
 func cameraOrder(files []File) {
 	names := make([]dcf.Name, len(files))
+	bySource := map[int][]int{}
 	for i, f := range files {
 		names[i] = dcf.Of(f.Src)
+		bySource[f.source] = append(bySource[f.source], i)
 	}
-	dcf.Unify(names)
+	for _, idx := range bySource { // folder numbers count only when all of a card's are known
+		card := make([]dcf.Name, len(idx))
+		for k, i := range idx {
+			card[k] = names[i]
+		}
+		dcf.Unify(card)
+		for k, i := range idx {
+			names[i] = card[k]
+		}
+	}
 	idx := make([]int, len(files))
 	for i := range idx {
 		idx[i] = i
 	}
 	sort.Slice(idx, func(a, b int) bool {
 		ia, ib := idx[a], idx[b]
+		if sa, sb := files[ia].source, files[ib].source; sa != sb {
+			return sa < sb
+		}
 		if c := dcf.Compare(names[ia], names[ib]); c != 0 {
 			return c < 0
 		}
@@ -708,8 +726,9 @@ func ExpandName(pattern string, date, name, orig string, n int) (string, error) 
 	}), nil
 }
 
-// renamed names files by the pattern, numbering in camera-name order from one past the
-// largest number already in the shoot folder. Files the manifest already records
+// renamed names files by the pattern, numbering in camera order (cameraOrder: card
+// by card, then the DCF counter) from one past the largest number already in the
+// shoot folder. Files the manifest already records
 // (same source name, size and mtime) are skipped under their recorded name.
 func (p *Plan) renamed(o Options) error {
 	pat := o.Rename

@@ -191,7 +191,7 @@ judge it next.`,
 	f.StringVar(&o.Name, "name", "", "shoot name: the folder is \"<date> <name>\"")
 	f.StringVar(&o.Date, "date", "", "folder date YYYY-MM-DD (default: the earliest capture date)")
 	f.StringVar(&o.Backup, "backup", "", "also copy into this root (same folder layout), verified separately")
-	f.StringVar(&o.Rename, "rename", "", "rename files: {date} {name} {orig} {n} {n:W}, e.g. \"{date}_{name}_{n:4}\"; the counter continues across cards")
+	f.StringVar(&o.Rename, "rename", "", "rename files: {date} {name} {orig} {n} {n:W}, e.g. \"{date}_{name}_{n:4}\"; numbered in camera order card by card, in the order given: the counter continues across cards")
 	f.BoolVar(&o.Checksum, "checksum", false, "decide what's already copied by SHA-256, not size and time")
 	f.BoolVar(&dryRun, "dry-run", false, "print the plan and exit; write nothing")
 	f.BoolVar(&noScan, "no-scan", false, "stop after copying (don't scan the shoot folder)")

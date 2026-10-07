@@ -206,8 +206,11 @@ Every step, with its full output and screenshots of the live progress view, is i
   `M1103127`, then the card folder's number (`100LEICA`) when the counter wraps past
   9999. The letters before it don't count: an M11-P numbers its `M…` frames and its
   `L…` (Content Credentials) frames from one counter, so `M1102771` comes before
-  `L1002772`, where sorting by name would put every `L` first. Names of another shape
-  follow, by name. `--split-at` and grouping into sets use the same order.
+  `L1002772`, where sorting by name would put every `L` first. Names of another shape,
+  such as edited copies (`M1103127-Edit`, `M1103127-Enhanced-NR`), follow all camera
+  names, by name. With several cards, frames are numbered card by card in the order you
+  give them, so two bodies' overlapping counters never interleave. `--split-at` uses the
+  same order; grouping into sets goes by capture time first, then this order.
 - **Speed (measured on an M11-P card over USB):** the card reads at about 260 MB/s. A
   992-frame, 67.7 GB card went to a USB SSD in 8 minutes, every file verified; to the
   Mac's SSD, the measured 235 MB/s below would take about 5 minutes.

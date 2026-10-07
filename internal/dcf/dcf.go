@@ -89,6 +89,10 @@ func counter(base string) int {
 	return n
 }
 
+// IsName reports whether base has the DCF file-name shape (see counter): such a name
+// is ordered by its last 4 digits, not as text.
+func IsName(base string) bool { return counter(base) >= 0 }
+
 // Unify clears every name's folder unless all the DCF names have one. Folder numbers
 // order frames only when every frame's is known: a frame of unknown folder can't be
 // placed against a wrap, and "unknown matches any folder" isn't a transitive order.

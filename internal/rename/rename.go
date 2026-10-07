@@ -235,6 +235,13 @@ type frame struct {
 
 func (f frame) base() string { return filepath.Base(f.rel) }
 
+// home is the absolute path the report gives the frame at rel: in a sort folder,
+// its shoot folder's path for it (as triples).
+func (r *run) home(rel string) string {
+	p := r.abs(rel)
+	return filepath.Join(redate.ShootOf(r.dir, filepath.Dir(p)), filepath.Base(p))
+}
+
 // shoot is what survey found: the frames, every name in the shoot's folders, and the
 // names its manifest records for frames no longer there.
 type shoot struct {
@@ -394,10 +401,11 @@ func (r *run) plan() (*journal.Rename, error) {
 	if err != nil || len(moves) == 0 {
 		return nil, err
 	}
-	if err := r.checkOrder(moves); err != nil {
+	cards, err := r.checkOrder(sh, moves)
+	if err != nil {
 		return nil, err
 	}
-	return &journal.Rename{Pattern: r.o.Pattern, Recursive: r.o.Recursive, Report: r.reportField, Started: time.Now(), Moves: moves, Phase: 1}, nil
+	return &journal.Rename{Pattern: r.o.Pattern, Recursive: r.o.Recursive, Report: r.reportField, Started: time.Now(), Moves: moves, Phase: 1, Cards: cards}, nil
 }
 
 // checkOrder refuses a rename that changes the order of the report's frames as
@@ -407,10 +415,22 @@ func (r *run) plan() (*journal.Rename, error) {
 // them). A new order regroups
 // the shoot's sets, and judge would rank the changed sets again. Reorder goes ahead,
 // saying how many sets change.
-func (r *run) checkOrder(moves []journal.RenameMove) error {
+//
+// A report written before card names were recorded lacks them; the next judge fills
+// them from the manifest, so both orders here take them from the manifest too (the
+// frames' card names), and the rename writes them into the report (the returned map,
+// by the report's path relative to the folder; journalled, see followReport).
+func (r *run) checkOrder(sh *shoot, moves []journal.RenameMove) (map[string]string, error) {
 	if r.rep == nil {
-		return nil
+		return nil, nil
 	}
+	cardOf := map[string]string{} // the report's (home) path → the manifest's card name
+	for _, f := range sh.frames {
+		if f.card != "" {
+			cardOf[r.home(f.rel)] = f.card
+		}
+	}
+	cards := map[string]string{}
 	to := map[string]string{} // the report's (home) path → the new one
 	for _, m := range moves {
 		t := r.triples(m)
@@ -421,7 +441,16 @@ func (r *run) checkOrder(moves []journal.RenameMove) error {
 		to[h[0]] = h[2]
 	}
 	var before, after []group.Frame
+	var dcfNamed string // a new name that reads as a camera file number
+	for _, m := range moves {
+		if dcf.IsName(filepath.Base(m.New)) && dcfNamed == "" {
+			dcfNamed = filepath.Base(m.New)
+		}
+	}
 	for _, x := range r.rep.Results {
+		if c, ok := cardOf[x.File]; ok && x.CardName == "" {
+			x.CardName, cards[r.rel(x.File)] = c, c
+		}
 		if x.Error != "" || x.Preview == nil {
 			continue
 		}
@@ -431,8 +460,11 @@ func (r *run) checkOrder(moves []journal.RenameMove) error {
 		}
 		after = append(after, x.GroupFrame())
 	}
+	if len(cards) == 0 {
+		cards = nil
+	}
 	if slices.Equal(group.Order(before), group.Order(after)) {
-		return nil
+		return cards, nil
 	}
 	changed := -1
 	if r.rep.Seq != nil && r.rep.Seq.GapSeconds > 0 {
@@ -444,17 +476,20 @@ func (r *run) checkOrder(moves []journal.RenameMove) error {
 		} else {
 			r.warn("the new names put frames with the same capture time in another order")
 		}
-		return nil
+		return cards, nil
 	}
-	cause := "the new names sort frames with the same capture time in another order than their names do now"
-	if strings.Contains(r.o.Pattern, "{n}") && len(before) >= 10 {
+	cause := "frames no offload manifest records are ordered by their names, and the new names sort frames with the same capture time in another order than their names do now"
+	switch {
+	case dcfNamed != "":
+		cause = fmt.Sprintf("new names of 8 characters ending in 4 digits, such as %s, read as camera file numbers and are ordered by those 4 digits: pick a pattern that gives names of another length", dcfNamed)
+	case strings.Contains(r.o.Pattern, "{n}") && len(before) >= 10:
 		cause = fmt.Sprintf("{n} is unpadded, so 10 sorts before 2: use {n:%d}", max(4, len(strconv.Itoa(len(before)))))
 	}
 	sets := ""
 	if changed >= 0 {
 		sets = fmt.Sprintf(" (%d set(s) would change)", changed)
 	}
-	return fmt.Errorf("this rename would change the order of the report's frames, which regroups the shoot's sets%s and makes judge rank them again: %s; or pass --reorder to go ahead; nothing was renamed", sets, cause)
+	return nil, fmt.Errorf("this rename would change the order of the report's frames, which regroups the shoot's sets%s and makes judge rank them again: %s; or pass --reorder to go ahead; nothing was renamed", sets, cause)
 }
 
 // setsChanged counts the sets in a that b doesn't have, and those in b that a doesn't.
@@ -995,8 +1030,9 @@ func (r *run) followReport() error {
 		}
 	}
 	at := r.reportAt(r.j)
+	filled := r.fillCards()
 	if at == "" {
-		if r.rep.RenamePaths(toTmp) > 0 {
+		if r.rep.RenamePaths(toTmp)+filled > 0 {
 			if err := r.saveReport(); err != nil {
 				return err
 			}
@@ -1014,7 +1050,7 @@ func (r *run) followReport() error {
 		at = "temp"
 	}
 	if at == "temp" {
-		if r.rep.RenamePaths(toNew) > 0 {
+		if r.rep.RenamePaths(toNew)+filled > 0 {
 			if err := r.saveReport(); err != nil {
 				return err
 			}
@@ -1023,8 +1059,42 @@ func (r *run) followReport() error {
 			return errCrash
 		}
 	}
+	if at == "new" && filled > 0 {
+		if err := r.saveReport(); err != nil {
+			return err
+		}
+	}
 	r.j.ReportAt = "new"
 	return nil
+}
+
+// fillCards writes the journal's card names into the report's frames that lack one,
+// wherever the report has the frame now (its old, temp or new path), and returns how
+// many it filled. Card names don't change with a rename, so filling is idempotent.
+func (r *run) fillCards() int {
+	if len(r.j.Cards) == 0 {
+		return 0
+	}
+	at := map[string]string{}
+	for rel, c := range r.j.Cards {
+		at[r.abs(rel)] = c
+	}
+	for _, m := range r.j.Moves {
+		for _, t := range r.triples(m) {
+			if c, ok := at[t[0]]; ok {
+				at[t[1]], at[t[2]] = c, c
+			}
+		}
+	}
+	n := 0
+	for i := range r.rep.Results {
+		x := &r.rep.Results[i]
+		if c, ok := at[x.File]; ok && x.CardName == "" {
+			x.CardName = c
+			n++
+		}
+	}
+	return n
 }
 
 func (r *run) saveReport() error {

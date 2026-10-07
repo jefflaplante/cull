@@ -180,7 +180,7 @@ func TestRenameCounterContinues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Numbered in camera-name order, not capture order.
+	// Numbered in camera order, not capture order.
 	if got := strings.Join(names(p, false), ","); got != "20261002_Smith_wedding_0008.DNG,20261002_Smith_wedding_0009.DNG" {
 		t.Fatalf("names %s", got)
 	}
@@ -334,5 +334,31 @@ func TestSplitAtCameraOrder(t *testing.T) {
 			t.Logf("%s: %v", p.Folder, names(p, false))
 		}
 		t.Fatal("events not split in camera order")
+	}
+}
+
+// Two cards (two bodies, both 100LEICA, overlapping counters) are numbered card by
+// card in the order given, each in camera order: one numbering, never interleaved.
+func TestRenameNumbersCardByCard(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	card(t, a, map[string]spec{"DCIM/100LEICA/L1000006.DNG": {seed: 1}, "DCIM/100LEICA/M1100005.DNG": {seed: 2}})
+	card(t, b, map[string]spec{"DCIM/100LEICA/M1100007.DNG": {seed: 3}, "DCIM/100LEICA/M1100003.DNG": {seed: 4}})
+	for _, tc := range []struct {
+		sources []string
+		want    string
+	}{
+		{[]string{a, b}, "1_M1100005.DNG,2_L1000006.DNG,3_M1100003.DNG,4_M1100007.DNG"},
+		{[]string{b, a}, "1_M1100003.DNG,2_M1100007.DNG,3_M1100005.DNG,4_L1000006.DNG"},
+	} {
+		o := opts(t, tc.sources[0])
+		o.Sources = tc.sources
+		o.Rename = "{n}_{orig}"
+		p, err := MakePlan(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(names(p, false), ","); got != tc.want {
+			t.Errorf("sources %v: %s, want %s", tc.sources, got, tc.want)
+		}
 	}
 }

@@ -221,7 +221,7 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 		w.crtime = make([]error, len(w.temps))
 		for i, f := range w.temps {
 			if len(patches[i]) > 0 {
-				if err := applyPatches(f.Name(), patches[i]); err != nil {
+				if err := applyPatchesFn(f.Name(), patches[i]); err != nil {
 					return err
 				}
 				if h.afterPatch != nil {
@@ -231,7 +231,7 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 					return fmt.Errorf("%s: %w", w.name, err)
 				}
 			}
-			crErr, err := setFileTimes(f.Name(), *w.setDate)
+			crErr, err := setFileTimesFn(f.Name(), *w.setDate)
 			if err != nil {
 				return err
 			}
@@ -259,8 +259,10 @@ func finishStage(ctx context.Context, w *written, h hooks) (err error) {
 // verifyDated is stage B's verify read with --set-date: it computes the patches that
 // set p's capture dates to t (dng.PatchDates reads only the metadata, by ReadAt), then
 // reads p once from the device, returning orig (p as read: the card's hash if the
-// copy is good) and want (p with the patches applied). A file whose dates can't be read
-// (not a TIFF) gets no patches and undated says why; it is still verified.
+// copy is good) and want (p with the patches applied). A file whose dates can't be
+// read because of its format (not a TIFF, offsets past its end) gets no patches and
+// undated says why; it is still verified. A read error is an I/O failure, returned
+// as err: the verify fails and offload's retry applies.
 func verifyDated(ctx context.Context, p string, size int64, t time.Time) (ps []dng.Patch, skipped []string, undated error, orig, want [32]byte, err error) {
 	f, err := os.Open(p)
 	if err != nil {
@@ -270,13 +272,39 @@ func verifyDated(ctx context.Context, p string, size int64, t time.Time) (ps []d
 	if err := noCache(f); err != nil {
 		return nil, nil, nil, orig, want, err
 	}
-	ps, skipped, undated = dng.PatchDates(f, size, t)
+	ra := &ioErrAt{r: datesReaderAt(f)}
+	ps, skipped, undated = dng.PatchDates(ra, size, t)
+	if ra.err != nil {
+		return nil, nil, nil, orig, want, fmt.Errorf("read its metadata: %w", ra.err)
+	}
 	if undated != nil {
 		ps, skipped = nil, nil
 	}
 	orig, want, err = streamPatched(ctx, f, ps, nil)
 	return ps, skipped, undated, orig, want, err
 }
+
+// ioErrAt passes ReadAt through and keeps the first error that isn't the end of the
+// file: what tells an I/O failure from a format PatchDates can't read.
+type ioErrAt struct {
+	r   io.ReaderAt
+	err error
+}
+
+func (a *ioErrAt) ReadAt(p []byte, off int64) (int, error) {
+	n, err := a.r.ReadAt(p, off)
+	if err != nil && a.err == nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		a.err = err
+	}
+	return n, err
+}
+
+// Stage B's date steps; tests swap them to inject failures.
+var (
+	applyPatchesFn = applyPatches
+	setFileTimesFn = setFileTimes
+	datesReaderAt  = func(f *os.File) io.ReaderAt { return f }
+)
 
 // syncTemp is stage B's fsync of each temp copy; tests swap it to inject the errors a
 // network share reports there (a full share, an I/O error).

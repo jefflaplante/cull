@@ -5,11 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -242,9 +245,15 @@ func TestSetDateRerunSkips(t *testing.T) {
 				t.Fatalf("first run %+v", res)
 			}
 			o.Checksum = m.checksum
+			reads := countDiskReads(t)
 			p, err := MakePlan(o)
 			if err != nil {
 				t.Fatalf("re-plan: %v", err)
+			}
+			// --checksum hashes every copy already there, on both destinations; the
+			// quick check reads none.
+			if want := map[bool]int{false: 0, true: 3 * len(p.Dests)}[m.checksum]; reads() != want {
+				t.Fatalf("re-plan read %d copies from the disk, want %d", reads(), want)
 			}
 			if got := names(p, false); len(got) != 0 {
 				t.Fatalf("re-run would copy %v", got)
@@ -447,6 +456,16 @@ func TestSetDateUnreadableFileCopiedAsIs(t *testing.T) {
 	}
 }
 
+// countDiskReads counts the copies hashFromDisk reads (--checksum, --verify).
+func countDiskReads(t *testing.T) func() int {
+	var mu sync.Mutex
+	n := 0
+	old := beforeDiskRead
+	beforeDiskRead = func(string) { mu.Lock(); n++; mu.Unlock() }
+	t.Cleanup(func() { beforeDiskRead = old })
+	return func() int { mu.Lock(); defer mu.Unlock(); return n }
+}
+
 func mustManifest(t *testing.T, d string) []Entry {
 	t.Helper()
 	m, err := readManifest(d)
@@ -559,5 +578,212 @@ func TestSetDateRerunAfterLostManifest(t *testing.T) {
 	os.WriteFile(filepath.Join(p.Dests[0], "M2.DNG"), b, 0o644)
 	if _, err := MakePlan(o); err == nil || !strings.Contains(err.Error(), "different content") {
 		t.Fatalf("damaged unrecorded copy passed --checksum: %v", err)
+	}
+}
+
+// The quick check trusts a recorded dated copy only while its mtime is still the
+// date set: a same-size file swapped in under its name is not skipped as verified.
+func TestSetDateRerunRefusesSwappedFile(t *testing.T) {
+	src, data := threeDNGs(t)
+	o := setDateOpts(t, src)
+	o.Backup = ""
+	p, _ := runPlan(t, o, nil)
+	at := filepath.Join(p.Dests[0], "M2.DNG")
+	os.Chmod(at, 0o644)
+	os.WriteFile(at, data["M2.DNG"], 0o644) // the unpatched card bytes: same size
+	os.Chtimes(at, t0, t0)
+	if _, err := MakePlan(o); err == nil || !strings.Contains(err.Error(), "different content") {
+		t.Fatalf("a swapped-in M2.DNG passed the quick check: %v", err)
+	}
+}
+
+// --rename --checksum hashes copies its own manifest records, and refuses a damaged one.
+func TestSetDateRenameChecksumRefusesDamagedCopy(t *testing.T) {
+	for _, dated := range []bool{true, false} {
+		t.Run(map[bool]string{true: "dated", false: "not dated"}[dated], func(t *testing.T) {
+			src, _ := threeDNGs(t)
+			o := setDateOpts(t, src)
+			o.Backup, o.Rename, o.SetDateSet = "", "{n:4}", dated
+			if !dated {
+				o.Date = "2026-10-04"
+			}
+			p, _ := runPlan(t, o, nil)
+			at := filepath.Join(p.Dests[0], "0002.DNG")
+			b, err := os.ReadFile(at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			st, _ := os.Stat(at)
+			b[len(b)-1] ^= 1
+			os.WriteFile(at, b, 0o644)
+			os.Chtimes(at, st.ModTime(), st.ModTime())
+			o.Checksum = true
+			if _, err := MakePlan(o); err == nil || !strings.Contains(err.Error(), "different content") {
+				t.Fatalf("damaged %s passed --rename --checksum: %v", at, err)
+			}
+		})
+	}
+}
+
+// A read error while finding a copy's dates is an I/O failure, not "no dates": the
+// verify fails and the file is retried, and ends patched.
+func TestSetDateReadErrorRetried(t *testing.T) {
+	src, data := threeDNGs(t)
+	failed := false
+	old := datesReaderAt
+	datesReaderAt = func(f *os.File) io.ReaderAt {
+		if !failed && strings.HasPrefix(filepath.Base(f.Name()), ".M2.DNG.") {
+			failed = true
+			return failingReaderAt{}
+		}
+		return f
+	}
+	t.Cleanup(func() { datesReaderAt = old })
+	o := setDateOpts(t, src)
+	o.Backup = ""
+	var n notes
+	p, res := runPlan(t, o, &n)
+	if !res.Safe || res.Copied != 3 || len(n.with("M2.DNG", "retrying")) != 1 || len(n.with("M2.DNG", "dates not fixed")) != 0 {
+		t.Fatalf("result %+v notes %q", res, n.list)
+	}
+	got, _ := os.ReadFile(filepath.Join(p.Dests[0], "M2.DNG"))
+	if !bytes.Equal(got, applyAll(t, data["M2.DNG"])) {
+		t.Fatal("M2.DNG not patched after the retry")
+	}
+}
+
+type failingReaderAt struct{}
+
+func (failingReaderAt) ReadAt([]byte, int64) (int, error) { return 0, syscall.EIO }
+
+// Copies already there that were made without --set-date are skipped, and one note
+// says how to fix their dates.
+func TestSetDateNotesCopiesMadeWithout(t *testing.T) {
+	for _, rename := range []string{"", "{n:4}"} {
+		t.Run("rename="+rename, func(t *testing.T) {
+			src, _ := threeDNGs(t)
+			o := setDateOpts(t, src)
+			o.Rename, o.SetDateSet, o.Date = rename, false, "2026-10-04"
+			runPlan(t, o, nil)
+			o.SetDateSet = true
+			var n notes
+			p, res := runPlan(t, o, &n)
+			if !res.Safe || res.Copied != 0 {
+				t.Fatalf("result %+v", res)
+			}
+			got := n.with("3 copies already there were made without --set-date", "cull redate", p.Dests[0], "--date 2026-10-04")
+			if len(got) != 1 {
+				t.Fatalf("notes %q", n.list)
+			}
+			// A re-run over dated copies says nothing.
+			var n2 notes
+			src2, _ := threeDNGs(t)
+			o2 := setDateOpts(t, src2)
+			o2.Rename = rename
+			runPlan(t, o2, nil)
+			runPlan(t, o2, &n2)
+			if len(n2.with("without --set-date")) != 0 {
+				t.Fatalf("notes %q", n2.list)
+			}
+		})
+	}
+}
+
+// Many Content Credentials frames: the normal note names five, the verbose one all.
+func TestSetDateContentCredentialsListed(t *testing.T) {
+	src := t.TempDir()
+	fx := map[string]dngtest.Fixture{}
+	var all []string
+	for i := 1; i <= 7; i++ {
+		name := fmt.Sprintf("L%d.DNG", i)
+		fx[name] = signed(int64(i))
+		all = append(all, name)
+	}
+	dngCard(t, src, fx)
+	var n notes
+	runPlan(t, setDateOpts(t, src), &n)
+	if got := n.with("L1.DNG, L2.DNG, L3.DNG, L4.DNG, L5.DNG and 2 more", "Content Credentials"); len(got) != 1 {
+		t.Fatalf("notes %q", n.list)
+	}
+	if got := n.with(strings.Join(all, ", ")); len(got) != 1 {
+		t.Fatalf("no full list: %q", n.list)
+	}
+}
+
+// A stage-B step failing after the verify (writing the patches, setting the times)
+// leaves only hidden temps, which are removed: nothing named or recorded for that
+// try. Once, the retry passes; always, the file fails and the run isn't safe.
+func TestSetDatePatchAndTimesFailures(t *testing.T) {
+	for _, step := range []string{"applyPatches", "setFileTimes"} {
+		for _, always := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s always=%v", step, always), func(t *testing.T) {
+				src, data := threeDNGs(t)
+				p, err := MakePlan(setDateOpts(t, src))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var mu sync.Mutex
+				calls := 0
+				fail := func(path string) error {
+					if !strings.HasPrefix(filepath.Base(path), ".M2.DNG.") {
+						return nil
+					}
+					mu.Lock()
+					defer mu.Unlock()
+					calls++
+					if always || calls == 1 {
+						if _, err := os.Lstat(filepath.Join(filepath.Dir(path), "M2.DNG")); err == nil {
+							t.Errorf("M2.DNG named before %s", step)
+						}
+						return syscall.EIO
+					}
+					return nil
+				}
+				oldA, oldT := applyPatchesFn, setFileTimesFn
+				t.Cleanup(func() { applyPatchesFn, setFileTimesFn = oldA, oldT })
+				if step == "applyPatches" {
+					applyPatchesFn = func(path string, ps []dng.Patch) error {
+						if err := fail(path); err != nil {
+							return err
+						}
+						return applyPatches(path, ps)
+					}
+				} else {
+					setFileTimesFn = func(path string, tm time.Time) (error, error) {
+						if err := fail(path); err != nil {
+							return nil, err
+						}
+						return setFileTimes(path, tm)
+					}
+				}
+				res, err := Run(context.Background(), p, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, d := range p.Dests {
+					noTemps(t, d)
+					_, named := os.Lstat(filepath.Join(d, "M2.DNG"))
+					rec := false
+					for _, e := range mustManifest(t, d) {
+						rec = rec || e.Name == "M2.DNG"
+					}
+					if always && (named == nil || rec) {
+						t.Fatalf("failed M2.DNG named (%v) or recorded (%v) in %s", named == nil, rec, d)
+					}
+					if !always {
+						got, _ := os.ReadFile(filepath.Join(d, "M2.DNG"))
+						if !bytes.Equal(got, applyAll(t, data["M2.DNG"])) || !rec {
+							t.Fatalf("M2.DNG wrong or unrecorded in %s after the retry", d)
+						}
+					}
+				}
+				switch {
+				case always && (res.Safe || res.Copied != 2 || len(res.Failed) != 1 || calls != 1+len(retryDelays)):
+					t.Fatalf("always: result %+v, %d calls", res, calls)
+				case !always && (!res.Safe || res.Copied != 3 || len(res.Failed) != 0):
+					t.Fatalf("once: result %+v", res)
+				}
+			})
+		}
 	}
 }

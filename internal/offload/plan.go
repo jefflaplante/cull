@@ -62,6 +62,9 @@ type File struct {
 	// manifest line and no --checksum comparison, so it was never checked against the
 	// card and can't count toward "safe to format".
 	Unverified bool
+	// Undated: skipped as already there, but with --set-date its copies were made
+	// without it (the manifest records no dates_set): their dates are the camera's.
+	Undated bool
 }
 
 // DefaultSplitGap is the capture-time gap that starts a new event with --split.
@@ -431,9 +434,10 @@ func same(f File, path string, st os.FileInfo, checksum bool) (bool, error) {
 // redate): its bytes and mtime differ from the card's on purpose, so the card file is
 // matched against the manifest entry e instead. e applies when it records dates_set
 // for this card file (orig, size and mtime, within the window); then the copy is f
-// when its size is the card's, and with checksum when the card hashes to e's sha256
-// and the copy, read from the disk, to e's file_sha256 (sha256 when only its file
-// times were set). applies false: e says nothing about f, and same decides.
+// when its size is the card's and, as the quick check, its mtime is the date set
+// (within the window); with checksum, when the card hashes to e's sha256 and the
+// copy, read from the disk, to e's file_sha256 (sha256 when only its file times were
+// set). applies false: e says nothing about f, and same decides.
 func recordedSame(f File, e Entry, path string, st os.FileInfo, checksum bool) (applies, eq bool, err error) {
 	dt := e.ModTime.Sub(f.ModTime)
 	if e.DatesSet == "" || !strings.EqualFold(e.Orig, filepath.Base(f.Src)) || e.Size != f.Size ||
@@ -444,17 +448,30 @@ func recordedSame(f File, e Entry, path string, st os.FileInfo, checksum bool) (
 		return true, false, nil
 	}
 	if !checksum {
-		return true, true, nil
+		set, err := time.ParseInLocation("2006-01-02T15:04:05", e.DatesSet, time.Local)
+		if err != nil {
+			return true, false, nil
+		}
+		d := st.ModTime().Sub(set)
+		return true, d <= mtimeWindow && d >= -mtimeWindow, nil
 	}
+	eq, err = matchesEntry(f, e, path)
+	return true, eq, err
+}
+
+// matchesEntry is the --checksum comparison against a manifest entry: the card file
+// hashes to e's sha256 and the copy at path, read from the disk, to the checksum the
+// file must have now (file_sha256 when its dates were patched, else sha256).
+func matchesEntry(f File, e Entry, path string) (bool, error) {
 	a, err := fileSum(f.Src)
 	if err != nil {
-		return true, false, err
+		return false, err
 	}
 	if hexOf(a[:]) != e.SHA256 {
-		return true, false, nil
+		return false, nil
 	}
 	b, err := hashFromDisk(context.Background(), path)
-	return true, err == nil && hexOf(b[:]) == e.fileSHA(), err
+	return err == nil && hexOf(b[:]) == e.fileSHA(), err
 }
 
 // sameDated is same for a copy --set-date made that no manifest records: a crash
@@ -538,6 +555,7 @@ func (p *Plan) cameraNames(o Options) error {
 			return fmt.Errorf("%s is on two sources (%s and %s): use --rename to keep both", f.Name, other, f.Src)
 		}
 		byName[key] = f.Src
+		datedThere := false // a copy already there is a dated one
 		for i, d := range p.Dests {
 			at, st, ok := existing(d, f.Name)
 			if !ok {
@@ -549,6 +567,7 @@ func (p *Plan) cameraNames(o Options) error {
 			applies, eq, err := false, false, error(nil)
 			if e, ok := dated[i][key]; ok {
 				applies, eq, err = recordedSame(*f, e, at, st, o.Checksum)
+				datedThere = datedThere || (applies && eq)
 			}
 			if !applies && err == nil {
 				eq, err = same(*f, at, st, o.Checksum)
@@ -556,6 +575,7 @@ func (p *Plan) cameraNames(o Options) error {
 				// above, is another file.
 				if _, recorded := verified[i][f.Name]; !eq && err == nil && p.setDate != nil && !recorded {
 					eq, err = sameDated(*f, at, st, o.Checksum, *p.setDate)
+					datedThere = datedThere || eq
 				}
 			}
 			if err != nil {
@@ -570,6 +590,7 @@ func (p *Plan) cameraNames(o Options) error {
 		}
 		if len(f.To) == 0 {
 			f.Skip = "already copied"
+			f.Undated = p.setDate != nil && !datedThere
 		}
 	}
 	return nil
@@ -683,6 +704,17 @@ func (p *Plan) renamed(o Options) error {
 						at, st.Size(), f.Size)
 				}
 				if e, ok := recorded[j][key]; ok && e.Name == rec.Name && matches(e) {
+					// Recorded here: verified when it was made. --checksum checks it
+					// still is, against the checksums that line records.
+					if o.Checksum {
+						eq, err := matchesEntry(*f, e, at)
+						if err != nil {
+							return err
+						}
+						if !eq {
+							return fmt.Errorf("%s exists with different content than the manifest records; move it aside and rerun", at)
+						}
+					}
 					continue
 				}
 				eq := false
@@ -702,6 +734,7 @@ func (p *Plan) renamed(o Options) error {
 			}
 			if len(f.To) == 0 {
 				f.Skip = "in manifest"
+				f.Undated = p.setDate != nil && rec.DatesSet == ""
 			}
 			continue
 		}

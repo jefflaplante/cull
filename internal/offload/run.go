@@ -69,6 +69,7 @@ func Run(ctx context.Context, p *Plan, sink ui.Sink) (*Result, error) {
 		r.pipeline()
 	}
 	r.noteSigned()
+	r.noteUndated()
 	res := r.res
 	// Only now, with no file in either stage, is each destination's drive cache flushed,
 	// once: fsync stops at the drive. That can take a few seconds after a big copy, so
@@ -327,6 +328,27 @@ func (r *runner) noteDates(f File, w *written) {
 	}
 }
 
+// noteUndated says, once per run, how many copies --set-date skipped as already
+// there were made without it, and how to fix their dates.
+func (r *runner) noteUndated() {
+	n := 0
+	for _, f := range r.p.Files {
+		if f.Skip != "" && f.Undated {
+			n++
+		}
+	}
+	if n == 0 || r.p.setDate == nil {
+		return
+	}
+	at := ""
+	if c := r.p.setDate.Format(time.TimeOnly); c != "12:00:00" {
+		at = " --time " + c
+	}
+	r.emit(ui.Event{Note: &ui.Note{Level: ui.Normal, Text: fmt.Sprintf(
+		"%d copies already there were made without --set-date; fix their dates with `cull redate %q --date %s%s`",
+		n, r.p.Dests[0], r.p.setDate.Format(time.DateOnly), at)}})
+}
+
 // noteSigned names, in one note per run, the Content Credentials frames --set-date
 // copied with their dates unchanged.
 func (r *runner) noteSigned() {
@@ -339,6 +361,9 @@ func (r *runner) noteSigned() {
 	}
 	r.emit(ui.Event{Note: &ui.Note{Level: ui.Normal, Text: names +
 		": Content Credentials — dates left unchanged so the signature stays valid (file times set; the sidecar carries the date)"}})
+	if len(r.signed) > 5 {
+		r.verbose("Content Credentials, dates left unchanged: %s", strings.Join(r.signed, ", "))
+	}
 }
 
 // retryFailed carries on after try 0 of f failed with err: it copies f again with

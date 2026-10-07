@@ -260,6 +260,7 @@ are gone, but cull can set one fixed date and time on every frame:
 
 ```sh
 cull offload /Volumes/LEICA\ M ~/Pictures --name "Smith wedding" --set-date 2026-10-04   # while copying
+S=~/Pictures/"2026-10-04 Smith wedding"         # the shoot folder
 cull redate "$S" --date 2026-10-04 --dry-run     # a folder already offloaded: list the changes
 cull redate "$S" --date 2026-10-04 --time 15:00:00
 ```
@@ -288,32 +289,41 @@ compares. Only a match takes the file's name. So every patched file is the origi
 for byte, everywhere except the dates.
 - **`offload --set-date`:** each copy is first verified against the card as usual, then
   patched, then proven. The card is never written.
-- **`redate`:** the frame is first checked against the checksum offload recorded for it.
-  A frame that no longer matches is refused and left alone: a damaged file is never
-  "fixed". The patched version is written to a hidden file beside the frame, proven, and
-  then swapped in with one atomic rename. That swap is the only place cull ever replaces a
-  file. A crash leaves the old file or the new one, never a half-written one.
+- **`redate`:** when offload recorded a checksum for the frame, the frame is first checked
+  against it. A frame that no longer matches is refused and left alone: a damaged file is
+  never "fixed".
+  Check the folder with `cull offload --verify <folder>`. If the card isn't formatted
+  yet, copy that frame again (or take it from your backup), then run redate again.
+  A frame cull didn't copy (no checksum recorded) is proven against itself as read.
+  The patched version is written to a hidden file beside the frame, proven, and then
+  renamed over it. That rename is the only time cull replaces a photo.
+- **A crash never leaves a half-written frame.** On a Mac's own disk (APFS) the rename is
+  atomic: the old frame or the new one. On exFAT, FAT32 or a network share, a crash at the
+  wrong moment can leave the frame only in its hidden, already-proven copy; the next
+  `redate` puts it back (and `cull status` says so).
 - **The manifest keeps both checksums:** the card's (`sha256`) and the patched file's
   (`file_sha256`). `offload --verify` checks each frame against the right one, and running
   offload again on the same card copies nothing.
 
 **Content Credentials.** Some frames carry a signed Content Credentials (C2PA) record, and
-its signature covers the dates; on the M11-P these were the `L…` files. Changing the dates
-would break the signature, so those frames keep their dates inside the file. Their file
-times still change, and cull's sidecar carries the corrected date. The run lists them.
+its signature covers the dates; on the one M11-P card checked, these were the `L…` files.
+Changing the dates would break the signature, so those frames keep their dates inside the
+file. Their file times still change, and cull's sidecar carries the corrected date. The run
+names them (all of them with `-v`).
 
 **What doesn't change:**
-- **The shoot's sets and rankings.** cull's report keeps the camera's capture time, which
-  the sets are grouped by. A `judge` afterwards continues the report without calling the
-  model again.
+- **redate doesn't change the shoot's sets and rankings.** cull's report keeps the
+  capture time it read when the shoot was scanned, which the sets are grouped by. A
+  `judge` afterwards continues the report without calling the model again. (After
+  `offload --set-date`, the scan reads the fixed dates.)
 - **The shoot folder's name.** redate doesn't rename it; `offload --set-date` names a new
   folder by the date you give.
 
 **Interrupted?** Run the same command again: it finishes the job, proving any hidden copy
-it left. Until then the other cull commands refuse the folder, and `cull status` names the
-command that finishes it. redate also refuses while a judge or ranking batch is still
-pending, and while another cull command is working on the folder (see
-[the folder lock](#the-folder-lock)).
+it left. Until then the commands that read or change the folder's frames refuse it, and
+`cull status` names the command that finishes it. redate also refuses while a judge or
+ranking batch is still pending, and while another cull command is working on the folder
+(see [the folder lock](#the-folder-lock)).
 
 **Before import.** Capture One and Lightroom may lose track of files changed after import,
 so fix dates first. Whether Capture One shows the date inside the DNG or the one in cull's
@@ -340,7 +350,8 @@ cull rename --undo "$S"                            # put the old names back
   where they are.
 - **Everything follows the file:** its sidecar, the report, your labels, the offload
   manifest (so `--verify` and a re-run of offload still find every frame) and the review
-  sheet's images. A `judge` afterwards makes no model calls.
+  sheet's images. A `judge` afterwards makes no model calls (unless you passed
+  `--reorder`: then it ranks the changed sets again).
 - **Nothing moves until the whole plan passes.** The rename is refused, naming the files,
   when:
   - two frames would get the same name, or a new name belongs to another file;
@@ -349,8 +360,8 @@ cull rename --undo "$S"                            # put the old names back
 - **Names can swap safely.** Frames first move to hidden temp names, then to their new
   ones, so two frames can trade names. Each step is recorded in `cull-rename.json`. If a
   rename is interrupted, run the same command again to finish it, or `--undo` to put the
-  names back; until then the other cull commands refuse the folder. `--undo` also reverses
-  the last finished rename.
+  names back; until then the commands that read or change its frames refuse the folder.
+  `--undo` also reverses the last finished rename.
 - **A pattern that changes the frames' order is refused.** Frames with the same capture
   time (every frame, with a stopped clock) are grouped into sets in name order. An
   unpadded `{n}` sorts `10` before `2`, so the sets would regroup and `judge` would rank
@@ -374,7 +385,9 @@ the command in the way; wait for it to finish, or stop it.
   command is running and the refusal says the share holds a stale lock, remount the share,
   or remove the `.cull.lock` the message names.
 - **A disk that can't lock at all** gets a one-line note, and the command goes ahead.
-- **The hidden files stay.** They're never taken for frames.
+- **Only `.cull.lock` stays.** Each command removes its `.cull-holder-…` file when it
+  ends; one left by a crash is cleared by the next redate or rename. None is ever taken for
+  a frame.
 
 **`cull status`** names an unfinished redate or rename and the command that finishes it.
 It also lists any hidden temp file that may hold a frame's only copy after a crash, and

@@ -25,20 +25,24 @@ time). offload --set-date does the same while copying a card.
 Each frame's EXIF and embedded XMP dates are rewritten at the same length, digit for
 digit, into a hidden copy beside it. That copy is read back from the disk and must
 hash to the original's bytes with exactly those fields changed, and it gets the new
-file times; only then does it replace the original (an atomic rename). A frame that no
-longer matches the checksum offload recorded is refused and left as it is: a changed
-or damaged file is never "fixed". Frames with Content Credentials keep their signed
-dates; only their file times change.
+file times; only then is it renamed over the original. On a Mac's own disk (APFS) that
+rename is atomic; on exFAT, FAT32 or a network share a crash can leave the frame only
+in its hidden, proven copy, which the next redate puts back. Never a half-written frame.
+
+A frame that no longer matches the checksum offload recorded is refused and left as it
+is: a changed or damaged file is never "fixed" (check with offload --verify, copy that
+frame again from the card or a backup, then run redate again). Frames with Content
+Credentials keep their signed dates; only their file times change.
 
 The offload manifest, the report and cull's sidecars follow, so judge continues the
-report without calling the model again. The report keeps the camera's capture time,
-which the shoot's sets are grouped by, so sets and rankings stay as they were; the
-corrected date goes into cull's sidecars.
+report without calling the model again. The report keeps the capture time it read when
+the shoot was scanned, which the sets are grouped by, so redate doesn't change the sets
+or their rankings; the corrected date goes into cull's sidecars.
 
 redate refuses while a judge or ranking batch is pending (finish or cancel it first)
 and while another cull command is using the folder (the folder lock, .cull.lock). An
-interrupted run is finished by running the same command again; until then the other
-cull commands refuse the folder, and cull status says why. Capture One and Lightroom
+interrupted run is finished by running the same command again; until then the commands
+that read or change the folder's frames refuse it, and cull status says why. Capture One and Lightroom
 may lose track of frames already imported.`,
 		Example: `  cull redate ~/Pictures/"2026-10-04 Smith wedding" --date 2026-10-04 --dry-run
   cull redate ~/Pictures/"2026-10-04 Smith wedding" --date 2026-10-04 --time 15:00:00`,
@@ -98,7 +102,7 @@ may lose track of frames already imported.`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&day, "date", "", "the capture date to set, YYYY-MM-DD")
+	f.StringVar(&day, "date", "", "the capture date to set, YYYY-MM-DD (required)")
 	f.StringVar(&clock, "time", "12:00:00", "the time of day set, HH:MM:SS (local time)")
 	f.BoolVar(&dryRun, "dry-run", false, "print what would change, per file; write nothing")
 	return cmd

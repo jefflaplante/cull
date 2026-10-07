@@ -4,7 +4,7 @@ This is a whole session, in order: copy the card, judge the frames, check them, 
 import into Capture One. Every command has `--help` with examples; `--help-all` adds the tuning and experimental flags. The full flag
 reference is in the [README](README.md).
 
-**Every example here is real output** (the judge run recorded 2026-10-03; offload, estimate, tag, sort and status re-run with v0.2.0 on 2026-10-06) (the screenshots are rendered
+**Every example here is real output** (the judge run recorded 2026-10-03; offload, estimate, tag, sort and status re-run with v0.2.0 on 2026-10-06), except `--set-date`, `redate` and `rename`, which show commands only until real output is added (the screenshots are rendered
 from recordings of the live terminal). It's a 17-frame M11-P shoot: a small card made
 from the repo's sample frames, judged with `--backend claude-code`. Paths are relative
 to where the commands ran. Your numbers will differ. Lines are trimmed only where the
@@ -420,17 +420,21 @@ cull redate "Pictures/2025-12-28 Forest portraits" --date 2026-10-02 --dry-run
 cull redate "Pictures/2025-12-28 Forest portraits" --date 2026-10-02
 ```
 
-- **Each frame is checked first** against the checksum taken when it was copied. A frame
-  that changed since is refused and left alone.
+- **Each frame is checked first** against the checksum taken when it was copied, if cull
+  copied it. A frame that changed since is refused and left alone. Check the folder with
+  `cull offload --verify <folder>`; if the card isn't formatted yet, copy that frame again
+  (or take it from your backup), then run redate again.
 - **The fixed version is proven before it replaces the frame.** It is written to a hidden
   file beside the frame, read back from the disk, and must match the original byte for
-  byte, apart from the dates. Only then is it swapped in.
+  byte, apart from the dates. Only then is it swapped in. A crash never leaves a
+  half-written frame; at worst the frame waits in its hidden, proven copy until the next
+  redate puts it back.
 - **The report, the manifest and cull's sidecars follow,** so `judge` carries on without
   calling the model again. The sets stay as they were: cull still groups frames by the
   time the camera wrote.
 - **The folder keeps its name:** redate doesn't rename it.
-- **Interrupted?** Run the same command again. Until it has finished, the other commands
-  refuse the folder, and `cull status` tells you what to run.
+- **Interrupted?** Run the same command again. Until it has finished, the commands that
+  read or change its frames refuse the folder, and `cull status` tells you what to run.
 
 **`cull rename`** renames every frame by a pattern, with the same tokens as offload's
 `--rename`:
@@ -466,7 +470,8 @@ cull command uses the folder.
   - `--sort` moves frames within the shoot folder, recorded in the
     report and undone by `cull restore`. `rename` renames them, undone by
     `cull rename --undo`.
-  - The one file cull ever replaces is a frame `redate` has just proven.
+  - The only time cull replaces a photo is when `redate` swaps in a frame it has just
+    proven.
   - Sidecars that cull didn't write are never overwritten unless you pass
     `--overwrite-xmp`.
 - **Verdicts are only as good as calibration.** Label a sample in `review`, check

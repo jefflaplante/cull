@@ -47,9 +47,9 @@ Limits, checked before anything moves (each refuses the rename, naming the files
     cull command is using (the folder lock, .cull.lock).
 
 An interrupted rename is finished by running the same command again, or put back with
---undo; until then the other cull commands refuse the folder, and cull status says
-why. --undo also puts back the last finished rename. Capture One and Lightroom may
-lose track of frames already imported.`,
+--undo; until then the commands that read or change the folder's frames refuse it,
+and cull status says why. --undo also puts back the last finished rename. Capture One
+and Lightroom may lose track of frames already imported.`,
 		Example: `  cull rename ~/Pictures/"2026-10-04 Smith wedding" "{date}_{name}_{n:4}" --dry-run
   cull rename ~/Pictures/"2026-10-04 Smith wedding" "{date}_{name}_{n:4}"
   cull rename --undo ~/Pictures/"2026-10-04 Smith wedding"`,

@@ -112,8 +112,8 @@ make vet
   `._` (macOS's AppleDouble companions on exFAT/FAT).
 - `internal/redate` — `cull redate`: per frame `PatchDates` → `ReplacePatched` (file times
   only for Content Credentials or nothing to patch), proven against the manifest's checksum
-  (a mismatch is refused, never "fixed"); then a manifest line, the report (`ModTime`,
-  `DatesSet`), cull's sidecar. The journal `cull-redate.json` records each frame before its
+  when one is recorded (a mismatch is refused, never "fixed"), else against the frame as
+  read; then a manifest line, the report (`ModTime`, `DatesSet`), cull's sidecar. The journal `cull-redate.json` records each frame before its
   swap; `settleTemps` restores or removes temps an interruption left; refuses a sort folder,
   a parent of shoots, a pending batch. `Folders`/`ShootOf` are shared with rename.
 - `internal/rename` — `cull rename` / `--undo`: plans every name and refuses before moving
@@ -167,14 +167,20 @@ make vet
   (same-disk rename into `keep/` `review/` `cull/`, never overwriting, recorded as `moved_to`),
   and `restore` undoes it. `rename` (and `--undo`) renames them in their folders: journalled,
   through hidden temps, never replacing anything, with the report, labels log, manifest,
-  sidecars and review cache following. `offload` only reads cards.
-- Never replace a file, with one exception: `redate`'s atomic `rename(2)` of a proven temp
+  sidecars and review cache following. `offload` only reads cards and never replaces a file.
+- No command replaces a DNG, with one exception: `redate`'s `rename(2)` of a proven temp
   over its original, in the same directory, after the proof step. Never overwrite an
-  existing `.xmp` unless `--overwrite-xmp`.
+  existing `.xmp` unless `--overwrite-xmp`. (cull's own files — the report, its sidecars,
+  journals — are saved by temp + rename, which does replace them.)
+  - **Design assumption, not measured:** that rename is atomic on APFS. On exFAT, FAT32 and
+    SMB it may not be: a crash can leave only the proven temp, which the next redate proves
+    and adopts (`settleTemps`) and `status` reports. The tests simulate it; no real crash
+    has been observed.
 - `cull-offload.jsonl` and `cull-labels.jsonl` are append-only: the last line per
   `(orig, size)` / per file name is current. A manifest's `sha256` is always the card's hash.
 - After `redate` or `rename`, a following `judge` makes zero model calls: the report's keys
-  (path + size + mtime) follow the files. Both refuse while a batch is pending (its state
+  (path + size + mtime) follow the files. The exception is `rename --reorder`, whose
+  regrouped sets are ranked again. Both refuse while a batch is pending (its state
   is keyed by path). judge, decide, review, restore, scan, tag, rank, import-labels,
   offload, redate and rename refuse a folder with an unfinished `cull-redate.json` or
   `cull-rename.json` (`holdShoot`, `journal.Unfinished`); `status` names it.
@@ -675,8 +681,9 @@ effectively file-name order and the time gap never splits). Set-ups judged from 
 
 ### Date fixing and renaming (2026-10-06/07, built for a camera whose clock stopped)
 
-The user's M11-P has a dead real-time clock: every frame carries the same timestamp. These
-were measured while building `--set-date`, `redate` and `rename`.
+The user reports that their M11-P's real-time clock is dead, so every frame carries the
+same timestamp. The facts below were measured while building `--set-date`, `redate` and
+`rename`.
 
 - **The card's frames, read-only probe of `/Volumes/LEICA M` (10 frames, 2026-10-06):**
   - **5 `L…` frames carry Content Credentials:** a signed C2PA manifest in IFD0 tag 0xCD41,
@@ -701,8 +708,8 @@ were measured while building `--set-date`, `redate` and `rename`.
   - The real-filesystem tests (`CULL_ADV_DEST`) passed on exFAT and FAT32 images, with
     companions present.
 - **Replacing a file drops its extended attributes** (Finder tags, comments), because the
-  replacement is a new inode. redate copies them (`copyXattrs`; `TestXattrKept`, including a
-  read-only original).
+  replacement is a new inode. redate copies them (`copyXattrs`; `TestXattrKept`, and
+  `TestXattrReadOnly` for a read-only original).
 - **flock on the user's NAS** (`/Volumes/photos-1`, smbfs, SMB 3.1.1 to TrueNAS,
   2026-10-06/07):
   - **A shared lock held by one process blocks a shared lock from another:** smbfs treats
@@ -713,16 +720,17 @@ were measured while building `--set-date`, `redate` and `rename`.
     found 2–6 cases of two writers at once. Releasing by close alone: 0 in 9 runs.
   - **Closing any other handle to a locked file in the same process drops that process's
     lock.** So cull never opens a lock file it holds.
-  - **A lock nobody owns comes back as EACCES,** not EWOULDBLOCK. A `.cull.lock` left by a
-    `LOCK_UN`-then-close run couldn't be deleted from either mount ("Resource busy"), and
-    still refused a fresh flock. Hence EACCES on the gate counts as held, with advice to
-    remount or remove the file.
+  - **A lock nobody owns comes back as EACCES,** not EWOULDBLOCK. A `.cull.lock` left on
+    the share couldn't be deleted from either mount ("Resource busy"), and still refused a
+    fresh flock. That it came from a `LOCK_UN`-then-close run is inferred, not proven.
+    EACCES may also be ordinary smbfs contention, not only a stale lock. Hence EACCES on
+    the gate counts as held, and the advice (remount, or remove the file) applies only
+    when no cull command is running.
   - **Exclusive flocks across processes work** there, and on APFS, exFAT and FAT32, with no
     "lock unavailable" note.
 - **Not yet run on real frames:** `offload --set-date`, `redate` and `rename` themselves.
   They're tested on synthetic DNGs, on APFS and on exFAT and FAT32 images; the folder
-  lock also on the NAS.
-  The live check on the card (each step followed by `--verify`) is the plan's Task 8.
+  lock also on the NAS. The live check on the card (each step followed by `--verify`) is the plan's Task 8.
 
 ## Unverified assumptions — check before building on them
 

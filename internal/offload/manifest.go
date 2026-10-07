@@ -22,8 +22,24 @@ type Entry struct {
 	Name    string    `json:"name"` // name in the shoot folder
 	Size    int64     `json:"size"`
 	ModTime time.Time `json:"mtime"`
-	SHA256  string    `json:"sha256"`
+	SHA256  string    `json:"sha256"` // the card's bytes, always; a patched file adds FileSHA256
 	At      time.Time `json:"at"`
+
+	// Set when the file's capture dates were patched (offload --set-date, redate). The
+	// patched_at tag is omitzero, not omitempty: a zero time.Time is not "empty" to
+	// encoding/json, and unpatched lines stay as they were.
+	FileSHA256 string    `json:"file_sha256,omitempty"` // the file as it is now, when its dates were patched
+	DatesSet   string    `json:"dates_set,omitempty"`   // "2026-10-04T12:00:00" local, when patched
+	PatchedAt  time.Time `json:"patched_at,omitzero"`
+}
+
+// fileSHA is the checksum the file on disk must have now: FileSHA256 for a patched
+// file, else the card's.
+func (e Entry) fileSHA() string {
+	if e.FileSHA256 != "" {
+		return e.FileSHA256
+	}
+	return e.SHA256
 }
 
 func hexOf(b []byte) string { return hex.EncodeToString(b) }

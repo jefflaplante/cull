@@ -356,14 +356,16 @@ func unsupported(err error) bool {
 	return errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP)
 }
 
-// Verify re-hashes every file folder's manifest records, from the disk, and reports
-// how many match and how many are missing or differ (each with a warning).
 // Verified is what Verify found.
 type Verified struct {
 	OK, Bad    int
 	Unrecorded []string // DNGs in the folder that no manifest line covers: never verified by cull
 }
 
+// Verify re-hashes every file folder's manifest records, from the disk, and reports
+// how many match and how many are missing or differ (each with a warning). Each file
+// is checked under the name and checksum of its current (last) entry: file_sha256 for
+// a file whose dates were patched, the card's sha256 otherwise.
 func Verify(ctx context.Context, folder string, sink ui.Sink) (v Verified, err error) {
 	ok, bad := 0, 0
 	defer func() { v.OK, v.Bad = ok, bad }()
@@ -374,6 +376,9 @@ func Verify(ctx context.Context, folder string, sink ui.Sink) (v Verified, err e
 	if len(man) == 0 {
 		return v, fmt.Errorf("no %s in %s: nothing to verify", ManifestName, folder)
 	}
+	// Each file is checked against its current entry: redate and rename append lines
+	// that supersede earlier ones (new name, patched checksum).
+	man = current(man)
 	if sink != nil {
 		sink.Emit(ui.Event{Stage: &ui.Stage{Name: "verify", Unit: "files", Total: int64(len(man))}})
 		defer sink.Emit(ui.Event{Stage: &ui.Stage{Name: "verify", Done: true}})
@@ -390,8 +395,11 @@ func Verify(ctx context.Context, folder string, sink ui.Sink) (v Verified, err e
 			problem = fmt.Sprintf("size %d, the card's was %d", st.Size(), e.Size)
 		} else if sum, err := hashFromDisk(ctx, p); err != nil {
 			problem = err.Error()
-		} else if hexOf(sum[:]) != e.SHA256 {
+		} else if hexOf(sum[:]) != e.fileSHA() {
 			problem = "differs from the card (checksum mismatch)"
+			if e.FileSHA256 != "" {
+				problem = "differs from the recorded checksum (its dates were patched)"
+			}
 		}
 		if problem != "" {
 			bad++

@@ -2,7 +2,10 @@
 
 package offload
 
-import "os"
+import (
+	"os"
+	"time"
+)
 
 // noCache is a no-op off macOS: the verify read may then be served from the page
 // cache, so it checks less than on macOS.
@@ -16,3 +19,6 @@ func plainSync(f *os.File) error { return f.Sync() }
 func residentPages(string) (resident, pages int, err error) { return 0, 0, nil }
 
 func evict(string) error { return nil }
+
+// setCreationTime is a no-op off macOS: there is no portable creation time to set.
+func setCreationTime(string, time.Time) error { return nil }

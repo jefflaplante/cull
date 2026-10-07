@@ -5,7 +5,10 @@ package offload
 import (
 	"os"
 	"syscall"
+	"time"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // noCache stops the kernel keeping f's pages in the page cache (fcntl F_NOCACHE): a
@@ -78,4 +81,13 @@ func evict(p string) error {
 		}
 		return nil
 	})
+}
+
+// setCreationTime sets p's creation (birth) time to t (setattrlist ATTR_CMN_CRTIME),
+// which Finder and Capture One show as "Created". Not every filesystem keeps one.
+func setCreationTime(p string, t time.Time) error {
+	ts := unix.NsecToTimespec(t.UnixNano())
+	al := unix.Attrlist{Bitmapcount: unix.ATTR_BIT_MAP_COUNT, Commonattr: unix.ATTR_CMN_CRTIME}
+	buf := unsafe.Slice((*byte)(unsafe.Pointer(&ts)), unsafe.Sizeof(ts))
+	return unix.Setattrlist(p, &al, buf, unix.FSOPT_NOFOLLOW)
 }

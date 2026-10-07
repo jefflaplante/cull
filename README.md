@@ -983,8 +983,8 @@ plain lines. Ctrl-C works as before: in-flight frames finish, the report is save
 ## Changed in v0.2.0
 
 <!-- v0.2.0 renames -->
-For v0.1 users. Every old form below still works in v0.2.0, with a warning, and goes in
-the next release, except the `calibrate` sweep, which the policy grid replaced.
+For v0.1 users. Every old form below still works throughout v0.2, with a warning, and goes in
+v0.3.0, except the `calibrate` sweep, which the policy grid replaced.
 
 | Old | New |
 |---|---|

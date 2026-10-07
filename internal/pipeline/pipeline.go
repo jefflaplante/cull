@@ -24,6 +24,7 @@ import (
 	"github.com/jefflaplante/cull/internal/imageprep"
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/llm"
+	"github.com/jefflaplante/cull/internal/offload"
 	"github.com/jefflaplante/cull/internal/rawclip"
 	"github.com/jefflaplante/cull/internal/report"
 	"github.com/jefflaplante/cull/internal/ui"
@@ -80,6 +81,7 @@ type Config struct {
 	rankWith    rankExec                            // set by Run (sync) or RunBatch (batch) when Rank: what finishRun ranks with; nil = no ranking
 	pinner      llm.ModelPinner                     // the backend, when its model is an alias: finishRun records what it resolved to
 	detect      func(*imageprep.Frame) []focus.Face // test hook; nil = pigo
+	datesSet    map[string]string                   // by frame path: the date offload --set-date or redate set (startRun reads the manifests)
 	CheckpointN int
 	Log         io.Writer // Normal-level lines (the CLI backs it with UI)
 	UI          ui.Sink   // structured progress events; nil = plain lines through Log
@@ -516,6 +518,7 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	cfg.datesSet = datesSet(*cfg, files)
 	if cfg.detect == nil {
 		d, err := focus.NewDetector()
 		if err != nil {
@@ -594,6 +597,9 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 			rep.ResolvedModel = prev.ResolvedModel
 			rep.DiscardedCostUSD = prev.DiscardedCostUSD
 			for _, r := range prev.Results {
+				if r.DatesSet == "" {
+					r.DatesSet = cfg.datesSet[r.File]
+				}
 				if kept(r, cfg.DryRun, cfg.Policy) {
 					rep.Results = append(rep.Results, r)
 					done[r.Key()] = true
@@ -629,6 +635,34 @@ func startRun(cfg *Config) (*report.Report, []string, error) {
 	rep.Results = kept
 	fmt.Fprintf(cfg.Log, "%d DNGs found, %d already done, %d to process\n", len(files), len(files)-len(todo), len(todo))
 	return rep, todo, nil
+}
+
+// datesSet reads the offload manifest of each folder the frames are in, once per
+// run, and returns the capture date each frame had set (offload --set-date, redate),
+// by path. A manifest that can't be read only costs those dates: a warning.
+func datesSet(cfg Config, files []string) map[string]string {
+	out := map[string]string{}
+	read := map[string]bool{}
+	dirs := []string{cfg.Dir} // even with every frame moved into sort folders: resumed results look it up
+	for _, f := range files {
+		dirs = append(dirs, filepath.Dir(f))
+	}
+	for _, dir := range dirs {
+		dir = filepath.Clean(dir)
+		if read[dir] {
+			continue
+		}
+		read[dir] = true
+		m, err := offload.DatesSet(dir)
+		if err != nil {
+			cfg.warn("%s: %v (capture dates set on offload not recorded)", filepath.Join(dir, offload.ManifestName), err)
+			continue
+		}
+		for name, d := range m {
+			out[filepath.Join(dir, name)] = d
+		}
+	}
+	return out
 }
 
 // guardOverwrite refuses a run that would replace a report holding paid

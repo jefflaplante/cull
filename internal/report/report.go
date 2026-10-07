@@ -138,11 +138,15 @@ type JunkInfo struct {
 }
 
 type Result struct {
-	File        string           `json:"file"`
-	Size        int64            `json:"size"`
-	ModTime     time.Time        `json:"mod_time"`
-	Preview     *PreviewInfo     `json:"preview,omitempty"`
-	Exif        *dng.Exif        `json:"exif,omitempty"`
+	File    string       `json:"file"`
+	Size    int64        `json:"size"`
+	ModTime time.Time    `json:"mod_time"`
+	Preview *PreviewInfo `json:"preview,omitempty"`
+	Exif    *dng.Exif    `json:"exif,omitempty"`
+	// DatesSet is the capture date set on the file (offload --set-date, redate), local
+	// "2006-01-02T15:04:05", from the shoot folder's offload manifest. The sidecar uses
+	// it over Exif: a Content Credentials frame keeps its camera dates in the file.
+	DatesSet    string           `json:"dates_set,omitempty"`
 	Stats       *imageprep.Stats `json:"stats,omitempty"`
 	FocusTarget *FocusTarget     `json:"focus_target,omitempty"`
 	Look        string           `json:"look,omitempty"` // look fingerprint (imageprep Grid), base64

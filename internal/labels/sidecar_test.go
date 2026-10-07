@@ -184,3 +184,17 @@ func TestSidecarDateTaken(t *testing.T) {
 		}
 	}
 }
+
+// A frame whose capture date was set on offload (Result.DatesSet) carries that date
+// in its sidecar, over the file's own EXIF date: a Content Credentials frame keeps
+// its camera dates in the file.
+func TestSidecarDateTakenPrefersDatesSet(t *testing.T) {
+	r := report.Result{Exif: &dng.Exif{DateTimeOriginal: "2025:12:28 00:05:59"}, DatesSet: "2026-10-04T12:00:00"}
+	if got := Sidecar(r, Entry{}, 1, false, nil).DateTaken; got != "2026-10-04T12:00:00" {
+		t.Errorf("DateTaken %q", got)
+	}
+	r.Exif = nil
+	if got := Sidecar(r, Entry{}, 1, false, nil).DateTaken; got != "2026-10-04T12:00:00" {
+		t.Errorf("without EXIF: DateTaken %q", got)
+	}
+}

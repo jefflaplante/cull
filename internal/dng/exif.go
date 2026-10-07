@@ -2,6 +2,7 @@ package dng
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"strconv"
@@ -47,17 +48,22 @@ type Exif struct {
 
 // ReadExif reads IFD0 and the Exif IFD. Missing tags are left zero.
 func ReadExif(path string) (Exif, error) {
-	var e Exif
 	f, err := os.Open(path)
 	if err != nil {
-		return e, err
+		return Exif{}, err
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return e, err
+		return Exif{}, err
 	}
-	t, ifd0, err := newTIFFReader(f, st.Size())
+	return ReadExifFrom(f, st.Size())
+}
+
+// ReadExifFrom is ReadExif on a DNG of size bytes read from r.
+func ReadExifFrom(r io.ReaderAt, size int64) (Exif, error) {
+	var e Exif
+	t, ifd0, err := newTIFFReader(r, size)
 	if err != nil {
 		return e, err
 	}

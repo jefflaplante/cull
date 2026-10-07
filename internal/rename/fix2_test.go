@@ -118,7 +118,7 @@ func TestDryRunsTakeNoLock(t *testing.T) {
 	}
 }
 
-// The holder message names the most recent holder without claiming it still holds.
+// The refusal names exactly the command in the way: each reader names itself.
 func TestRRLockHolderMessage(t *testing.T) {
 	dir := t.TempDir()
 	r1, _, _ := journal.Lock(dir, false, "judge")
@@ -126,7 +126,7 @@ func TestRRLockHolderMessage(t *testing.T) {
 	r2()
 	_, _, err := journal.Lock(dir, true, "rename")
 	r1()
-	if err == nil || !strings.Contains(err.Error(), "in use by another cull command (most recent: cull review pid") {
+	if err == nil || !strings.Contains(err.Error(), "is in use by cull judge (pid ") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -149,7 +149,7 @@ func TestRRUnlockedWriters(t *testing.T) {
 		{"import-labels", labels, dir},
 	} {
 		out, err := cullCmd(args...)
-		if err == nil || !strings.Contains(err.Error(), "in use by another cull command") {
+		if err == nil || !strings.Contains(err.Error(), "is in use by cull rename (pid ") {
 			t.Errorf("%v under a rename's lock: %v\n%.300s", args[0], err, out)
 		}
 	}

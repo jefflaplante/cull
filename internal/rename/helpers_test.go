@@ -25,6 +25,7 @@ import (
 	"github.com/jefflaplante/cull/internal/dng/dngtest"
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/imageprep"
+	"github.com/jefflaplante/cull/internal/journal"
 	"github.com/jefflaplante/cull/internal/labels"
 	"github.com/jefflaplante/cull/internal/llm"
 	"github.com/jefflaplante/cull/internal/offload"
@@ -375,7 +376,7 @@ func contains(m map[string]string, v string) bool {
 func noTemps(t *testing.T, dir string) {
 	t.Helper()
 	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err == nil && strings.HasPrefix(d.Name(), ".") && (strings.Contains(d.Name(), ".cull-") || strings.HasSuffix(d.Name(), ".tmp")) {
+		if err == nil && strings.HasPrefix(d.Name(), ".") && !journal.IsLockFile(d.Name()) && (strings.Contains(d.Name(), ".cull-") || strings.HasSuffix(d.Name(), ".tmp")) {
 			t.Errorf("temp left behind: %s", p)
 		}
 		return nil

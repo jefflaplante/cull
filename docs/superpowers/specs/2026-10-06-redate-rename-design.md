@@ -89,25 +89,29 @@ returns the exact byte ranges and their new contents (`Patch{Off int64; Old, New
 without writing anything. `Patch.Old` is what the file holds there now. Every writer below
 applies exactly these patches and then proves the result.
 
-**Proof step (shared):** re-read the patched file from the device (F_NOCACHE, after
-evicting it, as offload's verify does) and check two things:
+**Proof (shared): hash equality against "source with exactly these patches".**
 
-1. outside the patch ranges, every byte equals the original source (the card's bytes, or
-   the original file for `redate`);
-2. inside them, the bytes equal `Patch.New`.
-
-It produces the patched file's SHA-256. A failure removes the temp and fails the file.
+- While cull reads the source anyway, it computes two SHA-256s in the same pass:
+  - `orig`: the bytes as read;
+  - `want`: the same bytes with the patches applied in-stream.
+- After writing the patches and fsyncing, it evicts the file and re-reads it from the
+  device (F_NOCACHE, the existing verify path). That hash must equal `want`.
+- This proves the file is the source byte-for-byte except at exactly the patched ranges,
+  which hold `Patch.New`.
+- A mismatch removes the temp and fails the file; the retry rules are offload's.
 
 **Offload with `--set-date`.** Per file, in stage B of the pipeline:
 
-1. Fsync the temp, evict it, and verify it against the card hash. Unchanged.
-2. Compute the patches from the temp, apply them with `pwrite` into the temp, and fsync.
-3. Run the proof step against the card hash's data. The source for that comparison is the
-   temp before patching: rather than re-reading the card, verify step 1's equality to the
-   card, then compare the patched bytes with the pre-patch bytes, which are known equal to
-   the card.
-4. Set the file times.
-5. Link-no-replace to the final name.
+1. **Compute the patches** from the temp's metadata. A DNG's IFDs and XMP packet are read
+   with ReadAt, so no full read is needed.
+2. **Verify, extended:** fsync the temp, evict it, and re-read it from the device as today.
+   - `orig` must equal the card's hash, which is today's check.
+   - `want` is computed in the same pass.
+3. **Patch:** `pwrite` the patches into the temp, fsync, evict, and re-read it from the
+   device. The hash must equal `want`.
+4. **Set the file times,** then link-no-replace to the final name, as today.
+
+Cost: one extra re-read of the copy per file (the proof). Measure it in the plan's bench.
 
 The manifest entry (`cull-offload.jsonl`) keeps `sha256` = the card's hash, plus new
 fields:
@@ -126,17 +130,21 @@ fields:
 
 **`redate` on an existing folder.** Per file:
 
-1. Compute the patches.
-2. Write a full patched copy to a hidden temp beside the original (`.<name>.cull-*.tmp`,
-   the existing temp convention): stream the original, apply the patches in the stream,
-   fsync.
-3. Run the proof step against the original.
-4. Set the times on the temp.
-5. Atomically rename it over the original (`rename(2)`, same directory).
+1. **Compute the patches.**
+2. **Stream the original** into a hidden temp beside it (`.<name>.cull-*.tmp`, the existing
+   temp convention), applying the patches in-stream. In the same pass, compute:
+   - `orig`, which must equal the manifest's checksum for this file (`file_sha256`, else
+     `sha256`) when one exists. A mismatch means the file was already damaged or changed:
+     refuse that file and report it, never "fix" a corrupted file.
+   - `want`, the hash of the patched bytes.
+3. **Prove the temp:** fsync it, evict it, and re-read it from the device. Its hash must
+   equal `want`.
+4. **Set the times on the temp.**
+5. **Atomically rename it over the original** (`rename(2)`, same directory), then fsync the
+   directory.
    - This is the one deliberate exception to "never replace a file", allowed only here.
    - A crash leaves either the old or the new file, never a torn one, plus at most a
      hidden temp that the next run removes.
-6. fsync the directory.
 
 Then the bookkeeping, per file, in this order:
 
@@ -229,8 +237,8 @@ after the proof step. Everything else is unchanged.
 **Tests:**
 
 - `PatchDates`: exact offsets, lengths kept, idempotence, refusal on a length change.
-- **The proof step:** catches a stray byte changed outside a patch, and a patch not
-  applied.
+- **The proof:** catches a stray byte changed outside a patch, a patch not applied, and
+  a damaged original (`orig` doesn't match the manifest), which redate refuses.
 - **Offload `--set-date`:**
   - the card is unchanged (tree hash);
   - each patched copy differs from its card file only at the patch ranges;

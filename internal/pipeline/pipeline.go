@@ -120,7 +120,10 @@ func Discover(dir string, recursive bool) ([]string, error) {
 			}
 			return nil
 		}
-		if strings.EqualFold(filepath.Ext(p), ".dng") && !strings.HasPrefix(d.Name(), "._") {
+		// Hidden files are never frames: AppleDouble companions ("._…"), and redate's
+		// temps (".cull-redate-<hex>.<name>.DNG"), which may hold a frame's only copy until
+		// redate restores it, and must never be judged or sorted away from its folder.
+		if strings.EqualFold(filepath.Ext(p), ".dng") && !strings.HasPrefix(d.Name(), ".") {
 			out = append(out, p)
 		}
 		return nil

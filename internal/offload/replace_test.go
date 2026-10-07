@@ -17,9 +17,14 @@ import (
 
 func replaceFixture(t *testing.T) (path string, b []byte, ps []dng.Patch) {
 	t.Helper()
+	return replaceFixtureNamed(t, "M7.DNG")
+}
+
+func replaceFixtureNamed(t *testing.T, name string) (path string, b []byte, ps []dng.Patch) {
+	t.Helper()
 	dir := t.TempDir()
 	b = dngtest.Build(t, dated(7, 9<<20))
-	path = filepath.Join(dir, "M7.DNG")
+	path = filepath.Join(dir, name)
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +39,7 @@ func replaceFixture(t *testing.T) (path string, b []byte, ps []dng.Patch) {
 func temps(t *testing.T, dir string) []string {
 	t.Helper()
 	m, _ := filepath.Glob(filepath.Join(dir, ".*.tmp"))
-	r, _ := filepath.Glob(filepath.Join(dir, ".*.redate"))
+	r, _ := filepath.Glob(filepath.Join(dir, RedateTempPrefix+"*"))
 	return append(m, r...)
 }
 
@@ -180,7 +185,7 @@ func TestReplacePatchedJournalBeforeFullSync(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(order) != 3 || order[0] != "journal" || !strings.HasSuffix(order[1], ".redate") || order[2] != "full "+filepath.Base(filepath.Dir(path)) {
+	if len(order) != 3 || order[0] != "journal" || !strings.HasPrefix(order[1], "full "+RedateTempPrefix) || order[2] != "full "+filepath.Base(filepath.Dir(path)) {
 		t.Fatalf("order %q", order)
 	}
 }
@@ -195,7 +200,7 @@ func TestReplacePatchedKeepsTempWithoutTarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("no error")
 	}
-	if l, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".M7.DNG.cull-*.redate")); len(l) != 1 {
+	if l, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".cull-redate-*.M7.DNG")); len(l) != 1 {
 		t.Fatalf("temp not kept: %v", l)
 	}
 }
@@ -203,7 +208,7 @@ func TestReplacePatchedKeepsTempWithoutTarget(t *testing.T) {
 // Offload's sweep of its own stale temps leaves redate's alone.
 func TestRemoveStaleTempsSparesRedate(t *testing.T) {
 	dir := t.TempDir()
-	mine, theirs := filepath.Join(dir, ".A.DNG.cull-01020304.tmp"), filepath.Join(dir, ".A.DNG.cull-01020304.redate")
+	mine, theirs := filepath.Join(dir, ".A.DNG.cull-01020304.tmp"), filepath.Join(dir, ".cull-redate-01020304.A.DNG")
 	os.WriteFile(mine, nil, 0o644)
 	os.WriteFile(theirs, nil, 0o644)
 	RemoveStaleTemps(dir)
@@ -219,7 +224,7 @@ func TestRemoveStaleTempsSparesRedate(t *testing.T) {
 func TestTempsInGlobFolder(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "2026-10-02 trip [day 1] *?")
 	os.Mkdir(dir, 0o755)
-	mine, theirs := filepath.Join(dir, ".A.DNG.cull-01020304.tmp"), filepath.Join(dir, ".A.DNG.cull-01020304.redate")
+	mine, theirs := filepath.Join(dir, ".A.DNG.cull-01020304.tmp"), filepath.Join(dir, ".cull-redate-01020304.A.DNG")
 	os.WriteFile(mine, nil, 0o644)
 	os.WriteFile(theirs, nil, 0o644)
 	if got := RedateTemps(dir); got[theirs] != filepath.Join(dir, "A.DNG") || len(got) != 1 {
@@ -245,7 +250,7 @@ func TestReplacePatchedTempKept(t *testing.T) {
 // macOS's AppleDouble companions ("._" + name) on exFAT/FAT are never temps.
 func TestTempsSkipAppleDouble(t *testing.T) {
 	dir := t.TempDir()
-	ad1, ad2 := filepath.Join(dir, "._.A.DNG.cull-01020304.redate"), filepath.Join(dir, "._.A.DNG.cull-01020304.tmp")
+	ad1, ad2 := filepath.Join(dir, "._.cull-redate-01020304.A.DNG"), filepath.Join(dir, "._.A.DNG.cull-01020304.tmp")
 	os.WriteFile(ad1, nil, 0o644)
 	os.WriteFile(ad2, nil, 0o644)
 	if got := RedateTemps(dir); len(got) != 0 {
@@ -268,5 +273,82 @@ func TestReplacePatchedVanishesWhileRead(t *testing.T) {
 	})
 	if err == nil || !r.TempKept || r.Proven || r.Temp == "" {
 		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+// Redate's temps are ".cull-redate-<8 hex>.<name>". A frame named "_IGP0001.DNG" (Pentax;
+// Nikon and Sony "_DSC", Canon "_MG_") once got "._IGP0001.DNG.cull-<hex>.redate",
+// which reads as an AppleDouble companion: skipped by recovery and status, and deleted
+// by dot_clean or find -name '._*' -delete, though it may be the frame's only copy.
+func TestRedateTempNeverLooksAppleDouble(t *testing.T) {
+	for _, name := range []string{"_IGP0001.DNG", "M7.DNG", "_.DNG"} {
+		path, _, ps := replaceFixtureNamed(t, name)
+		restore := SetRenameHook(func(old, new string) error { os.Remove(new); return syscall.EIO })
+		r, err := ReplacePatched(context.Background(), path, ps, "", setTarget, nil)
+		restore()
+		if err == nil || !r.TempKept || !r.Proven {
+			t.Fatalf("%s: %+v %v", name, r, err)
+		}
+		base := filepath.Base(r.Temp)
+		if strings.HasPrefix(base, "._") || !strings.HasPrefix(base, RedateTempPrefix) || !strings.HasSuffix(base, "."+name) {
+			t.Fatalf("%s: temp named %s", name, base)
+		}
+		if got := RedateTemps(filepath.Dir(path)); len(got) != 1 || got[r.Temp] != path {
+			t.Fatalf("%s: RedateTemps %v", name, got)
+		}
+	}
+}
+
+// Offload's sweep takes the crash temp of an "_" frame ("._IGP0001.DNG.cull-<hex>.tmp"),
+// never an AppleDouble companion ("._." + a hidden temp's name), and never a redate temp.
+func TestRemoveStaleTempsUnderscoreFrames(t *testing.T) {
+	dir := t.TempDir()
+	swept := []string{"._IGP0001.DNG.cull-01020304.tmp", "._DSC0001.DNG.cull-0a0b0c0d.tmp", ".M1.DNG.cull-01020304.tmp"}
+	kept := []string{
+		"._.M1.DNG.cull-01020304.tmp",          // the companion of .M1.DNG.cull-….tmp
+		"._._IGP0001.DNG.cull-01020304.tmp",    // the companion of ._IGP0001.DNG.cull-….tmp
+		".cull-redate-01020304._IGP0001.DNG",   // redate's: may be the only copy
+		"._.cull-redate-01020304._IGP0001.DNG", // its companion
+		"_IGP0001.DNG", "._IGP0001.DNG",        // a frame and its companion
+	}
+	for _, n := range append(append([]string{}, swept...), kept...) {
+		os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644)
+	}
+	RemoveStaleTemps(dir)
+	for _, n := range swept {
+		if _, err := os.Stat(filepath.Join(dir, n)); !os.IsNotExist(err) {
+			t.Errorf("%s not swept", n)
+		}
+	}
+	for _, n := range kept {
+		if _, err := os.Stat(filepath.Join(dir, n)); err != nil {
+			t.Errorf("%s removed", n)
+		}
+	}
+}
+
+// RedateTemps maps each temp back to its frame, "_" names included, and never takes an
+// AppleDouble companion ("._.cull-redate-…") or an offload temp.
+func TestRedateTempsNames(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{
+		".cull-redate-01020304._IGP0001.DNG", ".cull-redate-0a0b0c0d.M1.DNG",
+		"._.cull-redate-01020304._IGP0001.DNG", "._.cull-redate-0a0b0c0d.M1.DNG",
+		"._IGP0001.DNG.cull-01020304.tmp", ".cull-redate-xyz.M1.DNG", ".cull-redate-01020304.", ".cull-redate-01020304..",
+	} {
+		os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644)
+	}
+	got := RedateTemps(dir)
+	want := map[string]string{
+		filepath.Join(dir, ".cull-redate-01020304._IGP0001.DNG"): filepath.Join(dir, "_IGP0001.DNG"),
+		filepath.Join(dir, ".cull-redate-0a0b0c0d.M1.DNG"):       filepath.Join(dir, "M1.DNG"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("%s → %q, want %q (all %v)", k, got[k], v, got)
+		}
 	}
 }

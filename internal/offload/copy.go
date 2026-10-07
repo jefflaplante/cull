@@ -326,14 +326,17 @@ func openSource(src string, h hooks) (io.ReadCloser, error) {
 
 // createTemp makes ".<name>.cull-<random>.tmp" in dir, as rsync does: a crash leaves
 // a hidden temp file, never a partial file under the real name.
-func createTemp(dir, name string) (*os.File, error) { return createTempExt(dir, name, ".tmp") }
+func createTemp(dir, name string) (*os.File, error) {
+	return createNamedTemp(dir, func(rnd string) string { return "." + name + ".cull-" + rnd + ".tmp" })
+}
 
-// createTempExt is createTemp with another extension: redate's temps end in
-// RedateTempExt, so offload's sweep of its own stale temps never takes one.
-func createTempExt(dir, name, ext string) (*os.File, error) {
+// createNamedTemp makes the uncached temp named(<8 random hex digits>) in dir, never
+// replacing anything: redate's are named apart (RedateTempPrefix), so offload's sweep of
+// its own stale temps never takes one.
+func createNamedTemp(dir string, named func(rnd string) string) (*os.File, error) {
 	var rb [4]byte
 	rand.Read(rb[:])
-	p := filepath.Join(dir, "."+name+".cull-"+hex.EncodeToString(rb[:])+ext)
+	p := filepath.Join(dir, named(hex.EncodeToString(rb[:])))
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err

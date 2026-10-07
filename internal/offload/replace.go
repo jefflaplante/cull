@@ -37,18 +37,21 @@ type Replaced struct {
 	Proven   bool   // the temp re-read from the disk as want
 }
 
-// RedateTempExt ends ReplacePatched's temps (".<name>.cull-<rand>.redate"): distinct from
-// offload's ".tmp", so RemoveStaleTemps never takes one. After a crash a redate temp may
-// be a file's only copy (a rename-over that deletes first, interrupted), so only
-// RedateTemps' caller, which can prove it, decides its fate.
-const RedateTempExt = ".redate"
+// RedateTempPrefix starts ReplacePatched's temps: ".cull-redate-<8 hex>.<name>". After a
+// crash a redate temp may be a file's only copy (a rename-over that deletes first,
+// interrupted), so only RedateTemps' caller, which can prove it, decides its fate:
+//   - offload's sweep (RemoveStaleTemps, ".<name>.cull-<8 hex>.tmp") never takes one;
+//   - it never starts "._", so it can't pass for an AppleDouble companion, whatever the
+//     frame's name (Pentax "_IGP0001.DNG", Nikon and Sony "_DSC", Canon "_MG_"), which
+//     recovery would skip and dot_clean or find -name '._*' -delete would remove.
+const RedateTempPrefix = ".cull-redate-"
 
-var redateTempRE = regexp.MustCompile(`^\.(.+)\.cull-[0-9a-f]{8}` + regexp.QuoteMeta(RedateTempExt) + `$`)
+var redateTempRE = regexp.MustCompile(`^` + regexp.QuoteMeta(RedateTempPrefix) + `[0-9a-f]{8}\.([^.].*)$`) // redate never takes a hidden file
 
 // ReplacePatched rewrites path with exactly the patches ps (dng.PatchDates' output)
 // and its times set to t, replacing the original only once the new bytes are proven:
 //
-//  1. The original is read once into a hidden temp beside it (".<name>.cull-<rand>.redate"),
+//  1. The original is read once into a hidden temp beside it (".cull-redate-<rand>.<name>"),
 //     the patches applied in-stream, hashing both the bytes as read (orig) and as
 //     written (want). If expect (hex) is set and orig differs, ErrChanged.
 //  2. beforeSwap (if set) runs: redate journals the swap there, before the flush below,
@@ -79,7 +82,7 @@ func ReplacePatched(ctx context.Context, path string, ps []dng.Patch, expect str
 		return r, fmt.Errorf("%s has %d hard links: replacing it would leave the others with the old dates", path, s.Nlink)
 	}
 	dir, name := filepath.Split(path)
-	tmp, err := createTempExt(dir, name, RedateTempExt)
+	tmp, err := createNamedTemp(dir, func(rnd string) string { return RedateTempPrefix + rnd + "." + name })
 	if err != nil {
 		return r, err
 	}
@@ -195,11 +198,12 @@ func ProveFrom(ctx context.Context, path string, want [32]byte) error {
 
 // RemoveStaleTemps removes the hidden temps (".<name>.cull-<rand>.tmp") an offload crash
 // left in dir: never a file's only copy, since a copy takes its name (by link, never
-// replacing) only once proven. Redate's temps (RedateTempExt) are never touched here.
+// replacing) only once proven. Redate's temps (RedateTempPrefix) are never touched here.
 func RemoveStaleTemps(dir string) {
 	ents, _ := os.ReadDir(dir)
 	for _, e := range ents {
-		if offloadTempRE.MatchString(e.Name()) && e.Type().IsRegular() && !appleDouble(e.Name()) {
+		n := e.Name()
+		if offloadTempRE.MatchString(n) && !redateTempRE.MatchString(n) && e.Type().IsRegular() && !appleDouble(n) {
 			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
@@ -229,6 +233,9 @@ func SetAfterStreamHook(f func(path string)) (restore func()) {
 	return func() { afterStream = nil }
 }
 
-// appleDouble reports macOS's "._" companion of a file on exFAT/FAT (its extended
-// attributes): never a temp itself. The filesystem removes it with its file.
-func appleDouble(name string) bool { return strings.HasPrefix(name, "._") }
+// appleDouble reports macOS's "._" companion (its extended attributes, on exFAT/FAT) of
+// a hidden temp: "._" + ".<name>…" starts "._.". Only that prefix: an offload temp of a
+// frame named "_IGP0001.DNG" is "._IGP0001.DNG.cull-<hex>.tmp", a temp to sweep. (A
+// frame named "_.<…>" would have its offload temp left behind: harmless.) The
+// filesystem removes a companion with its file.
+func appleDouble(name string) bool { return strings.HasPrefix(name, "._.") }

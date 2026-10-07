@@ -79,7 +79,7 @@ func TestOrphanTempIsOnlyCopy(t *testing.T) {
 	judge(t, dir, false, &counting{})
 	p := filepath.Join(dir, "M1.DNG")
 	patched := applyAll(t, data["M1.DNG"])
-	tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+	tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 	os.WriteFile(tmp, patched, 0o644)
 	os.Chtimes(tmp, target, target)
 	st, _ := os.Stat(p)
@@ -122,7 +122,7 @@ func TestOrphanTempIsOnlyCopy(t *testing.T) {
 // never deleted, and the journal stays.
 func TestUnprovenOrphanTempKept(t *testing.T) {
 	dir, data := offloaded(t, map[string]dngtest.Fixture{"M1.DNG": dated(1, 4000)})
-	tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+	tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 	bad := applyAll(t, data["M1.DNG"])
 	bad[len(bad)-5] ^= 0xFF
 	os.WriteFile(tmp, bad, 0o644)
@@ -145,7 +145,7 @@ func TestUnprovenOrphanTempKept(t *testing.T) {
 // happen: removed.
 func TestLeftoverTempRemoved(t *testing.T) {
 	dir, _ := offloaded(t, map[string]dngtest.Fixture{"M1.DNG": dated(1, 4000)})
-	tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+	tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 	os.WriteFile(tmp, []byte("half written"), 0o644)
 	run(t, dir)
 	if _, err := os.Stat(tmp); !os.IsNotExist(err) {

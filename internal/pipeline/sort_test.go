@@ -242,3 +242,17 @@ func TestLegacyCulledFolderIsResortedAndRestored(t *testing.T) {
 		}
 	}
 }
+
+// Hidden files are never frames: redate's temps (".cull-redate-<hex>.<name>", which end
+// in .DNG and may be a frame's only copy until redate restores them) and AppleDouble
+// companions are never judged, counted or sorted.
+func TestDiscoverSkipsHidden(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"_IGP0001.DNG", ".cull-redate-01020304._IGP0001.DNG", "._.cull-redate-01020304._IGP0001.DNG", "._IGP0001.DNG"} {
+		os.WriteFile(filepath.Join(dir, n), nil, 0o644)
+	}
+	files, _ := Discover(dir, false)
+	if len(files) != 1 || filepath.Base(files[0]) != "_IGP0001.DNG" {
+		t.Fatalf("discovered %v", files)
+	}
+}

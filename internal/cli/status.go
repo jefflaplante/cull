@@ -78,7 +78,7 @@ func writeStatus(w io.Writer, cfg pipeline.Config, files []string, rep *report.R
 		for tmp, target := range offload.RedateTemps(d) {
 			rel, _ := filepath.Rel(cfg.Dir, target)
 			if _, err := os.Lstat(target); err == nil {
-				missing = append(missing, fmt.Sprintf("  hidden temp %s beside %s: the next redate removes it if %s is what it recorded, else keeps both and says why\n", tmp, rel, rel))
+				missing = append(missing, fmt.Sprintf("  hidden temp %s beside %s: the next redate removes it if it's a partial copy or %s is what it recorded, else keeps both and says why\n", tmp, rel, rel))
 				continue
 			}
 			if rec, ok := jr.FileRecord(rel); ok && rec.Want != "" && unfinished && which == "redate" {

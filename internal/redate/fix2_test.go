@@ -97,7 +97,7 @@ func TestOrphanTempBracketFolder(t *testing.T) {
 	}
 	p := filepath.Join(dir, "M1.DNG")
 	patched := applyAll(t, data["M1.DNG"])
-	tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+	tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 	os.WriteFile(tmp, patched, 0o644)
 	os.Chtimes(tmp, target, target)
 	st, _ := os.Stat(p)
@@ -106,7 +106,7 @@ func TestOrphanTempBracketFolder(t *testing.T) {
 	}}
 	j.Save(dir)
 	os.Remove(p)
-	leftover := filepath.Join(dir, ".M2.DNG.cull-cafebabe.redate")
+	leftover := filepath.Join(dir, ".cull-redate-cafebabe.M2.DNG")
 	os.WriteFile(leftover, []byte("x"), 0o644)
 	if res, n, err := runNotes(t, dir); err != nil || res.Refused != 0 {
 		t.Fatalf("%v %+v\n%s", err, res, n.all())
@@ -169,7 +169,7 @@ func TestOrphanInSortFolder(t *testing.T) {
 	p := filepath.Join(keep, "M1.DNG")
 	os.Rename(filepath.Join(dir, "M1.DNG"), p)
 	patched := applyAll(t, data["M1.DNG"])
-	tmp := filepath.Join(keep, ".M1.DNG.cull-0badf00d.redate")
+	tmp := filepath.Join(keep, ".cull-redate-0badf00d.M1.DNG")
 	os.WriteFile(tmp, patched, 0o644)
 	os.Chtimes(tmp, target, target)
 	st, _ := os.Stat(p)
@@ -195,7 +195,7 @@ func TestTempBesideUnprovenFileKept(t *testing.T) {
 	dir, data := offloaded(t, map[string]dngtest.Fixture{"M1.DNG": dated(1, 4000)})
 	p := filepath.Join(dir, "M1.DNG")
 	patched := applyAll(t, data["M1.DNG"])
-	tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+	tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 	os.WriteFile(tmp, patched, 0o644)
 	st, _ := os.Stat(p)
 	j := &journal.Redate{Target: targetISO, Started: time.Now(), Files: map[string]journal.FileState{
@@ -225,7 +225,7 @@ func TestTempBesideUnprovenFileKept(t *testing.T) {
 func TestOrphanAdvice(t *testing.T) {
 	dir, _ := offloaded(t, map[string]dngtest.Fixture{"M1.DNG": dated(1, 4000)})
 	os.Remove(filepath.Join(dir, "M1.DNG"))
-	tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+	tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 	os.WriteFile(tmp, []byte("unknown"), 0o644)
 	res, n, _ := runNotes(t, dir)
 	if len(res.Orphans) != 1 || res.Orphans[0] != tmp {

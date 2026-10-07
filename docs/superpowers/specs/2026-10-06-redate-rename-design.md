@@ -144,8 +144,10 @@ fields:
 **`redate` on an existing folder.** Per file:
 
 1. **Compute the patches.**
-2. **Stream the original** into a hidden temp beside it (`.<name>.cull-*.tmp`, the existing
-   temp convention), applying the patches in-stream. In the same pass, compute:
+2. **Stream the original** into a hidden temp beside it (`.cull-redate-<8 hex>.<name>`:
+   never offload's `.tmp`, which offload sweeps, and never starting `._`, which would pass
+   for an AppleDouble companion when the frame's name starts with `_`), applying the
+   patches in-stream. In the same pass, compute:
    - `orig`, which must equal the manifest's checksum for this file (`file_sha256`, else
      `sha256`) when one exists. A mismatch means the file was already damaged or changed:
      refuse that file and report it, never "fix" a corrupted file.

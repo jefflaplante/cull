@@ -154,10 +154,86 @@ func TestRedateInterruptedReplacement(t *testing.T) {
 // it recorded).
 func TestStatusTempBesideFrame(t *testing.T) {
 	dir, _ := redateShoot(t)
-	tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+	tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 	os.WriteFile(tmp, []byte("x"), 0o644)
 	out, err := run(t, "status", dir)
 	if err != nil || !strings.Contains(out, tmp) {
 		t.Fatalf("status: %v\n%s", err, out)
+	}
+}
+
+// A frame named "_IGP0001.DNG" (Pentax; Nikon/Sony "_DSC", Canon "_MG_") interrupted
+// mid-replacement: status names it and its hidden temp (once taken for an AppleDouble
+// companion and never shown), and the next redate restores it.
+func TestStatusUnderscoreInterrupted(t *testing.T) {
+	dir := t.TempDir()
+	b := dngtest.Build(t, dngtest.Fixture{DateTime: "2025:12:28 00:05:59", DTO: "2025:12:28 00:05:59", Payload: []byte("raw")})
+	p := filepath.Join(dir, "_IGP0001.DNG")
+	os.WriteFile(p, b, 0o644)
+	restore := offload.SetRenameHook(func(old, new string) error { os.Remove(new); return syscall.EIO })
+	out, err := run(t, "redate", "--date", "2026-10-04", dir)
+	restore()
+	if err == nil {
+		t.Fatalf("redate: no error\n%s", out)
+	}
+	out, _ = run(t, "status", dir)
+	if !strings.Contains(out, "missing: _IGP0001.DNG; the next redate restores it") || !strings.Contains(out, ".cull-redate-") ||
+		!strings.Contains(out, "next: cull redate "+dir+" --date 2026-10-04") || !strings.Contains(out, ": 0 DNGs") {
+		t.Fatalf("status:\n%s", out)
+	}
+	if out, err := run(t, "redate", "--date", "2026-10-04", dir); err != nil {
+		t.Fatalf("finish: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(p); err != nil {
+		t.Fatal("_IGP0001.DNG not restored")
+	}
+}
+
+// An AppleDouble companion of a redate temp ("._.cull-redate-…") is never listed as a
+// temp, nor counted as a DNG.
+func TestStatusIgnoresAppleDoubleOfTemp(t *testing.T) {
+	dir, _ := redateShoot(t)
+	os.WriteFile(filepath.Join(dir, "._.cull-redate-deadbeef.M9.DNG"), []byte("x"), 0o644)
+	out, err := run(t, "status", dir)
+	if err != nil || strings.Contains(out, "cull-redate-deadbeef") || strings.Contains(out, "next: mv") {
+		t.Fatalf("status: %v\n%s", err, out)
+	}
+}
+
+// -r: an interrupted replacement in a plain subfolder; status -r lists it and the
+// redate that restores it, which then finishes.
+func TestStatusRecursiveInterrupted(t *testing.T) {
+	parent := t.TempDir()
+	sub := filepath.Join(parent, "day1")
+	os.Mkdir(sub, 0o755)
+	b := dngtest.Build(t, dngtest.Fixture{DateTime: "2025:12:28 00:05:59", DTO: "2025:12:28 00:05:59", Payload: []byte("raw")})
+	os.WriteFile(filepath.Join(sub, "_DSC0001.DNG"), b, 0o644)
+	restore := offload.SetRenameHook(func(old, new string) error { os.Remove(new); return syscall.EIO })
+	run(t, "redate", "-r", "--date", "2026-10-04", parent)
+	restore()
+	out, _ := run(t, "status", "-r", parent)
+	if !strings.Contains(out, "day1/_DSC0001.DNG; the next redate restores it") || !strings.Contains(out, "next: cull redate") {
+		t.Fatalf("status -r:\n%s", out)
+	}
+	if out, err := run(t, "redate", "-r", "--date", "2026-10-04", parent); err != nil {
+		t.Fatalf("finish: %v\n%s", err, out)
+	}
+}
+
+// An orphan in a subfolder with -r: the CLI error names cull status -r, which lists it.
+func TestOrphanRecursiveCLI(t *testing.T) {
+	parent := t.TempDir()
+	sub := filepath.Join(parent, "day1")
+	os.Mkdir(sub, 0o755)
+	b := dngtest.Build(t, dngtest.Fixture{DateTime: "2025:12:28 00:05:59", DTO: "2025:12:28 00:05:59", Payload: []byte("raw")})
+	os.WriteFile(filepath.Join(sub, "M1.DNG"), b, 0o644)
+	os.WriteFile(filepath.Join(sub, ".cull-redate-deadbeef._M2.DNG"), b, 0o644)
+	out, err := run(t, "redate", "-r", "--date", "2026-10-04", parent)
+	if err == nil || !strings.Contains(err.Error(), "cull status -r") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, _ = run(t, "status", "-r", parent)
+	if !strings.Contains(out, ".cull-redate-deadbeef._M2.DNG") || !strings.Contains(out, "next: mv") || !strings.Contains(out, "day1/_M2.DNG") {
+		t.Fatalf("status -r:\n%s", out)
 	}
 }

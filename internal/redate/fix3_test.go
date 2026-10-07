@@ -22,7 +22,7 @@ func hiddenTemps(dir string) []string {
 	var out []string
 	ents, _ := os.ReadDir(dir)
 	for _, e := range ents {
-		if strings.HasPrefix(e.Name(), ".") && strings.HasSuffix(e.Name(), ".redate") {
+		if strings.HasPrefix(e.Name(), ".cull-redate-") {
 			out = append(out, e.Name())
 		}
 	}
@@ -36,7 +36,7 @@ func TestHardeningTempSurvivesRuns(t *testing.T) {
 	dir, data := offloaded(t, map[string]dngtest.Fixture{"M1.DNG": dated(1, 4000)})
 	p := filepath.Join(dir, "M1.DNG")
 	patched := applyAll(t, data["M1.DNG"])
-	tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+	tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 	os.WriteFile(tmp, patched, 0o644)
 	os.Chtimes(tmp, target, target)
 	st, _ := os.Stat(p)
@@ -71,7 +71,7 @@ func TestHardeningTempSurvivesRuns(t *testing.T) {
 func TestUnjournalledTempBesideFrame(t *testing.T) {
 	t.Run("partial", func(t *testing.T) {
 		dir, _ := offloaded(t, map[string]dngtest.Fixture{"M1.DNG": dated(1, 4000)})
-		tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+		tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 		os.WriteFile(tmp, []byte("half"), 0o644)
 		if res := run(t, dir); len(res.Orphans) != 0 {
 			t.Fatalf("%+v", res)
@@ -83,7 +83,7 @@ func TestUnjournalledTempBesideFrame(t *testing.T) {
 	t.Run("full beside a damaged frame", func(t *testing.T) {
 		dir, data := offloaded(t, map[string]dngtest.Fixture{"M1.DNG": dated(1, 4000)})
 		p := filepath.Join(dir, "M1.DNG")
-		tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+		tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 		os.WriteFile(tmp, applyAll(t, data["M1.DNG"]), 0o644)
 		b := read(t, p)
 		b[len(b)-1] ^= 0xff
@@ -98,7 +98,7 @@ func TestUnjournalledTempBesideFrame(t *testing.T) {
 	})
 	t.Run("full beside an intact frame", func(t *testing.T) {
 		dir, data := offloaded(t, map[string]dngtest.Fixture{"M1.DNG": dated(1, 4000)})
-		tmp := filepath.Join(dir, ".M1.DNG.cull-deadbeef.redate")
+		tmp := filepath.Join(dir, ".cull-redate-deadbeef.M1.DNG")
 		os.WriteFile(tmp, applyAll(t, data["M1.DNG"]), 0o644)
 		if res := run(t, dir); len(res.Orphans) != 0 || res.Patched != 1 {
 			t.Fatalf("%+v", res)

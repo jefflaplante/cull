@@ -259,6 +259,10 @@ func Run(ctx context.Context, o Options) (Result, error) {
 func (r *run) file(p string) error {
 	rel, _ := filepath.Rel(r.dir, p)
 	if r.held[rel] { // its temp was left alone, and its journal record stays with it
+		if r.o.DryRun {
+			r.say("%s: would be left alone with the hidden temp beside it (see above)", rel)
+			return nil
+		}
 		r.verbose("%s: left alone with the hidden temp beside it (see above)", rel)
 		return nil
 	}
@@ -646,7 +650,8 @@ func listDNGs(folders []string) ([]string, error) {
 //     its patched checksum, it takes the file's name; otherwise it is left alone, and the
 //     user is told how to put it back.
 //
-// A dry run changes nothing.
+// A dry run changes nothing: it reads the files to say what a run would do, and holds
+// (reports, and leaves out) the frames a run would leave alone.
 func (r *run) settleTemps(d string) error {
 	jr := r.j
 	if jr == nil {
@@ -660,18 +665,18 @@ func (r *run) settleTemps(d string) error {
 			rec, journaled = jr.Files[rel]
 		}
 		if tst, err := os.Lstat(target); err == nil {
-			if r.o.DryRun {
-				continue
-			}
 			keep, err := r.keepBeside(tmp, target, rel, tst, rec, journaled)
 			if err != nil {
 				return err
 			}
-			if keep != "" {
+			switch {
+			case keep != "":
 				r.orphan(tmp, target, keep)
-				continue
+			case r.o.DryRun:
+				r.verbose("%s: a run would remove the hidden temp %s beside it (a swap that never happened)", rel, tmp)
+			default:
+				os.Remove(tmp)
 			}
-			os.Remove(tmp)
 			continue
 		}
 		if !journaled || rec.Want == "" {
@@ -699,9 +704,15 @@ func (r *run) settleTemps(d string) error {
 }
 
 // keepBeside decides about a redate temp beside its file: "" removes it (a swap that
-// never happened, the file intact), else why both stay. A journalled file must be what
-// the journal recorded, before or after its patches. Otherwise a shorter temp is a
-// partial copy; a full one goes only if the file proves against its manifest.
+// never happened, the file intact; or a partial copy), else why both stay. It only
+// reads.
+//   - A journalled file must be what the journal recorded, before or after its patches.
+//     If it isn't, the temp still goes when it is a partial copy: shorter than the file
+//     and than the file the journal recorded, and not the journal's patched file.
+//   - Otherwise a temp shorter than the frame's full size is a partial copy: the size its
+//     manifest records (never the size of whatever now sits at the name: a larger
+//     foreign file there mustn't cost the only copy), or with no manifest, the file's. A
+//     full one goes only if the file proves against its manifest.
 func (r *run) keepBeside(tmp, target, rel string, tst os.FileInfo, rec journal.FileState, journaled bool) (string, error) {
 	if journaled {
 		sum, err := offload.HashFromDisk(r.ctx, target)
@@ -712,14 +723,22 @@ func (r *run) keepBeside(tmp, target, rel string, tst os.FileInfo, rec journal.F
 			return fmt.Sprintf("%s can't be read to check it against the journal (%v)", rel, err), nil
 		}
 		if h := hex.EncodeToString(sum[:]); h != rec.Orig && h != rec.Want {
+			partial, err := r.partialTemp(tmp, tst.Size(), rec)
+			if err != nil || partial {
+				return "", err
+			}
 			return rel + " isn't what the journal recorded, before or after its patches", nil
 		}
 		return "", nil
 	}
-	if st, err := os.Stat(tmp); err == nil && st.Size() < tst.Size() {
+	e, recorded := r.man[shootFolder(r.dir, target)][strings.ToLower(filepath.Base(target))]
+	full := tst.Size()
+	if recorded {
+		full = e.Size
+	}
+	if st, err := os.Lstat(tmp); err == nil && st.Size() < full {
 		return "", nil // cut short: a partial copy, never a frame
 	}
-	e, recorded := r.man[shootFolder(r.dir, target)][strings.ToLower(filepath.Base(target))]
 	if !recorded {
 		return rel + " has no record to check it against, and the temp is as large as it", nil
 	}
@@ -733,6 +752,29 @@ func (r *run) keepBeside(tmp, target, rel string, tst os.FileInfo, rec journal.F
 	return "", nil
 }
 
+// partialTemp reports a temp beside a journalled frame that can't be the good copy: it
+// is shorter than the frame and than the file the journal recorded (patches keep the
+// length), and it doesn't prove against the journal's patched checksum. A temp that
+// can't be read, or a record without a size, says no.
+func (r *run) partialTemp(tmp string, frameSize int64, rec journal.FileState) (bool, error) {
+	st, err := os.Lstat(tmp)
+	if err != nil || rec.Size <= 0 || st.Size() >= frameSize || st.Size() >= rec.Size {
+		return false, nil
+	}
+	w, derr := hex.DecodeString(rec.Want)
+	if derr != nil || len(w) != 32 {
+		return true, nil // nothing it could be: shorter than the file recorded
+	}
+	switch err := offload.ProveFrom(r.ctx, tmp, [32]byte(w)); {
+	case err == nil:
+		return false, nil
+	case r.ctx.Err() != nil:
+		return false, r.ctx.Err()
+	default:
+		return errors.Is(err, offload.ErrNotProven), nil
+	}
+}
+
 // orphan reports a redate temp left alone: it may be a frame's only copy.
 func (r *run) orphan(tmp, target, why string) {
 	r.res.Orphans = append(r.res.Orphans, tmp)
@@ -742,7 +784,11 @@ func (r *run) orphan(tmp, target, why string) {
 	rel, _ := filepath.Rel(r.dir, target)
 	r.held[rel] = true
 	if _, err := os.Lstat(target); err == nil {
-		r.warn("%s; the hidden temp %s was left alone: compare the two and keep the frame (delete the other)", why, tmp)
+		left := "was"
+		if r.o.DryRun {
+			left = "would be"
+		}
+		r.warn("%s; the hidden temp %s %s left alone: compare the two and keep the frame (delete the other)", why, tmp, left)
 		return
 	}
 	r.warn("%s; the hidden temp %s may be its only copy. If it is the frame, put it back with: mv %s %s (if it isn't, delete it)",

@@ -15,10 +15,18 @@ import (
 )
 
 // On a real exFAT or FAT32 volume (CULL_ADV_DEST=<a folder on it>; skipped otherwise):
-// a temp with xattrs gets an AppleDouble "._" companion, which also starts with "." and
-// ends ".cull-<hex>.redate". An interrupted replacement is restored on the next run,
+// a temp with xattrs gets an AppleDouble "._" companion ("._.cull-redate-<hex>.<name>"). An interrupted replacement is restored on the next run,
 // and the companion is never taken for a temp.
-func TestRealFSInterruptedWithAppleDouble(t *testing.T) {
+func TestRealFSInterruptedWithAppleDouble(t *testing.T) { realFSInterrupted(t, "M1.DNG", "M2.DNG") }
+
+// The same for frames whose names start with "_" (Pentax _IGP, Nikon/Sony _DSC, Canon
+// _MG_): their temps must never look like AppleDouble companions.
+func TestRealFSInterruptedUnderscore(t *testing.T) {
+	realFSInterrupted(t, "_IGP0001.DNG", "_IGP0002.DNG")
+}
+
+func realFSInterrupted(t *testing.T, names ...string) {
+	t.Helper()
 	root := os.Getenv("CULL_ADV_DEST")
 	if root == "" {
 		t.Skip("set CULL_ADV_DEST to a folder on an exFAT or FAT32 volume")
@@ -28,7 +36,11 @@ func TestRealFSInterruptedWithAppleDouble(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dest)
-	c := fakeCard(t, map[string]dngtest.Fixture{"M1.DNG": dated(1, 4000), "M2.DNG": dated(2, 4000)})
+	fx := map[string]dngtest.Fixture{}
+	for i, n := range names {
+		fx[n] = dated(int64(i+1), 4000)
+	}
+	c := fakeCard(t, fx)
 	p, err := offload.MakePlan(offload.Options{Sources: []string{c}, Dest: dest, Name: "test", Date: "2026-10-02"})
 	if err != nil {
 		t.Fatal(err)
@@ -37,12 +49,12 @@ func TestRealFSInterruptedWithAppleDouble(t *testing.T) {
 		t.Fatalf("offload %v %+v", err, res)
 	}
 	dir := p.Dests[0]
-	m1 := filepath.Join(dir, "M1.DNG")
+	m1 := filepath.Join(dir, names[0])
 	if err := unix.Setxattr(m1, "com.apple.metadata:_kMDItemUserTags", []byte("tag"), 0); err != nil {
 		t.Fatal(err)
 	}
 	restore := offload.SetRenameHook(func(old, new string) error {
-		if filepath.Base(new) == "M1.DNG" {
+		if filepath.Base(new) == names[0] {
 			os.Remove(new)
 			return syscall.EIO
 		}
@@ -53,22 +65,26 @@ func TestRealFSInterruptedWithAppleDouble(t *testing.T) {
 	if res.Interrupted != 1 {
 		t.Fatalf("run 1: %+v\n%s", res, n.all())
 	}
-	for tmp := range offload.RedateTemps(dir) {
+	temps := offload.RedateTemps(dir)
+	for tmp := range temps {
 		if filepath.Base(tmp)[:2] == "._" {
 			t.Fatalf("AppleDouble companion taken for a temp: %s", tmp)
 		}
+	}
+	if len(temps) != 1 {
+		t.Fatalf("run 1 left temps %v", temps)
 	}
 	res, n, err = runNotes(t, dir)
 	if err != nil || len(res.Orphans) != 0 || res.Refused != 0 {
 		t.Fatalf("run 2: %v %+v\n%s", err, res, n.all())
 	}
 	if _, err := os.Stat(m1); err != nil {
-		t.Fatal("M1.DNG not restored")
+		t.Fatalf("%s not restored", names[0])
 	}
 	if _, _, ok := journal.Incomplete(dir); ok {
 		t.Fatal("journal incomplete")
 	}
-	if v, err := offload.Verify(context.Background(), dir, nil); err != nil || v.OK != 2 {
+	if v, err := offload.Verify(context.Background(), dir, nil); err != nil || v.OK != len(names) {
 		t.Fatalf("verify %+v %v", v, err)
 	}
 }

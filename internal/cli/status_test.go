@@ -275,7 +275,7 @@ func TestStatusRankBatchPointsAtJudge(t *testing.T) {
 // that puts it back.
 func TestStatusOrphanTemp(t *testing.T) {
 	dir := statusShoot(t)
-	tmp := filepath.Join(dir, ".L9.DNG.cull-deadbeef.redate")
+	tmp := filepath.Join(dir, ".cull-redate-deadbeef.L9.DNG")
 	os.WriteFile(tmp, []byte("x"), 0o644)
 	out, err := run(t, "status", dir)
 	if err != nil || !strings.Contains(out, "next: mv "+shellQuote(tmp)+" "+shellQuote(filepath.Join(dir, "L9.DNG"))) {

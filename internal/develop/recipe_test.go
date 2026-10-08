@@ -30,6 +30,27 @@ func TestPresetFor(t *testing.T) {
 	}
 }
 
+// Every table entry loads: PresetFor panics on a broken one (see its comment), so this
+// is what keeps that panic out of every tested build.
+func TestEveryPresetLoads(t *testing.T) {
+	if len(presetsByModel) == 0 {
+		t.Fatal("no presets")
+	}
+	for model, file := range presetsByModel {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s (%s): %v", model, file, r)
+				}
+			}()
+			p, ok := PresetFor(model)
+			if !ok || p.ID == "" || p.File != file || len(p.Data) == 0 {
+				t.Errorf("%s: %+v, %v", model, p, ok)
+			}
+		}()
+	}
+}
+
 // The embedded preset is the documented one: the copy cull ships and the one
 // docs/lightcraft/README.md validates can't drift apart.
 func TestEmbeddedPresetMatchesDocs(t *testing.T) {

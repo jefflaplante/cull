@@ -45,6 +45,7 @@ func newShoot(t *testing.T, names ...string) *shoot {
 	t.Setenv(lctest.Env, "1")
 	t.Setenv("FAKE_LC_LOG", s.log)
 	t.Setenv("FAKE_LC_CRASH_AFTER", "")
+	t.Setenv("FAKE_LC_QUERY", "")
 	t.Setenv("FAKE_LC_TAG", "v1")
 	s.opts = Options{
 		StatePath:  filepath.Join(dir, StateName),
@@ -261,6 +262,64 @@ func TestRunResumesAfterCrash(t *testing.T) {
 	}
 	if got := s.exported(t); strings.Join(got, ",") != "B,C" {
 		t.Errorf("re-run exported %v, want B,C", got)
+	}
+}
+
+// A catalog.query answer cull can't read fails each frame with that diagnosis, not
+// "LightCraft didn't import it".
+func TestRunReportsUnreadableCatalog(t *testing.T) {
+	cases := map[string]string{
+		"garbled": "couldn't read LightCraft's answer",
+		"renamed": "a photo without an id or fileName",
+		"extra":   "lists 2 of 3 photos in a library of 2 imports", // the exact limit cut it short
+	}
+	for mode, want := range cases {
+		t.Run(mode, func(t *testing.T) {
+			s := newShoot(t, "A.DNG", "B.DNG")
+			t.Setenv("FAKE_LC_QUERY", mode)
+			_, sum, err := s.develop(t, context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sum.Developed != 0 || len(sum.Failures) != 2 || len(sum.Logs) != 1 {
+				t.Fatalf("summary %+v (want both failed, and the chunk's logs kept and named)", sum)
+			}
+			for _, f := range sum.Failures {
+				if !strings.Contains(f.Err, "catalog.query") || !strings.Contains(f.Err, want) {
+					t.Errorf("%s: %q, want catalog.query and %q", f.Name, f.Err, want)
+				}
+			}
+		})
+	}
+}
+
+// The exact limit asks for no more than the chunk's frames, and gets them all.
+func TestCatalogQueryLimitIsExact(t *testing.T) {
+	s := newShoot(t, "A.DNG", "B.DNG", "C.DNG")
+	s.opts.Chunk = 3
+	if _, sum, err := s.develop(t, context.Background()); err != nil || sum.Developed != 3 {
+		t.Fatalf("%v %+v", err, sum)
+	}
+	for _, c := range s.runs(t)[0] {
+		if c.Command == "catalog.query" && c.Params["limit"] != 3.0 {
+			t.Errorf("limit %v, want 3", c.Params["limit"])
+		}
+	}
+}
+
+// Output cull can't read (here a line over maxLine) is reported as that, and stops
+// LightCraft, instead of reading as LightCraft having exited.
+func TestRunReportsUnreadableOutput(t *testing.T) {
+	defer func(n int) { maxLine = n }(maxLine)
+	maxLine = 120 // the first result line fits; library.import's doesn't
+	s := newShoot(t, "A.DNG")
+	_, sum, err := s.develop(t, context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sum.Failures) != 1 || !strings.Contains(sum.Failures[0].Err, "reading lightcraft-cli's output after") ||
+		!strings.Contains(sum.Failures[0].Err, "token too long") {
+		t.Fatalf("summary %+v", sum)
 	}
 }
 

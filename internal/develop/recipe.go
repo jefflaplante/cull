@@ -164,6 +164,13 @@ var presetsByModel = map[string]string{
 }
 
 // PresetFor is the preset for a camera model (EXIF Model; case and padding ignored).
+//
+// It panics, rather than returning an error, on a table entry whose embedded file is
+// missing or malformed. Both the table and the files are compiled into the binary (a
+// literal map, go:embed), so no input or runtime state can reach that path: only a
+// mistake made when adding a preset can. TestEveryPresetLoads loads every entry, so make
+// test fails on that mistake before a binary carrying it is built. An error return would
+// thread through Steps, Fingerprint and Prepare to handle a case no user can cause.
 func PresetFor(model string) (Preset, bool) {
 	file, ok := presetsByModel[strings.ToUpper(strings.TrimSpace(model))]
 	if !ok {

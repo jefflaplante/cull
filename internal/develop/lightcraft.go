@@ -76,7 +76,7 @@ func lightcraft(ctx context.Context, bin, lib, dir, name string, cmds []Command,
 		return 0, fmt.Errorf("starting %s: %w", bin, err)
 	}
 	sc := bufio.NewScanner(stdout)
-	sc.Buffer(make([]byte, 64<<10), 256<<20) // a catalog.query of a big chunk is one long line
+	sc.Buffer(make([]byte, 0, min(64<<10, maxLine)), maxLine)
 	n := 0
 	for sc.Scan() {
 		b := sc.Bytes()
@@ -88,6 +88,14 @@ func lightcraft(ctx context.Context, bin, lib, dir, name string, cmds []Command,
 		each(n, l)
 		n++
 	}
+	if serr := sc.Err(); serr != nil {
+		// The rest of the output is unreadable (a line over maxLine, a broken pipe), so the
+		// frames still to come would be misreported as LightCraft stopping. Stop it: left
+		// alone it could block on a full pipe, and Wait would never return.
+		cmd.Process.Kill()
+		cmd.Wait()
+		return n, fmt.Errorf("reading lightcraft-cli's output after %d result(s): %w", n, serr)
+	}
 	err = cmd.Wait()
 	if err != nil {
 		if t := strings.TrimSpace(tail.String()); t != "" {
@@ -96,6 +104,10 @@ func lightcraft(ctx context.Context, bin, lib, dir, name string, cmds []Command,
 	}
 	return n, err
 }
+
+// maxLine is the longest output line read: a catalog.query of a big chunk is one long
+// line (~400 bytes a photo). A variable so a test can make reading fail.
+var maxLine = 256 << 20
 
 // tailBuffer keeps the last 2 KB written: enough of stderr for an error message.
 type tailBuffer struct{ b []byte }

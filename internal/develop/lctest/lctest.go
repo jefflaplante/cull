@@ -7,6 +7,9 @@
 //   - FAKE_LC_TAG: written into every JPEG, so a test can tell exports apart.
 //   - A photo whose name contains BADIMPORT fails to import; BADEXPORT fails app.export;
 //     SLOW sleeps 30 s in app.export (for cancellation).
+//   - catalog.query honours limit, as LightCraft does (total still counts every photo).
+//     FAKE_LC_QUERY=garbled answers with a string; =renamed with file_name for fileName;
+//     =extra lists a photo nobody imported.
 package lctest
 
 import (
@@ -130,7 +133,26 @@ func Main(args []string) int {
 			}
 			res = map[string]any{"imported": imported, "failed": bad, "duplicates": []any{}}
 		case "catalog.query":
-			res = map[string]any{"photos": photos, "total": len(photos)}
+			list := photos
+			if os.Getenv("FAKE_LC_QUERY") == "extra" {
+				list = append(append([]photo(nil), photos...), photo{ID: len(photos) + 1, Path: "/elsewhere/X.DNG", FileName: "X.DNG"})
+			}
+			total := len(list)
+			if lim, ok := c.Params["limit"].(float64); ok && int(lim) < len(list) {
+				list = list[:int(lim)]
+			}
+			switch os.Getenv("FAKE_LC_QUERY") {
+			case "garbled":
+				res = "photos: none"
+			case "renamed":
+				var renamed []map[string]any
+				for _, ph := range list {
+					renamed = append(renamed, map[string]any{"id": ph.ID, "file_name": ph.FileName})
+				}
+				res = map[string]any{"photos": renamed, "total": total}
+			default:
+				res = map[string]any{"photos": list, "total": total}
+			}
 		case "preset.import":
 			for _, p := range c.Params["paths"].([]any) {
 				if _, err := os.Stat(p.(string)); err != nil {

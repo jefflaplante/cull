@@ -303,11 +303,15 @@ type frameRun struct {
 
 func (r *run) chunk(ctx context.Context, idx int, frames []Frame) {
 	dir := filepath.Join(r.o.Work, fmt.Sprintf("chunk-%04d", idx))
-	keep := false
+	keep := false // a frame failed: keep the chunk's folder for its LightCraft logs
 	defer func() {
 		if !keep {
 			os.RemoveAll(dir)
+			return
 		}
+		r.mu.Lock()
+		r.sum.Logs = append(r.sum.Logs, dir)
+		r.mu.Unlock()
 	}()
 	fail := func(f Frame, msg string) {
 		keep = true
@@ -333,16 +337,28 @@ func (r *run) chunk(ctx context.Context, idx int, frames []Frame) {
 	_, err := lightcraft(ctx, r.o.LightCraft, lib, dir, "import", []Command{
 		{"library.xmpPreferences", map[string]any{"autoWrite": false}}, // never write beside the DNGs
 		{"library.import", map[string]any{"paths": paths, "mode": "add"}},
-		{"catalog.query", map[string]any{"limit": len(frames) + 1000}},
+		// The library is this chunk's alone, so it holds at most these frames: the limit is
+		// exact, and a total above it (photos cull didn't import) is an error, not a truncation.
+		{"catalog.query", map[string]any{"limit": len(frames)}},
 	}, func(i int, l line) {
 		if !l.OK {
 			cmdErr = l.Command + ": " + l.errText()
 			return
 		}
+		// An answer that doesn't parse means LightCraft's output format changed: say so,
+		// rather than leave every frame "not imported".
+		unexpected := func(what string, err error) {
+			if cmdErr == "" {
+				cmdErr = fmt.Sprintf("%s: couldn't read LightCraft's answer (%s): %v; is this lightcraft-cli a version cull knows (0.4.0)?", l.Command, what, err)
+			}
+		}
 		switch l.Command {
 		case "library.import":
 			var res struct{ Failed [][2]string }
-			json.Unmarshal(l.Result, &res)
+			if err := json.Unmarshal(l.Result, &res); err != nil {
+				unexpected("failed: [[path, reason]]", err)
+				return
+			}
 			for _, f := range res.Failed {
 				importErr[f[0]] = f[1]
 			}
@@ -352,9 +368,21 @@ func (r *run) chunk(ctx context.Context, idx int, frames []Frame) {
 					ID       int    `json:"id"`
 					FileName string `json:"fileName"`
 				}
+				Total int `json:"total"`
 			}
-			json.Unmarshal(l.Result, &res)
+			if err := json.Unmarshal(l.Result, &res); err != nil {
+				unexpected("photos: [{id, fileName}]", err)
+				return
+			}
+			if res.Total > len(res.Photos) {
+				unexpected("photos: [{id, fileName}]", fmt.Errorf("it lists %d of %d photos in a library of %d imports", len(res.Photos), res.Total, len(frames)))
+				return
+			}
 			for _, ph := range res.Photos {
+				if ph.ID == 0 || ph.FileName == "" {
+					unexpected("photos: [{id, fileName}]", fmt.Errorf("a photo without an id or fileName"))
+					return
+				}
 				ids[ph.FileName] = ph.ID
 			}
 		}
@@ -451,11 +479,6 @@ func (r *run) chunk(ctx context.Context, idx int, frames []Frame) {
 			why = err.Error()
 		}
 		fail(fr.f, "lightcraft-cli stopped before exporting it: "+why)
-	}
-	if keep {
-		r.mu.Lock()
-		r.sum.Logs = append(r.sum.Logs, dir)
-		r.mu.Unlock()
 	}
 }
 

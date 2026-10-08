@@ -484,3 +484,18 @@ func TestPatchDatesUnreadableExifPointer(t *testing.T) {
 		}
 	}
 }
+
+// The shared fixture's camera tags read back through ReadExif, with and without a
+// preview strip (which puts Compression before them).
+func TestFixtureCamera(t *testing.T) {
+	for _, preview := range [][]byte{nil, {0xFF, 0xD8, 0xFF, 0xD9}} {
+		b := dngtest.Build(t, dngtest.Fixture{Make: "Leica Camera AG", Model: "LEICA M10-R", DTO: "2023:04:12 07:31:32", Preview: preview})
+		e, err := dng.ReadExifFrom(bytes.NewReader(b), int64(len(b)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Make != "Leica Camera AG" || e.Model != "LEICA M10-R" || e.DateTimeOriginal != "2023:04:12 07:31:32" {
+			t.Errorf("preview %v: got %+v", preview != nil, e)
+		}
+	}
+}

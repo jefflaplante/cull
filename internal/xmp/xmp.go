@@ -30,7 +30,7 @@ type Sidecar struct {
 	Keywords   []string // dc:subject: plain keywords
 	Hierarchy  []string // lr:hierarchicalSubject: "parent|child" paths (Capture One and Lightroom nest them)
 	ExposureEV *float64 // crs:Exposure2012
-	Crop       *Box     // crs:Crop*, normalized, in the raw's stored (unrotated) orientation
+	Crop       *Box     // crs:Crop*, normalized edges of the displayed (EXIF-oriented) frame; see DisplayCrop
 	DateTaken  string   // "2006-01-02T15:04:05", the camera's local time; empty omits the date properties
 }
 

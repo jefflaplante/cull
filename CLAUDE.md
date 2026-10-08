@@ -851,6 +851,32 @@ same timestamp. The facts below were measured while building `--set-date`, `reda
     over the file's EXIF there. The `--set-date` copy (A, 2026-10-04) and the redated
     copy (B, 2026-10-03), both without sidecars, showed their patched EXIF dates.
 
+### LightCraft bridge (2026-10-08, two M10-R frames in the user's Photos share)
+
+[LightCraft](https://getartcraft.com/apps/lightcraft) (storytold/lightcraft v0.4.0, built from
+source) is a pure-Rust Lightroom reimplementation whose CLI reads cull's `crs:` XMP sidecars
+on import and render. Tested as a cull → client-JPEG pipeline:
+
+- **`crs:Exposure2012` and `crs:Crop*` are both applied on render.** A hand-written
+  sidecar in cull's exact format (+0.50 EV, 60% centered crop) rendered 3120x4718 from a
+  5200x7864 source (exactly 60% both axes) with the expected luma lift.
+- **`crs:Crop*` are oriented-frame edges.** Proven on an orientation-6 M10-R DNG: crops
+  written in display coordinates render at correlation 0.9989/0.9973 at two positions;
+  transposed interpretations score 0.29 / -0.26 or fail dimension checks. This closed the
+  "ASSUMPTION TO VERIFY" that used to sit on `FromDisplay`: **cull's old transposition was
+  wrong for LightCraft and Lightroom consumers, and is removed** (`DisplayCrop` passes
+  display coordinates through; `internal/xmp/crop_orientation_test.go` guards it).
+  Evidence: NAS `/Jules/lightcraft-test/crop-orientation-test/`.
+- **Keywords and rating also flow** (`docs/xmp-interop.md` in the LightCraft repo maps
+  them), but Capture One remains the only target for the AppleScript path.
+- **Rendering is CPU-only headless, ~25 s and ~2.9 GB per 60 MP frame.** A 300-frame keep
+  set is an overnight job, not a coffee break.
+- **M10-R corrective preset:** `docs/lightcraft/leica-m10r-std.lcpreset` (plus bare
+  `.json` for `--settings`), tuned against the camera's own embedded JPEG previews; closes
+  the flat-color/contrast gap (validation table in `docs/lightcraft/README.md`).
+- LightCraft never *writes* `crs:` — the bridge is one-way (fine for DNG→JPEG delivery;
+  round-trips back to Capture One keep only what apply-c1 put there).
+
 ## Unverified assumptions — check before building on them
 
 - What makes the M11-P write Content Credentials on some frames (`L…`) and not others
@@ -879,8 +905,6 @@ same timestamp. The facts below were measured while building `--set-date`, `reda
   shoots.
 - Whether heavy scripted `claude -p` use is within subscription usage policy and how
   much of the 5-hour window a 1000-frame run uses. `--quota-stop` bounds the impact.
-- `crs:Crop*` coordinate space for rotated (orientation 6/8) images; code assumes
-  stored orientation (`xmp.FromDisplay`).
 - Capture One AppleScript property names for rating, keywords, exposure, crop.
   Dump the real dictionary with `sdef "/Applications/Capture One.app"` and read it
   before writing the applier.

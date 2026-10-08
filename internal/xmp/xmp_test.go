@@ -53,14 +53,13 @@ func TestPath(t *testing.T) {
 	}
 }
 
-func TestFromDisplayRoundTrip(t *testing.T) {
-	// A display crop of the top-left quadrant on an orientation-6 image maps to the
-	// stored image's bottom-left... verify via corner mapping: display (0,0) = stored (0,1).
-	b := FromDisplay(0, 0, 0.5, 0.5, 6)
-	if b != (Box{Left: 0, Top: 0.5, Right: 0.5, Bottom: 1}) {
-		t.Fatalf("got %+v", b)
+func TestDisplayCrop(t *testing.T) {
+	// crs:Crop* are oriented-frame edges (verified 2026-10-08, see xmp.go), so a
+	// display crop passes through unchanged.
+	if DisplayCrop(0, 0, 0.5, 0.5) != (Box{Left: 0, Top: 0, Right: 0.5, Bottom: 0.5}) {
+		t.Fatal("crop was transformed")
 	}
-	if FromDisplay(0.1, 0.2, 0.3, 0.4, 1) != (Box{0.1, 0.2, 0.3, 0.4}) {
+	if DisplayCrop(0.1, 0.2, 0.3, 0.4) != (Box{0.1, 0.2, 0.3, 0.4}) {
 		t.Fatal("identity failed")
 	}
 }

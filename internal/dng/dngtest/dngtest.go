@@ -61,11 +61,16 @@ type Fixture struct {
 	// marked reduced-resolution (NewSubfileType 1) and JPEG-compressed: what
 	// dng.Extract finds as the embedded preview, so the pipeline can judge the file.
 	Preview []byte
+	// Make and Model are IFD0's 0x010F and 0x0110 (e.g. "Leica Camera AG",
+	// "LEICA M10-R"): what picks a camera's develop preset.
+	Make, Model string
 }
 
 const (
 	tagNewSubfileType = 0x00FE
 	tagCompression    = 0x0103
+	tagMake           = 0x010F
+	tagModel          = 0x0110
 	tagStripOffsets   = 0x0111
 	tagStripByteCount = 0x0117
 	tagDateTime       = 0x0132
@@ -141,12 +146,23 @@ func Build(tb testing.TB, f Fixture) []byte {
 	}
 
 	ifd0 := []entry{{tag: tagNewSubfileType, typ: typeLong, count: 1, raw: make([]byte, 4)}}
+	camera := func() { // 0x010F, 0x0110: after Compression, before StripOffsets
+		if f.Make != "" {
+			ifd0 = append(ifd0, ascii(tagMake, f.Make))
+		}
+		if f.Model != "" {
+			ifd0 = append(ifd0, ascii(tagModel, f.Model))
+		}
+	}
 	stripAt := -1
-	if f.Preview != nil {
+	if f.Preview == nil {
+		camera()
+	} else {
 		bo.PutUint32(ifd0[0].raw, 1) // reduced resolution: a preview
 		comp := make([]byte, 4)
 		bo.PutUint16(comp, 7) // JPEG
 		ifd0 = append(ifd0, entry{tag: tagCompression, typ: typeShort, count: 1, raw: comp})
+		camera()
 		stripAt = len(ifd0)
 		ifd0 = append(ifd0, entry{tag: tagStripOffsets, typ: typeLong, count: 1, raw: make([]byte, 4)})
 		n := make([]byte, 4)

@@ -364,6 +364,12 @@ Expected: PASS (7 tests).
 
 ---
 
+> **Historical note (2026-10-08):** this plan predates the crop-convention fix
+> (PR #1, commit a00c4d4). `xmp.FromDisplay` no longer exists: empirical testing
+> against LightCraft proved `crs:Crop*` edges are oriented-frame (display)
+> coordinates, so crops are now written through `xmp.DisplayCrop` with no
+> transposition. The code samples below are kept as written at planning time.
+
 ### Task 2: One sidecar mapping (`labels.Sidecar`), optional rating
 
 **Files:**

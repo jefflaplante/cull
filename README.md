@@ -546,6 +546,7 @@ Junk frames get your tags but no content keywords, since the model never saw the
 | `review <dir>` | Browser contact sheet for checking, labelling and rating frames | no |
 | `calibrate <report>...` | Compare a report's decisions with your labels; print a grid of policy settings | no |
 | `apply-c1 <dir>` | AppleScript that applies verdicts, stars and keywords in Capture One (dry run by default) | no |
+| `develop <dir>` | Render the keeps into client JPEGs with LightCraft (`lightcraft-cli`): your sidecar EV and crop, the camera's preset, auto white balance; resumable, asks first (hours of CPU) | no |
 | `tag <dir>` | Show or change the shoot's project, event, location and keywords | no |
 | `restore <dir>` | Move frames that `--sort` moved back where they were | no |
 | `status <dir>` | Where a shoot stands (judged, labelled, ranked, spent) and the next command to run | no |

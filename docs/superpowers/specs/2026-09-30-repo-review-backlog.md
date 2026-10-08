@@ -186,7 +186,7 @@ itself hasn't been driven in a browser yet, because the Chrome extension wasn't 
 
 - **Fuzz tests:** for `FindCandidates`, `ReadRaw`, `ReadExif`, `decodeLJPEG` (without the recover), and the XMP render.
   - Latent panic: an SOS segment of length 2 at `ljpeg.go:82`.
-  - Property test: `xmp.FromDisplay` against `Frame.storedRect` for orientations 1, 3, 6 and 8.
+  - ~~Property test: `xmp.FromDisplay` against `Frame.storedRect`~~ — superseded by the crop-convention fix (PR #1): `FromDisplay` is gone; `crs:Crop*` edges are display-frame, pinned by `crop_orientation_test.go`. A property test of `DisplayCrop` bounds (edges within 0..1, left<right, top<bottom, all orientations) is still worth adding.
 - **Raw strip size:** reject `offset + count > file size`, and measure raw clip before the full-frame decode to lower peak RSS (`rawclip/raw.go:50`, `dng/raw.go:96`).
 - **exiftool:** give it a context and timeout, and use one call instead of four (`dng/preview.go:327`).
 - **`claude -p`:** set `cmd.WaitDelay`, and kill the whole process group on cancel.

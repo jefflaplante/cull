@@ -26,7 +26,7 @@ var colors = map[eval.Decision]string{eval.Keep: "Green", eval.Review: "Yellow",
 // sets stars), the effective verdict as colour and keyword, plus
 // cull:labeled when the verdict is the user's and cull:best when it is the top
 // of its set (Group.Best). Develop settings only when asked, and never for a cull.
-func Sidecar(r report.Result, l Entry, orientation int, develop bool, tags *report.Tags) xmp.Sidecar {
+func Sidecar(r report.Result, l Entry, _ int, develop bool, tags *report.Tags) xmp.Sidecar {
 	d, yours := Effective(r, l)
 	sc := xmp.Sidecar{Rating: l.Stars, Label: colors[d]}
 	if t, err := time.Parse("2006-01-02T15:04:05", r.DatesSet); err == nil {
@@ -68,7 +68,9 @@ func Sidecar(r report.Result, l Entry, orientation int, develop bool, tags *repo
 		sc.ExposureEV = &v
 	}
 	if c := e.Composition.Crop; c.Apply {
-		b := xmp.FromDisplay(c.Left, c.Top, c.Right, c.Bottom, orientation)
+		// crs:Crop* are oriented-frame edges (see xmp.DisplayCrop); the model's
+		// crop is already in display coordinates, so it passes through as-is.
+		b := xmp.DisplayCrop(c.Left, c.Top, c.Right, c.Bottom)
 		sc.Crop = &b
 	}
 	return sc

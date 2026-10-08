@@ -112,7 +112,7 @@ may lose track of frames already imported.`,
 
 // holdShoot takes dir's folder lock, shared, for a command that relies on the frames
 // keeping their names and bytes (judge, decide, review, restore, scan, tag, rank,
-// import-labels) for its whole run, and refuses while a redate or rename of dir is
+// import-labels, develop) for its whole run, and refuses while a redate or rename of dir is
 // unfinished: its keys may not match the files yet. With recursive (judge -r), every
 // folder it reads frames from is held, and checked for unfinished journals. lock false
 // (--estimate) takes no lock and makes no lock file. release ends the hold; call it

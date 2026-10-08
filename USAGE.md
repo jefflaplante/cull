@@ -394,6 +394,30 @@ tags, as plain words) and your stars.
 **The dry run is a readable AppleScript.** For this shoot it was 639 lines, looking up
 each distinct keyword once.
 
+## Client JPEGs without Capture One: `cull develop`
+
+[LightCraft](https://getartcraft.com/apps/lightcraft)'s headless `lightcraft-cli` can render
+the keeps straight to JPEGs. It reads cull's sidecars, so your EV and the model's crop come
+along; cull itself renders nothing.
+
+```sh
+cull develop --dry-run "Pictures/2025-12-28 Forest portraits"   # the keeps, the recipe, the estimate
+cull develop "Pictures/2025-12-28 Forest portraits"             # asks, then renders into export/
+```
+
+**The recipe:** auto white balance, levelled horizons, the camera's preset (the Leica M10-R
+gets `leica-m10r-std`; other bodies get LightCraft's auto settings, with a warning), your
+sidecar's exposure on top, then a 3000 px JPEG at quality 95.
+
+**It is slow:** about 25 s and 2.9 GB of memory per 60 MP frame, CPU only, so a 300-frame
+shoot runs overnight. It prints the estimate and asks first; `--yes` skips the question
+(a script needs it). `-j 2` runs two LightCraft processes at once, each with its own memory.
+
+**It picks up where it stopped.** `cull-develop.json` records every export as it lands, so
+after a Ctrl-C or a crash the same command develops only what is missing. Change a sidecar
+(a new EV in review) or a flag, and the next run redoes just those frames. A JPEG in
+`export/` that cull didn't write is never replaced.
+
 ## Re-ranking
 
 Every `judge` run ranks the sets that have no current ranking, so you rarely rank by hand.

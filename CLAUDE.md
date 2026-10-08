@@ -10,7 +10,8 @@ Scaffolded in a claude.ai chat; this file carries that context forward.
 The binary is **`cull`** (renamed 2026-09-28); the model step is `cull judge`. Files and
 tags it writes: `cull-report.json`, `cull-labels.jsonl`, `cull-review/`,
 `cull-offload.jsonl`, `cull-redate.json` (while a redate runs), `cull-rename.json` (the
-last rename, for `--undo`), the hidden folder lock `.cull.lock` / `.cull-holder-*`, keywords
+last rename, for `--undo`), `cull-develop.json` (develop's recipe and exports; its hidden
+work folder `.cull-develop/`, JPEGs in `export/`), the hidden folder lock `.cull.lock` / `.cull-holder-*`, keywords
 `cull:<verdict>` / `cull:labeled`. npm, crates.io and PyPI each have an unrelated `cull`
 package that installs a `cull` command (npm's deletes files); none is installed here.
 
@@ -34,6 +35,8 @@ make vet
 ./bin/cull offload <card> <dest> --set-date 2026-10-04   # fix copies' capture dates (proven); card untouched
 ./bin/cull redate <dir> --date 2026-10-04 --dry-run  # the same for a folder already offloaded
 ./bin/cull rename <dir> "{date}_{name}_{n:4}" --dry-run   # bulk rename; everything follows; --undo
+./bin/cull develop <dir> --dry-run                   # keeps → client JPEGs via lightcraft-cli: plan + estimate
+./bin/cull develop <dir> --yes                       # hours of CPU (~25 s, ~2.9 GB per 60 MP frame); resumable
 ```
 
 ## Layout
@@ -43,7 +46,7 @@ make vet
   deprecated in v0.2.0),
   `decide`, `review`, `calibrate`, `apply-c1`, `restore`, `status`, `tag`, `import-labels`
   (deprecated), `redate` (redate.go; also `holdShoot`: the folder lock and unfinished-journal
-  refusal every frame-reading command takes), `rename` (rename.go),
+  refusal every frame-reading command takes), `rename` (rename.go), `develop` (develop.go),
   `version` (+ built-in `completion`); status.go also lists unfinished journals and hidden
   temps that may be a frame's only copy;
   help.go (sectioned `--help`, `--help-all`); sortflag.go (`--sort[=all|culls]`, `--move-culled` as its
@@ -137,7 +140,7 @@ make vet
   `IncompleteBelow`, `Finish` (the exact command), `PendingBatch`. lock.go: the folder lock,
   exclusive flocks only. redate and rename hold the gate `.cull.lock` and check every
   `.cull-holder-<pid>-<hex>`; each reader (judge, decide, the review server, restore,
-  offload, scan, tag, rank, import-labels) holds its own holder file and probes the gate.
+  offload, scan, tag, rank, import-labels, develop) holds its own holder file and probes the gate.
   Released by close alone, never `LOCK_UN`; EACCES on the gate, or on a reader's own new
   holder file, counts as held (a stale or contended SMB lock). `cmd/cull` calls
   `RemoveHolders` on exit. `redate -r` and `rename -r` hold only the parent folder's gate: a
@@ -158,7 +161,19 @@ make vet
   review's render, batch prepare/upload/wait, offload's plan/checksum/flush, `apply-c1 --run`. Active
   stages spin and show elapsed time, so an open-ended wait never looks hung; plain output announces
   a described stage at the normal level
-- `internal/xmp` — sidecar writer, atomic, never clobbers by default
+- `internal/xmp` — sidecar writer, atomic, never clobbers by default; read.go: `ReadDevelop`
+  (a sidecar's `crs:Exposure2012` and crop, attribute or element form)
+- `internal/develop` — `cull develop`: keeps → client JPEGs through headless `lightcraft-cli`
+  (exec'd; no raw code in cull). keep.go: the keep set (`FromReport`: label over model, at
+  `moved_to`; `FromLabels` for a shoot with no report), `Load` (model, sidecar EV/crop).
+  recipe.go: `Recipe`, per-frame `Steps`, `Fingerprint`, presets embedded per EXIF Model
+  (`presets/`, must equal `docs/lightcraft/`'s; M10-R → `leica-m10r-std`). develop.go:
+  `Prepare` (plan + estimate, writes nothing), `Run`: chunks (`--chunk`) of frames, each one
+  LightCraft process with a throwaway library (import run for ids, then a `--script` run),
+  `-j` at a time; exports land as `.cull-develop-<hex>.<stem>.jpg`, are checked (JPEG SOI)
+  and named via `offload.MoveNoReplace`, or over a JPEG only when the state's SHA-256 proves
+  it cull's. state.go: `cull-develop.json` saved after every frame (batch.go's pattern),
+  flock in `.cull-develop/lock`. lctest: a fake `lightcraft-cli` (the test binary re-run)
 - `internal/config` — API key resolution; dotfile.go reads `~/.cull` (`LoadSettings`)
 - `site/` — the GitHub Pages site (`index.html` overview, `usage.html` walkthrough, shared
   `style.css` + `site.js`: lens strip, shutter dial, rangefinder headline, and on the homepage and usage heroes the
@@ -208,7 +223,7 @@ make vet
   (path + size + mtime) follow the files. The exception is `rename --reorder`, whose
   regrouped sets are ranked again. Both refuse while a batch is pending (its state
   is keyed by path). judge, decide, review, restore, scan, tag, rank, import-labels,
-  offload, redate and rename refuse a folder with an unfinished `cull-redate.json` or
+  develop, offload, redate and rename refuse a folder with an unfinished `cull-redate.json` or
   `cull-rename.json` (`holdShoot`, `journal.Unfinished`); `status` names it.
 - Never print, log, or read the API key contents beyond `internal/config`.
 - Keep/review/cull is decided in Go (`eval.Policy`), not by the model. The model
@@ -851,6 +866,73 @@ same timestamp. The facts below were measured while building `--set-date`, `reda
     over the file's EXIF there. The `--set-date` copy (A, 2026-10-04) and the redated
     copy (B, 2026-10-03), both without sidecars, showed their patched EXIF dates.
 
+### LightCraft bridge (2026-10-08, two M10-R frames in the user's Photos share)
+
+[LightCraft](https://getartcraft.com/apps/lightcraft) (storytold/lightcraft v0.4.0, built from
+source) is a pure-Rust Lightroom reimplementation whose CLI reads cull's `crs:` XMP sidecars
+on import and render. Tested as a cull → client-JPEG pipeline:
+
+- **`crs:Exposure2012` and `crs:Crop*` are both applied on render.** A hand-written
+  sidecar in cull's exact format (+0.50 EV, 60% centered crop) rendered 3120x4718 from a
+  5200x7864 source (exactly 60% both axes) with the expected luma lift.
+- **`crs:Crop*` are oriented-frame edges.** Proven on an orientation-6 M10-R DNG: crops
+  written in display coordinates render at correlation 0.9989/0.9973 at two positions;
+  transposed interpretations score 0.29 / -0.26 or fail dimension checks. This closed the
+  "ASSUMPTION TO VERIFY" that used to sit on `FromDisplay`: **cull's old transposition was
+  wrong for LightCraft and Lightroom consumers, and is removed** (`DisplayCrop` passes
+  display coordinates through; `internal/xmp/crop_orientation_test.go` guards it).
+  Evidence: NAS `/Jules/lightcraft-test/crop-orientation-test/`.
+- **Keywords and rating also flow** (`docs/xmp-interop.md` in the LightCraft repo maps
+  them), but Capture One remains the only target for the AppleScript path.
+- **Rendering is CPU-only headless, ~25 s and ~2.9 GB per 60 MP frame.** A 300-frame keep
+  set is an overnight job, not a coffee break.
+- **M10-R corrective preset:** `docs/lightcraft/leica-m10r-std.lcpreset` (plus bare
+  `.json` for `--settings`), tuned against the camera's own embedded JPEG previews; closes
+  the flat-color/contrast gap (validation table in `docs/lightcraft/README.md`).
+- LightCraft never *writes* `crs:` — the bridge is one-way (fine for DNG→JPEG delivery;
+  round-trips back to Capture One keep only what apply-c1 put there).
+
+### `cull develop` against lightcraft-cli 0.4.0 (2026-10-08, the two M10-R frames)
+
+Probed with `lightcraft-cli run` before building `internal/develop`; each fact is why the
+code is shaped the way it is.
+- **Targeting:** `develop.auto`, `develop.wb` and `crop.autoStraighten` act on the
+  *active* photo only (`library.selectAll` then `develop.auto` changed photo 1, not 2);
+  `preset.apply`, `develop.set` and `app.export` take `ids`. So each frame is made active
+  with `library.select ids=[id] active=id` before its stages.
+- **Every stage sets values outright.** `develop.auto` replaced the sidecar's
+  `crs:Exposure2012` (+0.50 → +0.92 on L1001525; it wanted +1.71 on L1001534, whose
+  camera JPEG is dark by intent). `preset.apply` then replaced every control auto had set
+  (exposure, contrast, highlights, shadows, whites, blacks, vibrance, saturation). So:
+  auto runs only where no preset applies, and cull's EV is set last as preset exposure +
+  EV (the preset reproduces the camera rendering cull's EV was judged against).
+- **Crop survives:** a sidecar crop (0.1–0.9) stayed through wb, auto, straighten and
+  the preset; 80% crops exported at 1984×3000.
+- **`develop.matchExposure` is not in the recipe:** it re-sets every selected frame's
+  exposure to match the active one (it did change one M10-R frame, so Leica M EXIF is
+  enough for it), which overrides cull's per-frame EV, and its reference would differ per
+  chunk.
+- **A new library has `library.xmpPreferences autoWrite: false`;** develop still sends it
+  first, so LightCraft never writes beside the DNGs. Nothing appeared there in any probe.
+- **`app.export dir=` never overwrites** (a second export became `L1001534-2.jpg`), so
+  develop exports to a unique `path=` and names the file itself.
+- **`run` prints one JSON line per command, in order,** `{"command","ok","result"|"error","ms"}`;
+  `--keep-going` continues past a failed command (exit status 1, "N command(s) failed" on
+  stderr). `library.import` reports unreadable files per path (`failed: [[path, reason]]`).
+- **Cost here (4-core Linux, 7 GB):** with the full recipe LightCraft took 22–23 s per
+  48 MP M10-R frame (a hand run without straighten: wb 1.7 s + export 14 s); 2.85 GB peak
+  RSS for one process with 2 frames; process start + import < 1 s. The first estimate uses
+  25 s / 2.9 GB per 60 MP; later ones use the shoot's recorded mean.
+- **Validated end to end (2026-10-08):** `cull develop -r --yes -o <tmp>/cull-report.json
+  --labels <tmp> --out <shoot>/export` on the staged shoot (`raw/L1001525.DNG`,
+  `raw/L1001534.DNG`, both labelled keep, no sidecars): developed 2, failed 0, 46 s;
+  `L1001525.jpg` 2,996,168 B and `L1001534.jpg` 3,672,648 B, 1984×3000. Pixel-identical
+  to a hand-written `lightcraft-cli run` of the same stages (only the ICC profile's
+  timestamp differs). DNGs unchanged (SHA-256). On a copy with cull sidecars (+0.50 EV;
+  a 0.1–0.9 crop): SIGINT once the first JPEG landed stopped LightCraft in 0.05 s, left
+  no temp and no process, recorded that frame; the re-run developed only the other.
+  Sidecars byte-identical after both runs.
+
 ## Unverified assumptions — check before building on them
 
 - What makes the M11-P write Content Credentials on some frames (`L…`) and not others
@@ -879,8 +961,6 @@ same timestamp. The facts below were measured while building `--set-date`, `reda
   shoots.
 - Whether heavy scripted `claude -p` use is within subscription usage policy and how
   much of the 5-hour window a 1000-frame run uses. `--quota-stop` bounds the impact.
-- `crs:Crop*` coordinate space for rotated (orientation 6/8) images; code assumes
-  stored orientation (`xmp.FromDisplay`).
 - Capture One AppleScript property names for rating, keywords, exposure, crop.
   Dump the real dictionary with `sdef "/Applications/Capture One.app"` and read it
   before writing the applier.
@@ -926,6 +1006,10 @@ same timestamp. The facts below were measured while building `--set-date`, `reda
    `rename`; spec and plan in `docs/superpowers/`) for a camera whose clock stopped. Checked
    live on the card 2026-10-07; Capture One shows a Content Credentials frame's corrected
    date from the sidecar.
+8. ~~LightCraft delivery~~ `cull develop` built 2026-10-08 (issue #2): keeps → client
+   JPEGs via headless `lightcraft-cli`, resumable, M10-R preset. Run on the two staged
+   M10-R frames only: validate the look on a full shoot, and add presets per body
+   (M11-P first) as they are tuned.
 
 ## Working style
 

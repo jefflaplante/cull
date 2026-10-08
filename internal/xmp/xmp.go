@@ -180,18 +180,13 @@ func Render(s Sidecar) []byte {
 `, ns, strings.Join(attrs, "\n    "), body))
 }
 
-// FromDisplay converts a normalized crop in displayed (EXIF-oriented) coordinates to
-// the stored orientation. ASSUMPTION TO VERIFY: crs:Crop* are expressed in the raw's
-// stored orientation. Test with one portrait-orientation file in ACR before relying on it.
-func FromDisplay(l, t, r, b float64, orientation int) Box {
-	switch orientation {
-	case 3:
-		return Box{Left: 1 - r, Top: 1 - b, Right: 1 - l, Bottom: 1 - t}
-	case 6: // display = stored rotated 90° CW
-		return Box{Left: t, Top: 1 - r, Right: b, Bottom: 1 - l}
-	case 8: // display = stored rotated 90° CCW
-		return Box{Left: 1 - b, Top: l, Right: 1 - t, Bottom: r}
-	default:
-		return Box{Left: l, Top: t, Right: r, Bottom: b}
-	}
+// DisplayCrop is a normalized crop in displayed (EXIF-oriented) coordinates,
+// ready to write as crs:Crop*. crs:Crop* are normalized edges of the ORIENTED
+// image (the frame after EXIF orientation is applied), which is what Lightroom
+// writes and LightCraft reads — verified 2026-10-08 by rendering an
+// orientation-6 DNG through LightCraft 0.4.0 with sidecar crops and matching
+// the rendered windows (correlation 0.9989/0.9973; transposed readings score
+// 0.29 or produce the wrong dimensions). See crop_orientation_test.go.
+func DisplayCrop(l, t, r, b float64) Box {
+	return Box{Left: l, Top: t, Right: r, Bottom: b}
 }

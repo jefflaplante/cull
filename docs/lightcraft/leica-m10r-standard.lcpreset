@@ -1,0 +1,35 @@
+{
+  "format": "lightcraft.preset",
+  "version": 1,
+  "presets": [
+    {
+      "id": "leica-m10r-standard",
+      "name": "Leica M10-R Standard",
+      "group": "Camera Profiles",
+      "settings": {
+        "light": {
+          "exposure": 0.3,
+          "contrast": 28,
+          "highlights": -14,
+          "shadows": 24,
+          "whites": 18,
+          "blacks": -22
+        },
+        "curve": {
+          "highlights": 16,
+          "lights": 18,
+          "darks": 8,
+          "shadows": 14,
+          "refine_saturation": 100
+        },
+        "color": {
+          "vibrance": 33,
+          "saturation": 5
+        },
+        "calibration": {
+          "shadows_tint": 15
+        }
+      }
+    }
+  ]
+}

@@ -52,6 +52,7 @@ A shoot, start to finish:
   cull review <dir>                        you label and rate
   cull decide --sort <dir>                 before import
   cull apply-c1 --run <dir>                after import
+  cull develop <dir>                       client JPEGs of the keeps (LightCraft)
 cull status <dir> says where a shoot stands and what to run next.
 
 Your own defaults for any flag go in ~/.cull ($CULL_CONFIG to use another file), one
@@ -101,7 +102,7 @@ naming one is skipped with a warning.`,
 	for _, c := range []*cobra.Command{scan, judge, rank, decide} {
 		so.registerSeq(c.Flags())
 	}
-	root.AddCommand(newOffloadCmd(&so), newTagCmd(&so), scan, judge, rank, decide, newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newRedateCmd(&so), newRenameCmd(&so), newStatusCmd(&so), newImportLabelsCmd(&so), newVersionCmd())
+	root.AddCommand(newOffloadCmd(&so), newTagCmd(&so), scan, judge, rank, decide, newReviewCmd(&so), newCalibrateCmd(), newApplyC1Cmd(&so), newRestoreCmd(&so), newDevelopCmd(&so), newRedateCmd(&so), newRenameCmd(&so), newStatusCmd(&so), newImportLabelsCmd(&so), newVersionCmd())
 	return root
 }
 

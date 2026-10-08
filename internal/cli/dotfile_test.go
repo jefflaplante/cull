@@ -6,12 +6,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jefflaplante/cull/internal/develop/lctest"
 	"github.com/jefflaplante/cull/internal/eval"
 	"github.com/jefflaplante/cull/internal/report"
 )
 
-// TestMain keeps every test off the developer's own ~/.cull.
+// TestMain keeps every test off the developer's own ~/.cull. With lctest.Env set, the
+// test binary is the fake lightcraft-cli the develop tests run.
 func TestMain(m *testing.M) {
+	if os.Getenv(lctest.Env) == "1" {
+		os.Exit(lctest.Main(os.Args[1:]))
+	}
 	os.Setenv("CULL_CONFIG", filepath.Join(os.TempDir(), "cull-tests-no-dotfile"))
 	os.Exit(m.Run())
 }

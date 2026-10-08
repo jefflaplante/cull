@@ -1,4 +1,4 @@
-# LightCraft preset: Leica M10-R Standard
+# LightCraft preset: Leica M10-R STD
 
 A corrective develop preset for [LightCraft](https://getartcraft.com/apps/lightcraft)
 (v0.4.0) that closes the gap between LightCraft's default rendering of Leica M10-R
@@ -7,12 +7,14 @@ DNGs and the camera's own JPEG rendering. LightCraft has no M10-R camera profile
 low midtone saturation and a dark tone curve relative to Leica's embedded previews.
 
 Built 2026-10-08 by iterative render-and-measure against the ground truth every
-M10-R DNG carries: the camera's own embedded JPEG preview.
+M10-R DNG carries: the camera's own embedded JPEG preview. Named **STD** to match
+the in-camera preset the target previews were shot with (M10-R JPEG setting:
+Standard) — the goal is to reproduce that specific look, not a generic "Leica look."
 
 ## Files
 
-- `leica-m10r-standard.lcpreset` — import via `preset.import` (GUI or CLI)
-- `leica-m10r-standard.json` — bare settings for `lightcraft-cli render --settings`
+- `leica-m10r-std.lcpreset` — import via `preset.import` (GUI or CLI)
+- `leica-m10r-std.json` — bare settings for `lightcraft-cli render --settings`
 
 ## Method
 
@@ -53,7 +55,7 @@ remains proprietary — but the "flat" default is gone.
 
 ```sh
 lightcraft-cli render KEEP.DNG -o CLIENT.jpg \
-  --settings leica-m10r-standard.json --quality 95
+  --settings leica-m10r-std.json --quality 95
 ```
 
 cull's XMP sidecars (exposure + crop) are read by LightCraft on import and

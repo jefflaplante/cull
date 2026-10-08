@@ -3,8 +3,8 @@
   "version": 1,
   "presets": [
     {
-      "id": "leica-m10r-standard",
-      "name": "Leica M10-R Standard",
+      "id": "leica-m10r-std",
+      "name": "Leica M10-R STD",
       "group": "Camera Profiles",
       "settings": {
         "light": {

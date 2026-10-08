@@ -871,7 +871,7 @@ on import and render. Tested as a cull → client-JPEG pipeline:
   them), but Capture One remains the only target for the AppleScript path.
 - **Rendering is CPU-only headless, ~25 s and ~2.9 GB per 60 MP frame.** A 300-frame keep
   set is an overnight job, not a coffee break.
-- **M10-R corrective preset:** `docs/lightcraft/leica-m10r-standard.lcpreset` (plus bare
+- **M10-R corrective preset:** `docs/lightcraft/leica-m10r-std.lcpreset` (plus bare
   `.json` for `--settings`), tuned against the camera's own embedded JPEG previews; closes
   the flat-color/contrast gap (validation table in `docs/lightcraft/README.md`).
 - LightCraft never *writes* `crs:` — the bridge is one-way (fine for DNG→JPEG delivery;
